@@ -547,6 +547,17 @@ class Repo(private val ctx: Context) {
                 if (!y && cards.has(near)) { cards.remove(near); cardsChanged = true }
             }
             if (cardsChanged) dao.putPlan(PlanEntity(slot, "cards", cards.toString(), now))
+            // cartão vermelho = suspenso (vale mesmo sem passar pelo Advogado); quem foi lido sem vermelho sai
+            val reds = planJson(slot, "reds")
+            var redsChanged = false
+            for (p in ex.players) {
+                val r = p.red ?: continue
+                val k = Txt.key(p.name)
+                val near = existing.firstOrNull { it.nameKey == k }?.nameKey ?: existing.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                if (r && !reds.optBoolean(near)) { reds.put(near, true); redsChanged = true }
+                if (!r && reds.has(near)) { reds.remove(near); redsChanged = true }
+            }
+            if (redsChanged) dao.putPlan(PlanEntity(slot, "reds", reds.toString(), now))
         }
         if (seen.isNotEmpty()) markSeen(slot, seen, now)
         if (seen.isNotEmpty()) trackProgress(slot, seen, arrived, now)
@@ -840,7 +851,8 @@ class Repo(private val ctx: Context) {
             val a = j.optJSONArray("names") ?: return emptySet()
             return (0 until a.length()).map { a.optString(it) }.toSet()
         }
-        return Pair(names(planJson(slot, "injured")), names(planJson(slot, "suspended")))
+        val reds = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
+        return Pair(names(planJson(slot, "injured")), names(planJson(slot, "suspended")) + reds)
     }
 
     // ------------------------------------------------------------------ leituras extras (eventos, teto de venda, patrocínio)

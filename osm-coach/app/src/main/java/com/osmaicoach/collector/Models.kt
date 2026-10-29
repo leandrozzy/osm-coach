@@ -53,7 +53,9 @@ data class PlayerRead(
     val cond: Int? = null,
     val morale: Int? = null,
     /** Cartão amarelo na coluna "Estado" do plantel. */
-    val yellow: Boolean? = null
+    val yellow: Boolean? = null,
+    /** Cartão vermelho na coluna "Estado" do plantel (jogador suspenso). */
+    val red: Boolean? = null
 )
 
 data class MatchRead(

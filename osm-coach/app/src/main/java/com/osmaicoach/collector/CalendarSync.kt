@@ -147,7 +147,8 @@ object CalendarSync {
                 m["test"] = Pair(start, id)
                 write(ctx, m)
                 true
-            }.getOrDefault(false)
+            }.onFailure { Notifier.logFire(ctx, "calendário: teste falhou (${it.javaClass.simpleName})") }
+                .getOrDefault(false).also { ok -> if (ok) Notifier.logFire(ctx, "calendário: teste criado para daqui a 2 min") else Notifier.logFire(ctx, "calendário: teste não criado") }
         }
     }
 }
