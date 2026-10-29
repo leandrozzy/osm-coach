@@ -173,7 +173,7 @@ object Playbook {
         }
         if (i.matchAt != null && i.matchAt > i.now) {
             val clash = i.seats.filter { it.endAt != null && it.endAt > i.matchAt && it.name != null }
-                .filter { s -> mine.any { p -> p.nameKey in i.xi && Txt.sim(Txt.key(p.name), Txt.key(s.name!!)) >= 0.8 } }
+                .filter { s -> mine.any { p -> p.nameKey in i.xi && p.nameKey !in i.suspended && p.nameKey !in i.injured && Txt.sim(Txt.key(p.name), Txt.key(s.name!!)) >= 0.8 } }
             if (clash.isNotEmpty()) {
                 out.add(
                     Tip(

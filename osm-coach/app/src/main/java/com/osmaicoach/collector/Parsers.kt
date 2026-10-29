@@ -132,7 +132,9 @@ object Parsers {
         }
         val leftTeam = teamLines.filter { it.xc < 0.5f }.maxByOrNull { it.h }
         val rightTeam = teamLines.filter { it.xc >= 0.5f }.maxByOrNull { it.h }
-        val nickLines = o.lines.filter { it.yc in 0.39f..0.47f && Txt.letters(it.text) >= 2 }
+        // o apelido do humano vem às vezes com a etiqueta do slot ("Nome [S3]"): tira a etiqueta antes de comparar
+        val nickLines = o.lines.filter { it.yc in 0.385f..0.48f && Txt.letters(it.text) >= 2 }
+            .map { ln -> ln.text.replace(Regex("\\s*\\[[^\\]]{1,4}\\]\\s*$"), "").let { t -> if (t == ln.text) ln else ln.copy(text = t) } }
         val myNick = nickLines.firstOrNull { Txt.sim(Txt.key(it.text), MY_NICK) >= 0.75 }
         // Apelido sob cada time (mesmo sem achar o meu): o Repo casa com o rival guardado.
         val sideNicks = LinkedHashMap<String, String?>()
@@ -366,7 +368,8 @@ object Parsers {
                     forSale = null,
                     cond = img?.let { PixelProbe.barFill(it, 0.757f, 0.800f, a.yc) },
                     morale = img?.let { PixelProbe.barFill(it, 0.808f, 0.850f, a.yc) },
-                    yellow = img?.let { PixelProbe.goldBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f }
+                    yellow = img?.let { PixelProbe.goldBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
+                    red = img?.let { PixelProbe.redBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f }
                 )
             )
         }

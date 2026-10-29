@@ -15,6 +15,18 @@ class PlaybookTest {
         p("Atk A", "ATA", 23, 83, "10M"), p("Atk B", "ATA", 26, 80, "8M"), p("Atk C", "ATA", 30, 71, "2M")
     )
 
+    @Test fun suspendedStarterTrainingIsNotAClash() {
+        val xi = setOf("gka", "defa", "defb", "defc", "mida", "midb", "midc", "atka", "atkb", "atkc", "defd")
+        val tips = Playbook.tips(
+            Playbook.Input(
+                squad, xi, 3.0, listedUsed = 1, capLevel = 1, pitchLevel = 1, trainLevel = 1, stadiumBuilding = false,
+                round = 2, roundTotal = 22, seats = listOf(WorkSeat("ATA", "ATK A", "active", 9_000L)),
+                matchAt = 5_000L, now = 0L, suspended = setOf("atka")
+            )
+        )
+        assertTrue(tips.none { it.title.contains("Titular treinando") })
+    }
+
     @Test fun prioritizesFreeTrainerListingAndStadiumOrder() {
         val xi = setOf("gka", "defa", "defb", "defc", "mida", "midb", "midc", "atka", "atkb", "atkc", "defd").toSet()
         val tips = Playbook.tips(
