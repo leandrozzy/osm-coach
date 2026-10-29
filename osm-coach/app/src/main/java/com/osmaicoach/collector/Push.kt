@@ -109,7 +109,6 @@ object Push {
             .put("title", it.title)
             .put("message", it.text)
             .put("priority", 4)
-            .put("tags", JSONArray().put("soccer"))
             .put("delay", ((it.at + LATE_MS) / 1000L).toString())
             .put("sequence_id", it.seq)
         return call("POST", BASE, body.toString())

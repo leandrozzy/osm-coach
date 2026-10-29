@@ -49,6 +49,8 @@ object Playbook {
         /** O advogado já está com um recurso em andamento (cronômetro lido). */
         val lawyerBusy: Boolean = false,
         val doctorBusy: Boolean = false,
+        /** Jogadores à venda no mercado (última leitura): fonte das sugestões de compra para as posições que faltam. */
+        val listings: List<ListingEntity> = emptyList(),
         /** Situação de cada card do estádio como o jogo mostra ("Relvado" -> "concluir melhoria" ou "665K + 18h"). */
         val stadiumStatus: Map<String, String> = emptyMap(),
         /** Jogadores com cartão amarelo (coluna Estado do plantel). */
@@ -119,10 +121,22 @@ object Playbook {
         val byCat = mine.groupingBy { it.cat }.eachCount()
         val short = MIN_POS.filter { (c, n) -> (byCat[c] ?: 0) < n }
         if (short.isNotEmpty()) {
+            // opções reais do mercado para cada posição que falta: as mais fortes que cabem no caixa (preço lido da lista)
+            val cash = i.cashM
+            val opts = short.keys.flatMap { c ->
+                i.listings.filter { it.cat == c && it.nameKey !in mine.map { p -> p.nameKey } }
+                    .mapNotNull { l -> Money.parse(l.priceText)?.let { pr -> Pair(l, pr) } }
+                    .filter { cash == null || it.second <= cash }
+                    .sortedWith(compareByDescending<Pair<ListingEntity, Double>> { it.first.strength ?: 0 }.thenBy { it.second })
+                    .take(2)
+            }
+            val buy = if (opts.isEmpty()) "" else " Opções no mercado: " + opts.joinToString("; ") { (l, pr) ->
+                l.name + " (" + (l.age?.let { "${it}a, " } ?: "") + (l.strength?.let { "$it, " } ?: "") + money(pr) + ")"
+            } + "."
             out.add(
                 Tip(
                     "🚨", "Faltam jogadores: " + short.entries.joinToString { (c, n) -> "${n - (byCat[c] ?: 0)} ${CAT_LABEL[c]}" },
-                    "O mínimo do OSM é 2 goleiros, 4 defensores, 4 meias e 3 atacantes. Compre os que faltam antes do próximo jogo.", 98, 6
+                    "Mínimo do OSM: 2 GL, 4 DEF, 4 MEI, 3 ATA. Compre antes do próximo jogo.$buy", 98, 6
                 )
             )
         }
@@ -184,7 +198,10 @@ object Playbook {
         val remaining = byCat.toMutableMap()
         val pool = ArrayList(mine)
         val sellOrder = ArrayList<PlayerEntity>()
-        for (p in reserves.sortedWith(compareByDescending<PlayerEntity> { (it.age ?: 0) >= 29 }.thenBy { it.strength ?: 0 }.thenByDescending { it.age ?: 0 })) {
+        // início da competição a CPU paga o máximo: vende primeiro o que mais vale; depois, velhos e fracos primeiro
+        val sellCmp = if (early) compareByDescending<PlayerEntity> { Money.parse(it.valueText) ?: 0.0 }
+        else compareByDescending<PlayerEntity> { (it.age ?: 0) >= 29 }.thenBy { it.strength ?: 0 }.thenByDescending { it.age ?: 0 }
+        for (p in reserves.sortedWith(sellCmp)) {
             if (sellOrder.size >= canGo) break
             // jovem bom (até 21 anos e 70+) vale mais no elenco (o treino faz o valor subir)
             if ((p.age ?: 99) <= 21 && (p.strength ?: 0) >= 70) continue

@@ -33,4 +33,15 @@ class AccuracyTest {
     @Test fun noGamesNoSummary() {
         assertNull(Accuracy.of(emptyList()))
     }
+
+    @Test fun splitsByContextAndFlagsTheWeakest() {
+        // contra humano erra tudo (6 jogos), contra CPU acerta tudo (6 jogos)
+        val logs = (1..12).map { i ->
+            log(i, 60, 20, 20, if (i <= 6) "D" else "V").put("human", i <= 6).put("home", i % 2 == 0)
+        }
+        val s = Accuracy.of(Accuracy.parse(1, logs))!!
+        assertEquals(50, s.pct)
+        assertTrue(s.splits.any { it.first == "contra humano" && it.second == 0 && it.third == 6 })
+        assertTrue(s.tips.any { it.contains("Onde mais erra") && it.contains("contra humano") })
+    }
 }
