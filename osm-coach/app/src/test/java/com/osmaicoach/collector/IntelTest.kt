@@ -83,6 +83,9 @@ class IntelTest {
     @Test fun backgroundTextIsNeverANick() {
         assertFalse(Evidence.plausibleNick("25 Anniversary"))
         assertFalse(Evidence.plausibleNick("Aniversário"))
+        assertTrue(Evidence.plausibleNick("Treinador pebas"))
+        assertFalse(Evidence.plausibleNick("Treinador universal"))
+        assertFalse(Evidence.plausibleNick("Treinador"))
         assertFalse(Evidence.plausibleNick("Jornada 12"))
         assertTrue(Evidence.plausibleNick("amar111_13"))
         assertTrue(Evidence.plausibleNick("Joel II Gonzalez"))
