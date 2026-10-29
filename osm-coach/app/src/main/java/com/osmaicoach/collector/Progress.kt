@@ -301,7 +301,8 @@ fun moneyText(m: Double, sign: Boolean = false): String {
 object Accuracy {
     data class Game(
         val slot: Int, val round: Int, val rival: String?, val pW: Int, val pE: Int, val pD: Int,
-        val result: String, val mine: Int?, val opp: Int?, val formation: String?
+        val result: String, val mine: Int?, val opp: Int?, val formation: String?,
+        val human: Boolean? = null, val home: Boolean? = null
     ) {
         val fav: String get() = if (pW >= pE && pW >= pD) "V" else if (pD >= pE) "D" else "E"
         val hit: Boolean get() = fav == result
@@ -312,7 +313,9 @@ object Accuracy {
     data class Summary(
         val games: Int, val hits: Int, val brier: Double, val avgFav: Int, val avgReal: Int,
         val favV: Pair<Int, Int>, val favE: Pair<Int, Int>, val favD: Pair<Int, Int>, val drawsReal: Int,
-        val recent: List<Game>, val tips: List<String>
+        val recent: List<Game>, val tips: List<String>,
+        /** Acerto por contexto: (rótulo, acertos, jogos), só com 3+ jogos. */
+        val splits: List<Triple<String, Int, Int>> = emptyList()
     ) {
         val pct: Int get() = if (games == 0) 0 else Math.round(100f * hits / games)
         /** Quanto melhor que o chute (0% = igual ao acaso). */
@@ -327,7 +330,9 @@ object Accuracy {
             j.optInt("predW"), j.optInt("predE"), j.optInt("predD"), r,
             if (j.has("scoreMine") && !j.isNull("scoreMine")) j.optInt("scoreMine") else null,
             if (j.has("scoreOpp") && !j.isNull("scoreOpp")) j.optInt("scoreOpp") else null,
-            j.optString("formation").ifBlank { null }
+            j.optString("formation").ifBlank { null },
+            if (j.has("human") && !j.isNull("human")) j.optBoolean("human") else null,
+            if (j.has("home") && !j.isNull("home")) j.optBoolean("home") else null
         )
     }
 
@@ -353,6 +358,18 @@ object Accuracy {
         if (n >= 8 && favE.second == 0 && draws * 100 >= n * 20) tips.add("Houve $draws empate(s) em $n jogos e a IA nunca aponta empate como mais provável: em jogo equilibrado, o empate é resultado frequente.")
         if (tips.isEmpty()) tips.add("Previsões e resultados estão alinhados. O app continua aprendendo com cada resultado que você passa.")
         val recent = all.sortedByDescending { it.round }.take(6)
-        return Summary(n, hits, brier, avgFav, avgReal, favV, favE, favD, draws, recent, tips)
+        fun split(label: String, f: (Game) -> Boolean): Triple<String, Int, Int>? {
+            val g = all.filter(f)
+            return if (g.size >= 3) Triple(label, g.count { it.hit }, g.size) else null
+        }
+        val splits = listOfNotNull(
+            split("contra humano") { it.human == true }, split("contra CPU") { it.human == false },
+            split("em casa") { it.home == true }, split("fora") { it.home == false }
+        )
+        val worst = splits.filter { it.third >= 5 }.minByOrNull { it.second.toDouble() / it.third }
+        if (worst != null && worst.second * 100 < worst.third * 45 && pct - 100 * worst.second / worst.third >= 15) {
+            tips.add("Onde mais erra: ${worst.first} (${worst.second} de ${worst.third}). Nesses jogos a previsão merece menos confiança.")
+        }
+        return Summary(n, hits, brier, avgFav, avgReal, favV, favE, favD, draws, recent, tips, splits)
     }
 }

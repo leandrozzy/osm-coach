@@ -80,6 +80,7 @@ object Hints {
                 stadiumBuilding = timers.any { it.key.startsWith("stad_") && it.at > now },
                 lawyerBusy = timers.any { it.lawyer && it.at > now },
                 doctorBusy = timers.any { it.doctor && it.at > now },
+                listings = repo.dao.listingsOf(slot),
                 round = kv(f, K.ROUND)?.toIntOrNull(), roundTotal = kv(f, K.ROUND_TOTAL)?.toIntOrNull(),
                 seats = work.seats, matchAt = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull(), now = now
             )

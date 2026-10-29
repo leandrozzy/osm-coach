@@ -192,6 +192,7 @@ object Notifier {
         val (title, text) = timerText(slot, e, team)
         post(ctx, CH_TIMER, timerCode(slot, key), title, text, if (e.mission) 0 else slot, if (e.mission) 0 else if (e.scout) 6 else 5, true)
         runCatching { Push.cancel(ctx, "t${slot}_$key") }
+        runCatching { CalendarSync.cancel(ctx, "t${slot}_$key") }
     }
 
     /** Título e texto do aviso de fim de treino/obra/olheiro/missões (o mesmo no alarme local e na nuvem). */
@@ -319,7 +320,10 @@ object Notifier {
         }
         val timerItems = runCatching { scheduleTimers(ctx) }.getOrNull()
         // só sincroniza com o servidor se a lista de cronômetros foi lida direito (senão apagaria avisos válidos)
-        if (timerItems != null) runCatching { Push.sync(ctx, gameItems + timerItems) }
+        if (timerItems != null) {
+            runCatching { Push.sync(ctx, gameItems + timerItems) }
+            runCatching { CalendarSync.sync(ctx, gameItems + timerItems) }
+        }
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -345,6 +349,7 @@ object Notifier {
             if (!enabled(ctx, "pre")) return
             if (nextAt != null) prefs(ctx).edit().putLong(firedKey(slot), nextAt / MIN).apply()
             runCatching { Push.cancel(ctx, "g${slot}_pre") }
+            runCatching { CalendarSync.cancel(ctx, "g${slot}_pre") }
             val mins = if (nextAt != null) ((nextAt - now) / MIN).coerceAtLeast(0L).toString() else "~20"
             val (sw, chk) = try { repo.rivalSwitches(slot) } catch (e: Exception) { Pair(0, 0) }
             val extra = if (sw > 0) " ⚠ Este usuário já trocou a tática na última hora ($sw de $chk): releia a análise dele AGORA e gere de novo." else ""
@@ -356,6 +361,7 @@ object Notifier {
         } else if (kind == "tactic") {
             if (!enabled(ctx, "tactic") || tacticReady(repo, slot, f)) return
             runCatching { Push.cancel(ctx, "g${slot}_tactic") }
+            runCatching { CalendarSync.cancel(ctx, "g${slot}_tactic") }
             post(ctx, CH_GAME, slot * 10 + 2, "🧠 Falta a tática: $head", "O jogo é em cerca de 1 hora e a tática desta rodada ainda não foi gerada. Toque para gerar.", slot, 4, false)
         } else if (kind == "result") {
             if (!enabled(ctx, "result")) return

@@ -1668,6 +1668,40 @@ private fun ActionPill(s: SlotSummary, onTactic: () -> Unit, onResult: () -> Uni
     }
 }
 
+/** Tudo o que tem hora, de todos os slots, em ordem: jogos, treinos e obras. */
+@Composable
+private fun AgendaCard(data: TodayData) {
+    val now = System.currentTimeMillis()
+    class Ev(val at: Long, val text: String)
+    val evs = ArrayList<Ev>()
+    for (s in data.slots) {
+        val at = s.nextAt ?: continue
+        if (!s.ended && at > now - 3600000L) evs.add(Ev(at, "⚽ S${s.slot} • jogo" + (s.rival?.let { " vs $it" } ?: "")))
+    }
+    for (w in data.work) {
+        for (seat in w.seats) seat.endAt?.takeIf { it > now - 3600000L }?.let {
+            evs.add(Ev(it, "🏋 S${w.slot} • treino ${Timers.roleLabel(seat.role)}" + (seat.name?.let { n -> " ($n)" } ?: "")))
+        }
+        for (c in w.cards) c.endAt?.takeIf { it > now - 3600000L }?.let { evs.add(Ev(it, "🏟 S${w.slot} • obra ${c.label}")) }
+    }
+    if (evs.isEmpty()) return
+    val list = evs.sortedBy { it.at }.take(14)
+    val fmt = SimpleDateFormat("EEE HH:mm", Locale.getDefault())
+    Fold("📅", "Agenda: o que acontece e quando", Timers.left(list.first().at, now)) {
+        for (e in list) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(fmt.format(Date(e.at)), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = C.GOLD, modifier = Modifier.width(84.dp))
+                Text(e.text, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(Timers.left(e.at, now), fontSize = 11.sp, color = C.MUTED)
+            }
+        }
+        Text(
+            "🎁 Todo dia: vídeos de Boss Coins grátis no Centro de Negócios e as missões (não gastam moedas).",
+            fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)
+        )
+    }
+}
+
 /** Quanto a previsão da IA acertou o resultado dos jogos já disputados, com dicas do que isso mostra. */
 @Composable
 private fun AccuracyCard(s: Accuracy.Summary, scope: String = "") {
@@ -1681,6 +1715,10 @@ private fun AccuracyCard(s: Accuracy.Summary, scope: String = "") {
         Text(
             "Quando previu vitória: ${s.favV.first} de ${s.favV.second} • empate: ${s.favE.first} de ${s.favE.second} • derrota: ${s.favD.first} de ${s.favD.second}",
             fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp)
+        )
+        if (s.splits.isNotEmpty()) Text(
+            "Acerto " + s.splits.joinToString(" • ") { "${it.first}: ${it.second}/${it.third}" },
+            fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
         )
         Text("Últimos jogos", fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         for (g in s.recent) {
@@ -1875,6 +1913,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
 
         Title("Seus slots")
         for (s in data.slots) SlotCard(s, { onOpenSlot(s.slot, 0) }, { onOpenSlot(s.slot, 4) }, { onOpenSlot(s.slot, 5) })
+        AgendaCard(data)
         data.accuracy?.let { AccuracyCard(it) }
         if (data.needs.any { it.urgency >= 1 }) NeedsCard(data.needs)
         if (data.work.isNotEmpty()) {
@@ -4578,6 +4617,46 @@ private fun NotificationsPanel() {
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
         ) { Text("Testar pela nuvem", fontSize = 12.sp) }
     }
+
+    // Reserva pelo calendário do celular: quem dispara é o app Calendário do sistema (não é fechado junto com este app).
+    var cal by remember { mutableStateOf(CalendarSync.enabled(ctx) && CalendarSync.hasPermission(ctx)) }
+    val calLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        val ok = r.values.isNotEmpty() && r.values.all { it }
+        cal = ok
+        Settings.put(ctx, "cal_on", if (ok) "1" else "0")
+        if (ok) pushScope.launch(Dispatchers.IO) { Notifier.reschedule(ctx.applicationContext) }
+        else Toast.makeText(ctx, "Sem a permissão do calendário não dá para ligar.", Toast.LENGTH_LONG).show()
+    }
+    Fold("📅", "Lembretes no calendário do celular", if (cal) "ligados" else "desligados") {
+        Text(
+            "A reserva mais firme: o aviso de fim de treino/obra e de jogo vira um lembrete num calendário próprio (\"OSM Coach avisos\") e quem toca é o app Calendário do Android, que o celular não fecha junto com o app. Precisa da permissão do calendário.",
+            fontSize = 12.sp, color = C.MUTED
+        )
+        SwitchRow("Ligar lembretes no calendário", cal) { v ->
+            if (v) {
+                if (CalendarSync.hasPermission(ctx)) {
+                    cal = true
+                    Settings.put(ctx, "cal_on", "1")
+                    pushScope.launch(Dispatchers.IO) { Notifier.reschedule(ctx.applicationContext) }
+                } else calLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+            } else {
+                cal = false
+                Settings.put(ctx, "cal_on", "0")
+                pushScope.launch(Dispatchers.IO) { CalendarSync.disable(ctx.applicationContext) }
+            }
+        }
+        OutlinedButton(
+            onClick = {
+                if (!cal) {
+                    Toast.makeText(ctx, "Ligue os lembretes no calendário primeiro.", Toast.LENGTH_SHORT).show()
+                } else pushScope.launch {
+                    val ok = CalendarSync.test(ctx.applicationContext)
+                    Toast.makeText(ctx, if (ok) "Criado. Feche o app: o lembrete toca em ~2 minutos." else "Não consegui criar o lembrete no calendário.", Toast.LENGTH_LONG).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+        ) { Text("Testar no calendário (2 min)", fontSize = 12.sp) }
+    }
 }
 
 /** Regras da comunidade em cartões: situação -> tática, de onde veio e como foi a última pesquisa. */
@@ -4785,7 +4864,7 @@ private fun SettingsTab() {
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }
         var metaMsg by remember { mutableStateOf("") }
-        Fold("🌐", "Táticas da comunidade (internet)", startOpen = true) {
+        Fold("🌐", "Táticas da comunidade (avançado)", startOpen = false) {
             val metaTick = rememberTick(5000L)
             val mv = rememberLoaded<MetaRefresh.View?>(null, metaTick, metaMsg) { MetaRefresh.view(Repo(ctx)) }
             CommunityView(mv)

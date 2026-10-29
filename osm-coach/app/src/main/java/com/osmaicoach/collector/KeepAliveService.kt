@@ -47,6 +47,7 @@ class KeepAliveService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        Notifier.logFire(this, "monitor ativo iniciado")
         job?.cancel()
         job = AppScope.scope.launch(Dispatchers.IO) {
             while (isActive) {
