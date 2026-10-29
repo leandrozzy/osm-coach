@@ -220,6 +220,7 @@ object Evidence {
         return t.length <= 4 && t.none { it.isLowerCase() || it.isDigit() }
     }
 
+    private val TRAINER_ROLE_WORDS = setOf("universal", "avancados", "avancado", "medios", "medio", "defesas", "defesa", "guarda", "guardas", "redes", "livre", "bloqueado")
     private val JUNK_PREFIX = listOf("anniv", "aniver")
     private val JUNK_WORDS = setOf(
         "season", "temporada", "edition", "edicao", "jornada", "liga", "copa", "batalha", "estadio", "arbitro",
@@ -238,7 +239,10 @@ object Evidence {
         val t = s?.trim() ?: return false
         if (t.length !in 3..24 || Txt.letters(t) < 2) return false
         val words = Txt.norm(t).split(" ")
-        if (words.any { w -> w in JUNK_WORDS || JUNK_PREFIX.any { w.startsWith(it) } }) return false
+        // Nome padrão do OSM: "Treinador pebas" (o apelido começa com a palavra do rótulo). Papéis do treino não valem.
+        val defaultName = words.size == 2 && words[0] == "treinador" && words[1].length >= 3 && words[1] !in TRAINER_ROLE_WORDS &&
+            words[1] !in JUNK_WORDS && JUNK_PREFIX.none { words[1].startsWith(it) }
+        if (!defaultName && words.any { w -> w in JUNK_WORDS || JUNK_PREFIX.any { w.startsWith(it) } }) return false
         val n = Txt.norm(t)
         if (Regex("^\\d+\\s").containsMatchIn(n)) return false
         // "Árbitro" lido com erro ("Arbifro") não é apelido do rival
