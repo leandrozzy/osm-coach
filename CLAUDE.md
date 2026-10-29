@@ -29,7 +29,7 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
     contra o resultado real, com dicas), `RivalWatch`.
   - Avisos: `Notifier` (alarmes locais) + `Push` (reserva na nuvem via ntfy.sh, opt-in em Ajustes: agenda cada aviso no
     servidor com `sequence_id` fixo; cancela quando o alarme local toca) + `CalendarSync` (reserva: lembretes num calendário local
-    "OSM Coach avisos", tocados pelo app Calendário do sistema; opt-in com permissão) + `KeepAliveService` (monitor em primeiro plano,
+    "OSM Coach avisos", tocados pelo app Calendário do sistema; opt-in com permissão) + `ClockSync` (alarme no app Relógio do sistema via `AlarmClock.ACTION_SET_ALARM`, opt-in, só próximas 23 h; cancelar é pedido best-effort) + `KeepAliveService` (monitor em primeiro plano,
     confere alarmes a cada minuto). Diagnóstico em Ajustes: log de eventos de aviso (`Notifier.fireLog`) e status do `Push`; botão para a Inicialização automática da ASUS/ROG.
   - IA: `Ai.kt` (`Settings`, `AiClient`, `Processor`, `MetaRefresh`): Gemini, Groq/compatível, OpenRouter, Mistral, Claude.
     Chaves ficam em SharedPreferences `settings` (nunca no código/repositório).
@@ -77,7 +77,7 @@ Sem slot confiável nada é gravado. Texto de tela: sempre comparar com `Txt.nor
   jogo com dicas; "Telas para atualizar" com caminho de menu; Médico/Advogado (jogadores fora do 11; lê conversa, cartão e "em curso" + cronômetro; sugere mandar ao médico/advogado, grátis 8 h); Especialistas;
   cartão amarelo (leitura); sponsors; diagnóstico exportável.
 - **Incompletas / não confirmadas:** avisos com o app fechado no ROG/ASUS: o teste local "Testar fechado" **falhou**
-  no aparelho (o OEM apaga os alarmes ao fechar o app); a reserva `Push` (ntfy: o servidor agenda e entrega no horário e as mensagens aparecem no app ntfy ao abrir, mas o ntfy Play não acordava com o celular parado), o `CalendarSync` e o `KeepAliveService` foram criados, **não validados em aparelho**; leitura de Médico/Advogado **com jogadores na lista** (falta print real); aba "Lista de
+  no aparelho (o OEM apaga os alarmes ao fechar o app); a reserva `Push` (ntfy: o servidor agenda e entrega no horário e as mensagens aparecem no app ntfy ao abrir, mas o ntfy Play não acordava com o celular parado), o `CalendarSync` (teste de 2 min criado às 15:52, nada tocou no ROG), o `ClockSync` e o `KeepAliveService` foram criados, **não validados em aparelho** (no ROG o monitor é morto e os alarmes locais só disparam ao reabrir o app); leitura de Médico/Advogado **com jogadores na lista** (falta print real); aba "Lista de
   Afazeres" (Boss Coins grátis, Missões) não é lida.
 - Aba Hoje: slots primeiro (cartão compacto com próximo jogo), depois acerto da IA, telas para atualizar, treinos/estádio e "Mais".
   Diretor: "Arranque" numerado quando a competição é nova (≤2 rodadas); comunidade fica no fim.
