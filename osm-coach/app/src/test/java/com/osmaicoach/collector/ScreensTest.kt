@@ -225,4 +225,20 @@ class ScreensTest {
         // conversa do advogado também conta
         assertEquals(ScreenType.LAWYER, cls(Fx.line("Li o caso de Bergier. Vamos apresentar recurso!", 0.3f, 0.5f), Fx.line("Continuar", 0.4f, 0.6f), Fx.line("Advogado", 0.9f, 0.9f)))
     }
+
+    @Test fun onlyAsksForScreensThatChangeADecision() {
+        val h = 3600000L
+        val now = 100 * h
+        val seen = ScreenType.values().associate { it.name to now - 20 * h } + mapOf("DOCTOR" to now - 2 * h, "LAWYER" to now - 2 * h)
+        val running = Timers.Entry(1, "train_ATA", now + 3 * h, "treino: X (avançados)")
+        fun needs(matchAt: Long?, timers: List<Timers.Entry>) = Fresh.needs(Fresh.In(1, seen, timers, matchAt, false, now, true, now - 30 * h)).map { it.type }
+        // jogo em 15 h e treino em andamento: nada de calendário, preparação, treinamento nem mercado
+        val far = needs(now + 15 * h, listOf(running))
+        assertTrue(ScreenType.CALENDAR !in far && ScreenType.PREP !in far && ScreenType.TRAINING !in far && ScreenType.MARKET !in far)
+        // jogo em 2 h: a preparação entra
+        assertTrue(ScreenType.PREP in needs(now + 2 * h, listOf(running)))
+        // sem jogo conhecido: o calendário é pedido
+        val old = seen + mapOf("CALENDAR" to now - 30 * h)
+        assertTrue(Fresh.needs(Fresh.In(1, old, listOf(running), null, false, now, true, now - 30 * h)).any { it.type == ScreenType.CALENDAR })
+    }
 }

@@ -90,44 +90,50 @@ object Fresh {
 
         val tEnd = i.timers.filter { it.training && it.at <= i.now }
         val a = age(ScreenType.TRAINING)
+        // com treino em andamento (cronômetro lido) não há o que reler; só cobra se ninguém parece estar treinando
+        val trainingRunning = i.timers.any { it.training && it.at > i.now }
         when {
             tEnd.isNotEmpty() -> add(ScreenType.TRAINING, 2, "${tEnd.size} treino(s) terminou: reclame e coloque outro jogador")
             a == null -> add(ScreenType.TRAINING, 1, "ainda não li os treinadores deste slot")
-            a > 12 * H -> add(ScreenType.TRAINING, 1, "última leitura ${ago(a)}")
+            !trainingRunning && a > 8 * H -> add(ScreenType.TRAINING, 1, "nenhum treino em andamento (última leitura ${ago(a)})")
         }
         val sEnd = i.timers.filter { !it.training && !it.scout && !it.mission && !it.lawyer && !it.doctor && it.at <= i.now }
         val s = age(ScreenType.STADIUM)
         when {
             sEnd.isNotEmpty() -> add(ScreenType.STADIUM, 2, "a obra terminou: conclua e comece a próxima")
             s == null -> add(ScreenType.STADIUM, 1, "ainda não li o estádio")
-            s > 24 * H -> add(ScreenType.STADIUM, 0, "última leitura ${ago(s)}")
+            s > 72 * H && !i.timers.any { !it.training && !it.scout && !it.mission && !it.lawyer && !it.doctor && it.at > i.now } ->
+                add(ScreenType.STADIUM, 0, "última leitura ${ago(s)}")
         }
         val m = age(ScreenType.MARKET)
         when {
             m == null -> add(ScreenType.MARKET, 1, "ainda não li a lista de transferências")
-            m > 12 * H -> add(ScreenType.MARKET, 1, "última leitura ${ago(m)}: vagas na lista e vendas")
+            m > 48 * H -> add(ScreenType.MARKET, 1, "última leitura ${ago(m)}: vagas na lista e vendas")
         }
         val q = age(ScreenType.SQUAD)
         when {
             q == null -> add(ScreenType.SQUAD, 2, "ainda não li o plantel do seu time")
-            q > 24 * H -> add(ScreenType.SQUAD, 1, "última leitura ${ago(q)}: contratações, forma e cartões")
+            // forma, lesões e cartões mudam depois de cada jogo: reler antes de montar a tática
+            soon && q > 12 * H -> add(ScreenType.SQUAD, 1, "última leitura ${ago(q)}: forma e cartões antes do jogo")
+            q > 72 * H -> add(ScreenType.SQUAD, 0, "última leitura ${ago(q)}")
         }
         val p = age(ScreenType.PREGAME)
         if (gameIn != null && gameIn in 0L..(90 * 60000L) && (p == null || p > 60 * 60000L)) {
             add(ScreenType.PREGAME, 2, "o jogo é daqui a ${gameIn / 60000} min: releia o pré-jogo (o rival pode ter mudado)")
-        } else if (p == null) add(ScreenType.PREGAME, 1, "ainda não li o próximo jogo")
+        } else if (p == null && soon) add(ScreenType.PREGAME, 1, "ainda não li o próximo jogo")
         val r = age(ScreenType.REPORT)
         if (gameIn != null && gameIn in 0L..(90 * 60000L) && (r == null || r > 90 * 60000L)) {
             add(ScreenType.REPORT, 1, "veja a análise do rival antes do jogo")
         }
+        // o calendário só é preciso para saber o próximo jogo (o app avança sozinho a cada rodada)
         val c = age(ScreenType.CALENDAR)
         when {
-            c == null -> add(ScreenType.CALENDAR, 1, "ainda não li o calendário")
-            c > 3 * 24 * H -> add(ScreenType.CALENDAR, 1, "última leitura ${ago(c)}")
+            c == null && i.matchAt == null -> add(ScreenType.CALENDAR, 1, "ainda não sei quando é o próximo jogo")
+            i.matchAt == null && c != null && c > 24 * H -> add(ScreenType.CALENDAR, 1, "não sei o próximo jogo (leitura ${ago(c)})")
         }
         val sp = age(ScreenType.SPONSORS)
         when {
-            sp == null -> add(ScreenType.SPONSORS, 1, "ainda não li os contratos de patrocínio")
+            sp == null -> add(ScreenType.SPONSORS, 0, "ainda não li os contratos de patrocínio")
             i.sponsorEnding && sp > 2 * 24 * H -> add(ScreenType.SPONSORS, 1, "contrato acabando: veja se já dá para renovar")
             sp > 3 * 24 * H -> add(ScreenType.SPONSORS, 0, "última leitura ${ago(sp)}: a comunidade revê os patrocínios a cada 2–3 dias")
         }
@@ -147,7 +153,8 @@ object Fresh {
             sc > 7 * 24 * H -> add(ScreenType.SPECIALISTS, 0, "última leitura ${ago(sc)}")
         }
         val pr = age(ScreenType.PREP)
-        if (soon && (pr == null || pr > 6 * H)) add(ScreenType.PREP, 1, "veja o que falta na preparação do jogo (treinos, estágio, 11 inicial…)")
+        // a preparação só importa perto do jogo (é a lista que você cumpre antes de começar)
+        if (gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H)) add(ScreenType.PREP, 1, "falta pouco para o jogo: veja o que falta na preparação")
         if (i.timers.any { it.scout && it.at <= i.now }) add(ScreenType.SCOUT, 2, "o olheiro terminou a busca")
         val st = age(ScreenType.STATS)
         when {

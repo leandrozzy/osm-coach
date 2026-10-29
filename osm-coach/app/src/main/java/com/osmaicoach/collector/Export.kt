@@ -83,7 +83,7 @@ object DiagExport {
     private const val IMAGE_BUDGET = 150L * 1024 * 1024
 
     private val SECRETS = setOf(Settings.GEMINI_KEY, Settings.CLAUDE_KEY, Settings.COMPAT_KEY, Settings.MISTRAL_KEY, Settings.OPENROUTER_KEY)
-    private val PREFS = listOf("ai_block", "ai_learn", "ai_test", "ai_usage", "collector_runtime", "formations", "health", "machine", "notifier", "ui")
+    private val PREFS = listOf("ai_block", "ai_learn", "ai_test", "ai_usage", "collector_runtime", "formations", "health", "machine", "notifier", "push", "ui")
 
     private fun n(v: Any?): Any = v ?: JSONObject.NULL
 
