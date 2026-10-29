@@ -1208,7 +1208,7 @@ data class SlotSummary(
     val rivalChanged: List<RivalWatch.Change> = emptyList()
 )
 
-data class TodayData(val active: Boolean = false, val slots: List<SlotSummary> = emptyList(), val work: List<SlotWork> = emptyList(), val needs: List<Fresh.Need> = emptyList())
+data class TodayData(val active: Boolean = false, val slots: List<SlotSummary> = emptyList(), val work: List<SlotWork> = emptyList(), val needs: List<Fresh.Need> = emptyList(), val accuracy: Accuracy.Summary? = null)
 
 object TodayCache {
     @Volatile var last = TodayData()
@@ -1418,7 +1418,10 @@ private suspend fun loadToday(ctx: Context): TodayData {
         runCatching { needs.addAll(Hints.needsFor(repo, s.slot, s.nextAt, true, now)) }
     }
     runCatching { needs.addAll(Fresh.global(repo.timers(0), repo.seenMap(0), now)) }
-    return TodayData(Control.activeSession(ctx) != null, list, work, needs.sortedWith(compareByDescending<Fresh.Need> { it.urgency }.thenBy { it.slot })).also { TodayCache.last = it }
+    val acc = runCatching {
+        Accuracy.of((1..4).flatMap { sl -> Accuracy.parse(sl, repo.dao.tacticLogs(sl).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }) })
+    }.getOrNull()
+    return TodayData(Control.activeSession(ctx) != null, list, work, needs.sortedWith(compareByDescending<Fresh.Need> { it.urgency }.thenBy { it.slot }), acc).also { TodayCache.last = it }
 }
 
 // ------------------------------------------------------------------ app
@@ -1665,18 +1668,49 @@ private fun ActionPill(s: SlotSummary, onTactic: () -> Unit, onResult: () -> Uni
     }
 }
 
+/** Quanto a previsão da IA acertou o resultado dos jogos já disputados, com dicas do que isso mostra. */
+@Composable
+private fun AccuracyCard(s: Accuracy.Summary, scope: String = "") {
+    val c = if (s.pct >= 60) C.OK else if (s.pct >= 45) C.GOLD else C.WARN
+    Fold("🎯", "Acerto da IA" + (if (scope.isNotBlank()) " ($scope)" else "") + ": ${s.pct}%", "${s.hits}/${s.games} jogos") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StatTile("🎯", "${s.pct}%", "acertou o resultado", c, Modifier.weight(1f))
+            StatTile("📈", (if (s.skill >= 0) "+" else "") + s.skill + "%", "melhor que o acaso", if (s.skill > 0) C.OK else C.WARN, Modifier.weight(1f))
+            StatTile("⚖", "${s.avgReal}%", "chance dada ao que ocorreu", C.PRIMARY, Modifier.weight(1f))
+        }
+        Text(
+            "Quando previu vitória: ${s.favV.first} de ${s.favV.second} • empate: ${s.favE.first} de ${s.favE.second} • derrota: ${s.favD.first} de ${s.favD.second}",
+            fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp)
+        )
+        Text("Últimos jogos", fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        for (g in s.recent) {
+            val res = when (g.result) { "V" -> "vitória"; "E" -> "empate"; else -> "derrota" }
+            Text(
+                (if (g.hit) "✔ " else "✘ ") + "S${g.slot} J${g.round}" + (g.rival?.let { " vs $it" } ?: "") +
+                    ": previu V${g.pW}% E${g.pE}% D${g.pD}% → $res" + (if (g.mine != null && g.opp != null) " (${g.mine}-${g.opp})" else ""),
+                fontSize = 11.sp, color = if (g.hit) C.OK else C.WARN, modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        for (t in s.tips) Text("💡 $t", fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        Text(
+            "A cada resultado que você passa, o app corrige os gols esperados e as probabilidades das próximas táticas.",
+            fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp)
+        )
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SlotCard(s: SlotSummary, onClick: () -> Unit, onTactic: () -> Unit, onResult: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().clickable { onClick() },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().clickable { onClick() },
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) {
         val accent = if (s.ended) C.GOLD else if (s.needsResult) C.GOLD else if (s.tacticReady && s.missing == 0) C.OK else if (s.tacticReady) C.PRIMARY else C.WARN
-        Column(Modifier.drawBehind { drawRect(accent, size = Size(5.dp.toPx(), size.height)) }.padding(14.dp)) {
+        Column(Modifier.drawBehind { drawRect(accent, size = Size(5.dp.toPx(), size.height)) }.padding(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Crest(s.slot, 54.dp)
+                Crest(s.slot, 44.dp)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1787,21 +1821,12 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
     val batteryOk = batteryUnrestricted(ctx)
     val hasKey = Settings.get(ctx, Settings.GEMINI_KEY, "").isNotBlank()
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
-        Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                .background(Brush.horizontalGradient(listOf(Color(0xFF0E2A5A), Color(0xFF1F6BFF))))
-                .padding(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.ic_launcher_fg), contentDescription = null, modifier = Modifier.size(58.dp))
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("OSM AI Coach", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                    Text("Você joga, o app lê, o diretor decide.", fontSize = 12.sp, color = Color(0xCCFFFFFF))
-                }
-                Pill(if (ready) "Leitura ativa" else "Leitura desligada", ready)
-            }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.ic_launcher_fg), contentDescription = null, modifier = Modifier.size(38.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("OSM AI Coach", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            Pill(if (ready) "Leitura ativa" else "Leitura desligada", ready)
         }
 
         KilledBanner(ctx, enabled, connected, batteryOk)
@@ -1814,10 +1839,10 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
                     AppScope.scope.launch { Control.end(ctx.applicationContext) }
                     msg = "Captura encerrada. Processando em segundo plano…"
                 },
-                modifier = Modifier.fillMaxWidth().height(84.dp),
+                modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(20.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = C.BAD)
-            ) { Text("ENCERRAR CAPTURA E PROCESSAR", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+            ) { Text("ENCERRAR CAPTURA E PROCESSAR", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White) }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { if (!openOsm(ctx)) msg = "OSM não encontrado." }, modifier = Modifier.fillMaxWidth()) {
                 Text("Voltar ao OSM (a mesma sessão continua)")
@@ -1839,82 +1864,64 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
                     }
                 },
                 enabled = ready,
-                modifier = Modifier.fillMaxWidth().height(72.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(20.dp)
-            ) { Text("▶  Abrir OSM e capturar", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+            ) { Text("▶  Abrir OSM e capturar", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
             if (!ready) Text("⚙ Ative a leitura (acima) para liberar o botão.", color = C.WARN, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             if (data.slots.none { it.known }) Panel { HowItWorks() }
         }
         if (msg.isNotBlank()) Text(msg, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
         ProcessCard()
 
-        val upcoming = data.slots.filter { it.nextAt != null && it.nextAt > System.currentTimeMillis() - 7200000L }.sortedBy { it.nextAt }
-        if (upcoming.isNotEmpty()) {
-            Title("Próximos jogos")
-            Panel {
-                for (u in upcoming) {
-                    Row(Modifier.fillMaxWidth().clickable { onOpenSlot(u.slot, if (u.needsResult) 5 else 4) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "S${u.slot} • ${u.title}" + (if (u.rival != null) " vs ${u.rival}" else ""), fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis
-                            )
-                            Text(countdown(u.nextAt!!), fontSize = 11.sp, color = C.MUTED)
-                        }
-                        ActionPill(u, { onOpenSlot(u.slot, 4) }, { onOpenSlot(u.slot, 5) })
+        Title("Seus slots")
+        for (s in data.slots) SlotCard(s, { onOpenSlot(s.slot, 0) }, { onOpenSlot(s.slot, 4) }, { onOpenSlot(s.slot, 5) })
+        data.accuracy?.let { AccuracyCard(it) }
+        if (data.needs.any { it.urgency >= 1 }) NeedsCard(data.needs)
+        if (data.work.isNotEmpty()) {
+            Fold("⏱", "Treinos e estádio", data.work.size.toString() + " slots") {
+                for (w in data.work) WorkFold(w) { onOpenSlot(w.slot, 5) }
+            }
+        }
+        Fold("⋯", "Mais: guia das telas, eventos e diagnóstico") {
+            Fold("🗺", "Guia: o que cada tela do OSM alimenta") {
+                Text("Passe por estas telas com a captura ligada. Vale para todos os slots (repita em cada um).", fontSize = 12.sp, color = C.MUTED)
+                for ((t, gives, every) in Fresh.GUIDE) {
+                    Column(Modifier.padding(top = 8.dp)) {
+                        Text(Fresh.NAME[t] ?: t.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(gives, fontSize = 11.sp, color = C.MUTED)
+                        Text("Quando: $every", fontSize = 11.sp, color = C.GOLD)
+                        Text(Fresh.PATH[t] ?: "", fontSize = 11.sp, color = C.PRIMARY)
                     }
                 }
             }
-        }
-
-        if (data.needs.any { it.urgency >= 1 }) NeedsCard(data.needs)
-        Fold("🗺", "Guia: o que cada tela do OSM alimenta") {
-            Text("Passe por estas telas com a captura ligada. Vale para todos os slots (repita em cada um).", fontSize = 12.sp, color = C.MUTED)
-            for ((t, gives, every) in Fresh.GUIDE) {
-                Column(Modifier.padding(top = 8.dp)) {
-                    Text(Fresh.NAME[t] ?: t.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text(gives, fontSize = 11.sp, color = C.MUTED)
-                    Text("Quando: $every", fontSize = 11.sp, color = C.GOLD)
-                    Text(Fresh.PATH[t] ?: "", fontSize = 11.sp, color = C.PRIMARY)
-                }
+            val ev = Diag.recentEvents()
+            Fold("🕘", "Últimos eventos", if (ev.isEmpty()) null else ev.size.toString()) {
+                if (ev.isEmpty()) Text("Nenhum evento ainda. Inicie a captura e navegue no OSM.", color = C.MUTED, fontSize = 12.sp)
+                for (e in ev) Text(e, fontSize = 12.sp, modifier = Modifier.padding(vertical = 1.dp))
             }
-        }
-        if (data.work.isNotEmpty()) {
-            Title("⏱ Treinos e estádio")
-            for (w in data.work) WorkFold(w) { onOpenSlot(w.slot, 5) }
-        }
-
-        Title("Seus slots")
-        for (s in data.slots) SlotCard(s, { onOpenSlot(s.slot, 0) }, { onOpenSlot(s.slot, 4) }, { onOpenSlot(s.slot, 5) })
-
-        Spacer(Modifier.height(8.dp))
-        val ev = Diag.recentEvents()
-        Fold("🕘", "Últimos eventos", if (ev.isEmpty()) null else ev.size.toString()) {
-            if (ev.isEmpty()) Text("Nenhum evento ainda. Inicie a captura e navegue no OSM.", color = C.MUTED, fontSize = 12.sp)
-            for (e in ev) Text(e, fontSize = 12.sp, modifier = Modifier.padding(vertical = 1.dp))
-        }
-        Fold("🩺", "Diagnóstico técnico", if (ready) "ok" else "⚠") {
-            Column {
-                KV("Acessibilidade ativada", if (enabled) "sim" else "NÃO")
-                KV("Serviço realmente conectado", if (connected) "sim" else "NÃO")
-                KV("Pacote do jogo", if (Diag.lastOsmEventAt > 0) "$OSM_PACKAGE (evento ${ago(Diag.lastOsmEventAt)})" else "sem eventos do OSM")
-                KV("Sessão atual", Control.activeSession(ctx) ?: "nenhuma")
-                KV("Slot atual", if (Diag.currentSlot > 0) "S${Diag.currentSlot}" else "não identificado")
-                KV("Tipo da tela atual", typeLabel(Diag.currentType))
-                KV("Último screenshot", ago(Diag.lastShotAt))
-                KV("Frames válidos", Diag.valid.get().toString())
-                KV("Frames descartados", Diag.discarded.get().toString())
-                KV("Deduplicados", Diag.dedup.get().toString())
-                KV("OCR realizado", Diag.ocr.get().toString())
-                KV("Parser aplicado", Diag.parsed.get().toString())
-                KV("Campos extraídos/alterados", Diag.extracted.get().toString())
-                KV("Sem slot (preservados)", Diag.unassigned.get().toString())
-                KV("Chamadas de IA (sessão)", Diag.aiCalls.get().toString())
-                KV("Última atualização de dados", ago(Diag.lastUpdateAt))
-                KV("Último erro", Diag.lastError ?: "nenhum")
-                KV("Último travamento", Health.lastCrash(ctx)?.let { fmtTime(it.first) + " — " + it.second } ?: "nenhum")
-                KV("Leitura viva pela última vez", ago(Health.lastAlive(ctx)))
-                KV("Aparelho", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " • Android " + android.os.Build.VERSION.RELEASE)
+            Fold("🩺", "Diagnóstico técnico", if (ready) "ok" else "⚠") {
+                Column {
+                    KV("Acessibilidade ativada", if (enabled) "sim" else "NÃO")
+                    KV("Serviço realmente conectado", if (connected) "sim" else "NÃO")
+                    KV("Pacote do jogo", if (Diag.lastOsmEventAt > 0) "$OSM_PACKAGE (evento ${ago(Diag.lastOsmEventAt)})" else "sem eventos do OSM")
+                    KV("Sessão atual", Control.activeSession(ctx) ?: "nenhuma")
+                    KV("Slot atual", if (Diag.currentSlot > 0) "S${Diag.currentSlot}" else "não identificado")
+                    KV("Tipo da tela atual", typeLabel(Diag.currentType))
+                    KV("Último screenshot", ago(Diag.lastShotAt))
+                    KV("Frames válidos", Diag.valid.get().toString())
+                    KV("Frames descartados", Diag.discarded.get().toString())
+                    KV("Deduplicados", Diag.dedup.get().toString())
+                    KV("OCR realizado", Diag.ocr.get().toString())
+                    KV("Parser aplicado", Diag.parsed.get().toString())
+                    KV("Campos extraídos/alterados", Diag.extracted.get().toString())
+                    KV("Sem slot (preservados)", Diag.unassigned.get().toString())
+                    KV("Chamadas de IA (sessão)", Diag.aiCalls.get().toString())
+                    KV("Última atualização de dados", ago(Diag.lastUpdateAt))
+                    KV("Último erro", Diag.lastError ?: "nenhum")
+                    KV("Último travamento", Health.lastCrash(ctx)?.let { fmtTime(it.first) + " — " + it.second } ?: "nenhum")
+                    KV("Leitura viva pela última vez", ago(Health.lastAlive(ctx)))
+                    KV("Aparelho", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " • Android " + android.os.Build.VERSION.RELEASE)
+                }
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -2231,33 +2238,34 @@ private fun DirectorTab(onOpen: (Int, Int) -> Unit) {
     val now = System.currentTimeMillis()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
         Text("Diretor", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatTile("🤖", AiClient.usedToday(ctx).toString(), "IA hoje", C.PRIMARY, Modifier.weight(1f))
-            StatTile("🔔", list.sumOf { it.alerts.size }.toString(), "alertas", C.WARN, Modifier.weight(1f))
-            StatTile("⚽", list.count { !it.s.ended && it.s.nextAt != null }.toString(), "jogos", C.OK, Modifier.weight(1f))
+        // competição recém-começada (batalha/liga nova): o plano de arranque vem primeiro
+        val fresh = list.filter { d -> !d.s.ended && d.s.known && (d.s.state == null || d.s.state == "preepoca") && (d.s.roundDone?.toIntOrNull() ?: 0) <= 2 && d.tips.any { it.icon != "🎉" } }
+        for (d in fresh) {
+            Title("🚀 Arranque do S${d.s.slot} • ${d.s.title}")
+            Text(
+                (if (d.s.compType == "Batalha") "Batalha nova" else "Competição nova") + ": faça nesta ordem para evoluir o mais rápido (grátis, sem Boss Coins).",
+                fontSize = 12.sp, color = C.MUTED
+            )
+            d.tips.filter { it.icon != "🎉" }.take(7).forEachIndexed { i, t ->
+                Text("${i + 1}.", fontWeight = FontWeight.ExtraBold, color = C.GOLD, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                TipCard(t) { onOpen(d.s.slot, t.tab) }
+            }
         }
         val eventTips = list.flatMap { it.tips }.filter { it.icon == "🎉" }.distinctBy { it.title }
         if (eventTips.isNotEmpty()) {
             Title("🎉 Eventos do OSM agora")
             for (t in eventTips) TipCard(t) {}
         }
-        Title("📋 Dicas primeiro")
-        Text("O que fazer agora para evoluir rápido, com os seus dados e o que a comunidade do OSM confirma que funciona.", fontSize = 12.sp, color = C.MUTED)
-        for (d in list.filter { it.tips.isNotEmpty() }) {
+        Title("📋 O que fazer agora")
+        for (d in list.filter { it.tips.isNotEmpty() && it !in fresh }) {
             Row(Modifier.padding(top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Crest(d.s.slot, 26.dp)
                 Spacer(Modifier.width(8.dp))
                 Text("S${d.s.slot} • ${d.s.title}", fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             val mineTips = d.tips.filter { it.icon != "🎉" }
-            for (t in mineTips.take(4)) TipCard(t) { onOpen(d.s.slot, t.tab) }
-            if (mineTips.size > 4) Fold("➕", "Mais ${mineTips.size - 4} dica(s) do S${d.s.slot}") { for (t in mineTips.drop(4)) TipCard(t) { onOpen(d.s.slot, t.tab) } }
-        }
-        Fold("📚", "O que a comunidade diz que funciona") {
-            for ((rule, src) in Playbook.GUIDE) {
-                Text(rule, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                Text("Fonte: $src", fontSize = 10.sp, color = C.MUTED)
-            }
+            for (t in mineTips.take(3)) TipCard(t) { onOpen(d.s.slot, t.tab) }
+            if (mineTips.size > 3) Fold("➕", "Mais ${mineTips.size - 3} dica(s) do S${d.s.slot}") { for (t in mineTips.drop(3)) TipCard(t) { onOpen(d.s.slot, t.tab) } }
         }
         if (Diag.lastError != null) Hint(Diag.lastError ?: "", "último erro")
 
@@ -2330,6 +2338,12 @@ private fun DirectorTab(onOpen: (Int, Int) -> Unit) {
                     OutlinedButton(onClick = { onOpen(d.s.slot, 4) }, modifier = Modifier.weight(1f)) { Text("Tática", fontSize = 12.sp) }
                     OutlinedButton(onClick = { onOpen(d.s.slot, 6) }, modifier = Modifier.weight(1f)) { Text("Plano completo", fontSize = 12.sp) }
                 }
+            }
+        }
+        Fold("📚", "O que a comunidade diz que funciona") {
+            for ((rule, src) in Playbook.GUIDE) {
+                Text(rule, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Fonte: $src", fontSize = 10.sp, color = C.MUTED)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -4264,6 +4278,7 @@ private fun GameCard(g: Coach.Game, rv: Coach.Review?) {
 @Composable
 private fun SlotLearning(slot: Int, d: SlotData) {
     d.progress?.let { ScoreboardCard(it.score) }
+    Accuracy.of(Accuracy.parse(slot, d.logs.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }))?.let { AccuracyCard(it, "S$slot") }
     LearnedCard(d.learned)
     data class Row2(
         val kind: String, val round: Int, val formation: String, val style: String, val rival: String,

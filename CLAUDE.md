@@ -24,7 +24,9 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
   - Decisão: `Engine` (`TacticEngine`, `Formations`), `Intel` (`WinModel` Poisson, `Fixtures`, `Evidence`, `Coach`),
     `Learn` (`Learned`, regressão sobre gols reais), `Director` (validadores, geração de tática/mercado), `Smart`
     (`OsmEvents`, `SellPrices`, `Sponsors`, `TrainLearn`, `RivalPredict`), `Playbook` (dicas), `Hints` (bolha/Diretor),
-    `Fresh` ("telas para atualizar"), `Screens` (leitores das telas novas), `Progress`, `RivalWatch`.
+    `Fresh` ("telas para atualizar": só pede o que muda uma decisão — calendário só sem jogo conhecido, preparação ≤3 h do jogo,
+    Médico/Advogado só após um jogo), `Screens` (leitores das telas novas), `Progress` (inclui `Accuracy`: % de acerto da previsão V/E/D
+    contra o resultado real, com dicas), `RivalWatch`.
   - Avisos: `Notifier` (alarmes locais) + `Push` (reserva na nuvem via ntfy.sh, opt-in em Ajustes: agenda cada aviso no
     servidor com `sequence_id` fixo; cancela quando o alarme local toca) + `KeepAliveService` (monitor em primeiro plano,
     confere alarmes a cada minuto). Diagnóstico em Ajustes: log de eventos de aviso (`Notifier.fireLog`) e status do `Push`; botão para a Inicialização automática da ASUS/ROG.
@@ -76,6 +78,8 @@ Sem slot confiável nada é gravado. Texto de tela: sempre comparar com `Txt.nor
 - **Incompletas / não confirmadas:** avisos com o app fechado no ROG/ASUS: o teste local "Testar fechado" **falhou**
   no aparelho (o OEM apaga os alarmes ao fechar o app); a reserva `Push` (ntfy; o servidor foi testado por curl: agenda e entrega no horário) e o `KeepAliveService` foram criados, **não validados em aparelho**; leitura de Médico/Advogado **com jogadores na lista** (falta print real); aba "Lista de
   Afazeres" (Boss Coins grátis, Missões) não é lida.
+- Aba Hoje: slots primeiro (cartão compacto com próximo jogo), depois acerto da IA, telas para atualizar, treinos/estádio e "Mais".
+  Diretor: "Arranque" numerado quando a competição é nova (≤2 rodadas); comunidade fica no fim.
 - **Ausentes:** forma recente do rival (bolinhas V/D) na decisão; escolha do 11 por cartão amarelo; compra com
   preço-alvo (≤1,5× valor); batalhas/crews.
 

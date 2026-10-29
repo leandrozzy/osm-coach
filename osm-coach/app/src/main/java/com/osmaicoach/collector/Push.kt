@@ -7,6 +7,7 @@ import java.security.SecureRandom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 /**
@@ -19,6 +20,9 @@ object Push {
     private const val BASE = "https://ntfy.sh"
     /** O aviso da nuvem sai um pouco depois do alarme local; se o local tocar, este é cancelado (sem repetir). */
     const val LATE_MS = 90_000L
+    const val TOLERANCE_MS = 3 * 60_000L
+    /** Vários vigias (app, serviço, monitor) chamam isto ao mesmo tempo: um de cada vez, senão o aviso sai repetido. */
+    private val lock = kotlinx.coroutines.sync.Mutex()
     /** O ntfy aceita agendar no máximo 3 dias à frente. */
     private const val MAX_AHEAD_MS = 3L * 24 * 3600_000L - 10 * 60_000L
 
@@ -34,7 +38,8 @@ object Push {
             if (at <= now) continue // já foi entregue
             if (k in wanted) keep[k] = at else del.add(k)
         }
-        val pub = wanted.values.filter { keep[it.seq] != it.at + LATE_MS }
+        // o cronômetro lido oscila por segundos: só reenvia se o horário mudou de verdade
+        val pub = wanted.values.filter { val k = keep[it.seq]; k == null || Math.abs(k - (it.at + LATE_MS)) > TOLERANCE_MS }
         return Plan(pub, del, keep)
     }
 
@@ -67,6 +72,7 @@ object Push {
     }
 
     @Volatile private var lastStatus = ""
+    @Volatile private var appCtx: Context? = null
 
     private fun call(method: String, url: String, body: String?): Boolean = try {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -82,9 +88,11 @@ object Push {
         c.disconnect()
         val ok = code in 200..299 || (method == "DELETE" && code == 404)
         lastStatus = (if (ok) "ok" else "erro HTTP $code") + " ($method)"
+        appCtx?.getSharedPreferences("push", Context.MODE_PRIVATE)?.edit()?.putString("last", lastStatus + " " + System.currentTimeMillis())?.apply()
         ok
     } catch (e: Exception) {
         lastStatus = "erro: " + (e.message ?: e.javaClass.simpleName)
+        appCtx?.getSharedPreferences("push", Context.MODE_PRIVATE)?.edit()?.putString("last", lastStatus + " " + System.currentTimeMillis())?.apply()
         false
     }
 
@@ -111,27 +119,28 @@ object Push {
 
     /** Deixa o servidor igual ao que vale agora (envia o novo, troca o que mudou, apaga o que não vale mais). */
     suspend fun sync(ctx: Context, want: List<Item>) {
+        appCtx = ctx.applicationContext
         if (!enabled(ctx)) return
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) { lock.withLock {
             val now = System.currentTimeMillis()
             val p = plan(want, readSent(ctx), now)
             val sent = LinkedHashMap(p.keep)
             for (k in p.delete) if (!delete(ctx, k)) sent[k] = readSent(ctx)[k] ?: (now + 1) // tenta de novo depois
             for (it in p.publish) if (publish(ctx, it)) sent[it.seq] = it.at + LATE_MS
             writeSent(ctx, sent)
-        }
+        } }
     }
 
     /** O alarme local tocou: o aviso da nuvem do mesmo evento não deve repetir. */
     suspend fun cancel(ctx: Context, seq: String) {
         if (!enabled(ctx)) return
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) { lock.withLock {
             val sent = readSent(ctx)
             if (sent.containsKey(seq) && delete(ctx, seq)) {
                 sent.remove(seq)
                 writeSent(ctx, sent)
             }
-        }
+        } }
     }
 
     /** Desligou: apaga tudo o que estava agendado no servidor. */

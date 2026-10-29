@@ -292,3 +292,67 @@ fun moneyText(m: Double, sign: Boolean = false): String {
     val body = if (a >= 1.0) String.format(java.util.Locale("pt", "BR"), "%.1fM", a) else "${(a * 1000).roundToInt()}K"
     return s + body
 }
+
+/**
+ * Quanto a previsão acertou: compara a chance de vitória/empate/derrota guardada na hora de gerar a tática com o
+ * resultado real depois do jogo. Acerto = o resultado mais provável foi o que aconteceu. O Brier mede a qualidade
+ * das probabilidades (0 = perfeito; 0,667 = chute 33/33/33).
+ */
+object Accuracy {
+    data class Game(
+        val slot: Int, val round: Int, val rival: String?, val pW: Int, val pE: Int, val pD: Int,
+        val result: String, val mine: Int?, val opp: Int?, val formation: String?
+    ) {
+        val fav: String get() = if (pW >= pE && pW >= pD) "V" else if (pD >= pE) "D" else "E"
+        val hit: Boolean get() = fav == result
+        val pFav: Int get() = maxOf(pW, pE, pD)
+        val pReal: Int get() = when (result) { "V" -> pW; "E" -> pE; else -> pD }
+    }
+
+    data class Summary(
+        val games: Int, val hits: Int, val brier: Double, val avgFav: Int, val avgReal: Int,
+        val favV: Pair<Int, Int>, val favE: Pair<Int, Int>, val favD: Pair<Int, Int>, val drawsReal: Int,
+        val recent: List<Game>, val tips: List<String>
+    ) {
+        val pct: Int get() = if (games == 0) 0 else Math.round(100f * hits / games)
+        /** Quanto melhor que o chute (0% = igual ao acaso). */
+        val skill: Int get() = Math.round(100.0 * (1.0 - brier / 0.667)).toInt().coerceIn(-99, 99)
+    }
+
+    fun parse(slot: Int, logs: List<JSONObject>): List<Game> = logs.mapNotNull { j ->
+        val r = j.optString("result")
+        if (r !in setOf("V", "E", "D") || !j.has("predW") || j.isNull("predW")) return@mapNotNull null
+        Game(
+            slot, j.optInt("round"), j.optString("rival").ifBlank { null },
+            j.optInt("predW"), j.optInt("predE"), j.optInt("predD"), r,
+            if (j.has("scoreMine") && !j.isNull("scoreMine")) j.optInt("scoreMine") else null,
+            if (j.has("scoreOpp") && !j.isNull("scoreOpp")) j.optInt("scoreOpp") else null,
+            j.optString("formation").ifBlank { null }
+        )
+    }
+
+    fun of(all: List<Game>): Summary? {
+        if (all.isEmpty()) return null
+        val n = all.size
+        val hits = all.count { it.hit }
+        val brier = all.sumOf { g ->
+            listOf("V" to g.pW, "E" to g.pE, "D" to g.pD).sumOf { (o, p) -> val x = p / 100.0 - (if (o == g.result) 1 else 0); x * x }
+        } / n
+        fun by(f: String) = Pair(all.count { it.fav == f && it.hit }, all.count { it.fav == f })
+        val avgFav = all.map { it.pFav }.average().toInt()
+        val avgReal = all.map { it.pReal }.average().toInt()
+        val pct = Math.round(100f * hits / n)
+        val favV = by("V"); val favE = by("E"); val favD = by("D")
+        val draws = all.count { it.result == "E" }
+        val tips = ArrayList<String>()
+        if (n < 10) tips.add("Só $n jogo(s) conferidos: o percentual ainda oscila. Quanto mais resultados você passa pelo app, mais a IA aprende.")
+        if (n >= 8 && avgFav - pct >= 8) tips.add("A IA tem sido confiante demais: aponta ~$avgFav% no favorito e acerta $pct%. As próximas previsões vão ser mais cautelosas (correção automática).")
+        if (n >= 8 && pct - avgFav >= 8) tips.add("A IA tem sido cautelosa demais: aponta ~$avgFav% no favorito e acerta $pct%. Dá para confiar um pouco mais nas previsões altas.")
+        if (favV.second >= 5 && favV.first * 100 < favV.second * 50) tips.add("Quando prevê vitória acerta só ${favV.first} de ${favV.second}: contra rivais fortes, prefira a tática mais segura e trate empate como bom resultado.")
+        if (favD.second >= 5 && favD.first * 100 >= favD.second * 70) tips.add("Previsão de derrota acerta ${favD.first} de ${favD.second}: quando aparecer, vale segurar o jogo (defender e punir) em vez de atacar tudo.")
+        if (n >= 8 && favE.second == 0 && draws * 100 >= n * 20) tips.add("Houve $draws empate(s) em $n jogos e a IA nunca aponta empate como mais provável: em jogo equilibrado, o empate é resultado frequente.")
+        if (tips.isEmpty()) tips.add("Previsões e resultados estão alinhados. O app continua aprendendo com cada resultado que você passa.")
+        val recent = all.sortedByDescending { it.round }.take(6)
+        return Summary(n, hits, brier, avgFav, avgReal, favV, favE, favD, draws, recent, tips)
+    }
+}

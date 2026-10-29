@@ -34,4 +34,11 @@ class PushTest {
         )
         assertTrue(p.publish.isEmpty() && p.delete.isEmpty() && p.keep.isEmpty())
     }
+
+    @Test fun smallTimeDriftDoesNotRepublish() {
+        val now = 1_000_000L
+        val a = item("t1_train_ATA", now + 2 * H + 4000L) // cronômetro relido: 4 s de diferença
+        val p = Push.plan(listOf(a), mapOf(a.seq to now + 2 * H + Push.LATE_MS), now)
+        assertTrue(p.publish.isEmpty())
+    }
 }
