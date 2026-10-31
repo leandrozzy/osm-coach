@@ -272,16 +272,16 @@ class CaptureService : AccessibilityService() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding((8 * dp).toInt(), (5 * dp).toInt(), (8 * dp).toInt(), (5 * dp).toInt())
-                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(0x33FFFFFF) }
+                background = GradientDrawable().apply { cornerRadius = 14 * dp; setColor(0x332AB4FF) }
             }
             row.addView(TextView(this).apply { text = h.icon; textSize = 18f; setPadding(0, 0, (8 * dp).toInt(), 0) })
             val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             col.addView(TextView(this).apply {
-                text = h.title; setTextColor(android.graphics.Color.WHITE); textSize = 12.5f; maxLines = 2
+                text = h.title; setTextColor(android.graphics.Color.WHITE); textSize = 14f; maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
             })
-            col.addView(TextView(this).apply { text = h.detail; setTextColor(0xFFB8C7E6.toInt()); textSize = 10.5f; maxLines = if (allowDone) 2 else 30; ellipsize = android.text.TextUtils.TruncateAt.END })
+            col.addView(TextView(this).apply { text = h.detail; setTextColor(0xFFC3D3EE.toInt()); textSize = 12f; maxLines = if (allowDone) 3 else 30; ellipsize = android.text.TextUtils.TruncateAt.END })
             row.addView(col, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             if (allowDone) {
                 val done = TextView(this).apply {
@@ -408,9 +408,9 @@ class CaptureService : AccessibilityService() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF2132A5C.toInt(), 0xF20B1530.toInt())).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFA0F2347.toInt(), 0xFA081A3C.toInt())).apply {
                 cornerRadius = 18 * dp
-                setStroke((1 * dp).toInt(), 0x6672B8FF)
+                setStroke((1.5f * dp).toInt(), 0xAA2AB4FF.toInt())
             }
             elevation = 12 * dp
             addView(head)

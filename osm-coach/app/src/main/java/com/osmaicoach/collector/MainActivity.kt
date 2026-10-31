@@ -2012,6 +2012,16 @@ private fun CtaButton(text: String, modifier: Modifier = Modifier, enabled: Bool
     }
 }
 
+/** Botão de contorno ciano (ação secundária). */
+@Composable
+private fun GhostButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.3.dp, Color(0x802AB4FF), RoundedCornerShape(14.dp))
+            .clickable { onClick() }.padding(vertical = 13.dp),
+        contentAlignment = Alignment.Center
+    ) { Text(text, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = C.PRIMARY) }
+}
+
 /** Cartão do slot: quem joga contra quem (com a força de cada um), quanto falta, três barras e o botão da ação certa. */
 @Composable
 private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit) {
@@ -2509,56 +2519,57 @@ private fun SessionsTab() {
         }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        Text("Sessões", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        PageTitle("🕘", "Sessões", "${rows.size} capturas")
+        // resumo: o que o app já guardou
+        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("📼", rows.size.toString(), "capturas", C.PRIMARY, Modifier.weight(1f))
+            StatTile("🕒", rows.firstOrNull()?.s?.startedAt?.let { fmtTime(it).substringAfter(" ") } ?: "—", "última", C.GOLD, Modifier.weight(1f))
+            StatTile("❓", rows.sumOf { it.unassigned }.toString(), "sem slot", if (rows.sumOf { it.unassigned } > 0) C.WARN else C.OK, Modifier.weight(1f))
+        }
         ProcessCard()
-        OutlinedButton(
-            onClick = {
-                if (!ProcessState.running) {
-                    val app = ctx.applicationContext
-                    AppScope.scope.launch(Dispatchers.IO) {
-                        try {
-                            Processor.run(app, "manual")
-                        } catch (e: Exception) {
-                            ProcessState.finish("Erro: " + (e.message ?: "?"))
-                        }
+        Title("Ferramentas")
+        GhostButton("Reprocessar telas sem slot") {
+            if (!ProcessState.running) {
+                val app = ctx.applicationContext
+                AppScope.scope.launch(Dispatchers.IO) {
+                    try {
+                        Processor.run(app, "manual")
+                    } catch (e: Exception) {
+                        ProcessState.finish("Erro: " + (e.message ?: "?"))
                     }
                 }
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-        ) { Text("Reprocessar telas sem slot") }
-        OutlinedButton(
-            onClick = {
-                if (!ProcessState.running) {
-                    val app = ctx.applicationContext
-                    AppScope.scope.launch(Dispatchers.IO) {
-                        try {
-                            val repo = Repo(app)
-                            val last = repo.dao.sessions().firstOrNull { it.endedAt != null } ?: repo.dao.sessions().firstOrNull()
-                            if (last == null) {
-                                ProcessState.begin("Reprocessando a última captura…", 0)
-                                ProcessState.finish("Nenhuma captura guardada ainda.")
-                                return@launch
-                            }
-                            ProcessState.begin("Reprocessando a última captura (${fmtTime(last.startedAt)})…", 1)
-                            val r = FramePipeline.get(app).replaySession(last.id) { i, n ->
-                                ProcessState.total = n
-                                ProcessState.done = i
-                                ProcessState.label("Relendo tela ${minOf(i + 1, n)} de $n da captura de ${fmtTime(last.startedAt)}…")
-                            }
-                            withContext(Dispatchers.Main) { UiBus.version++ }
-                            ProcessState.finish(
-                                "Captura de ${fmtTime(last.startedAt)} relida: ${r.read} de ${r.screens} telas guardadas, ${r.fields} campo(s) atualizados" +
-                                    (if (r.bySlot.isNotEmpty()) " (" + r.bySlot.toSortedMap().entries.joinToString { "S${it.key}: ${it.value}" } + ")" else "") +
-                                    ". Só as telas com imagem guardada podem ser relidas."
-                            )
-                        } catch (e: Exception) {
-                            ProcessState.finish("Erro ao reprocessar: " + (e.message ?: e.javaClass.simpleName))
+            }
+        }
+        GhostButton("🔁 Reprocessar a última captura inteira", Modifier.padding(top = 8.dp)) {
+            if (!ProcessState.running) {
+                val app = ctx.applicationContext
+                AppScope.scope.launch(Dispatchers.IO) {
+                    try {
+                        val repo = Repo(app)
+                        val last = repo.dao.sessions().firstOrNull { it.endedAt != null } ?: repo.dao.sessions().firstOrNull()
+                        if (last == null) {
+                            ProcessState.begin("Reprocessando a última captura…", 0)
+                            ProcessState.finish("Nenhuma captura guardada ainda.")
+                            return@launch
                         }
+                        ProcessState.begin("Reprocessando a última captura (${fmtTime(last.startedAt)})…", 1)
+                        val r = FramePipeline.get(app).replaySession(last.id) { i, n ->
+                            ProcessState.total = n
+                            ProcessState.done = i
+                            ProcessState.label("Relendo tela ${minOf(i + 1, n)} de $n da captura de ${fmtTime(last.startedAt)}…")
+                        }
+                        withContext(Dispatchers.Main) { UiBus.version++ }
+                        ProcessState.finish(
+                            "Captura de ${fmtTime(last.startedAt)} relida: ${r.read} de ${r.screens} telas guardadas, ${r.fields} campo(s) atualizados" +
+                                (if (r.bySlot.isNotEmpty()) " (" + r.bySlot.toSortedMap().entries.joinToString { "S${it.key}: ${it.value}" } + ")" else "") +
+                                ". Só as telas com imagem guardada podem ser relidas."
+                        )
+                    } catch (e: Exception) {
+                        ProcessState.finish("Erro ao reprocessar: " + (e.message ?: e.javaClass.simpleName))
                     }
                 }
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-        ) { Text("🔁 Reprocessar a última captura inteira") }
+            }
+        }
         Hint(
             "Relê com a versão atual do app todas as telas guardadas da última captura (as mesmas que vão no diagnóstico) e " +
                 "aplica nos slots. Dado mais novo nunca é trocado por leitura antiga."
@@ -2567,13 +2578,16 @@ private fun SessionsTab() {
         Title("Histórico")
         if (rows.isEmpty()) Text("Nenhuma sessão ainda.", color = C.MUTED)
         for (r in rows) {
-            Panel {
-                Text(r.s.id, fontWeight = FontWeight.Bold)
-                KV("Estado", r.s.state)
-                KV("Início", fmtTime(r.s.startedAt))
-                KV("Fim", r.s.endedAt?.let { fmtTime(it) } ?: "em andamento")
-                KV("Sem slot", r.unassigned.toString())
-                Text(r.counts.ifBlank { "sem quadros válidos" }, color = C.MUTED, fontSize = 13.sp)
+            Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).osmPanel().padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(fmtTime(r.s.startedAt), fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(r.s.endedAt?.let { "até " + fmtTime(it) } ?: "em andamento", fontSize = 13.sp, color = C.MUTED)
+                    }
+                    Pill(if (r.s.endedAt == null) "● gravando" else "concluída", r.s.endedAt == null)
+                }
+                Text(r.counts.ifBlank { "sem quadros válidos" }, fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+                if (r.unassigned > 0) Text("⚠ ${r.unassigned} tela(s) sem slot", fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
@@ -2585,8 +2599,9 @@ private fun SlotsTab(onOpen: (Int, Int) -> Unit) {
     val tick = rememberTick(5000L)
     val data = rememberLoaded(TodayCache.last, tick, UiBus.version) { loadToday(ctx) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        Text("Slots", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-        for (s in data.slots) SlotCard(s, { onOpen(s.slot, 0) }, { onOpen(s.slot, 4) }, { onOpen(s.slot, 5) })
+        PageTitle("📚", "Slots", "${data.slots.count { it.known }} ativos")
+        val nowS = System.currentTimeMillis()
+        for (s in data.slots.sortedBy { sl -> sl.nextAt?.takeIf { it > nowS && !sl.ended && sl.state == null } ?: Long.MAX_VALUE }) SlotCardV2(s, { onOpen(s.slot, 0) }, { t -> onOpen(s.slot, t) })
     }
 }
 
@@ -2704,7 +2719,7 @@ private fun DirectorTab(onOpen: (Int, Int) -> Unit) {
     val list = rememberLoaded(emptyList<DirSlot>(), tick, UiBus.version) { loadDirector(ctx) }
     val now = System.currentTimeMillis()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        Text("Diretor", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        PageTitle("🧭", "Diretor", "gestão do clube")
         // competição recém-começada (batalha/liga nova): o plano de arranque vem primeiro
         val fresh = list.filter { d -> !d.s.ended && d.s.known && (d.s.state == null || d.s.state == "preepoca") && (d.s.roundDone?.toIntOrNull() ?: 0) <= 2 && d.tips.any { it.icon != "🎉" } }
         for (d in fresh) {
@@ -3410,6 +3425,39 @@ private fun FilterPill(text: String, selected: Boolean, onClick: () -> Unit) {
     ) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else C.MUTED) }
 }
 
+/** Resumo dos últimos jogos do seu time: bolinhas V/E/D, aproveitamento e gols. */
+@Composable
+private fun ResultsStrip(d: SlotData) {
+    val done = d.matches.filter { it.result != null }.sortedByDescending { it.round ?: 0 }.take(5)
+    if (done.isEmpty()) return
+    val v = done.count { it.result == "V" }; val e = done.count { it.result == "E" }; val l = done.count { it.result == "D" }
+    val pts = v * 3 + e
+    val gf = done.sumOf { it.scoreMine ?: 0 }; val ga = done.sumOf { it.scoreOpp ?: 0 }
+    val pct = pts * 100 / (done.size * 3)
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(16.dp)) {
+        Text("📊 Seus últimos ${done.size} jogos", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (m in done.reversed()) {
+                    val col = when (m.result) { "V" -> C.WIN; "D" -> C.LOSS; else -> C.DRAW }
+                    Box(Modifier.size(32.dp).clip(RoundedCornerShape(50)).background(col), contentAlignment = Alignment.Center) {
+                        Text(m.result ?: "", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0B1C3E))
+                    }
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("$pct%", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = if (pct >= 60) C.OK else if (pct >= 40) C.GOLD else C.BAD)
+                Text("aproveitamento", fontSize = 12.sp, color = C.MUTED)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("🏆", "${v}V ${e}E ${l}D", "campanha", C.PRIMARY, Modifier.weight(1f))
+            StatTile("⭐", "$pts de ${done.size * 3}", "pontos", C.GOLD, Modifier.weight(1f))
+            StatTile("⚽", "$gf – $ga", "gols (pró – contra)", if (gf >= ga) C.OK else C.BAD, Modifier.weight(1f))
+        }
+    }
+}
+
 @Composable
 private fun SlotCalendar(slot: Int, d: SlotData) {
     var mode by remember { mutableIntStateOf(0) }
@@ -3423,6 +3471,7 @@ private fun SlotCalendar(slot: Int, d: SlotData) {
         if (e0 != null) MatchDialog(slot, e0, null) { editRound = null }
         return
     }
+    ResultsStrip(d)
     val sorted = d.matches.sortedBy { it.round ?: 999 }
     val total = fv(d, K.ROUND_TOTAL).toIntOrNull()
     val read = sorted.count { it.round != null }
@@ -4024,6 +4073,50 @@ private fun LegendDot(color: Color, label: String) {
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+/** Resumo da tática do próximo jogo no topo da aba: formação, estilo, números-chave e a chance de vitória. */
+@Composable
+private fun TacticHero(d: SlotData) {
+    val plan = d.tactic ?: return
+    val j = runCatching { JSONObject(plan.json) }.getOrNull() ?: return
+    if (!Director.tacticValid(j, plan.at, d.fields, System.currentTimeMillis())) return
+    val pr = j.optInt("pressure"); val me = j.optInt("mentality"); val te = j.optInt("tempo")
+    val byAi = j.optJSONObject("ai") != null
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("⚡ Tática do próximo jogo", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            Pill(if (byAi) "IA + simulação" else "simulação", null)
+        }
+        Text("Gerada ${ago(plan.at)}" + (known(d.fields, K.RIVAL_TEAM)?.let { " • contra $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+        Text(j.optString("formation"), fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY, modifier = Modifier.padding(top = 10.dp))
+        Text(j.optString("playStyle"), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((lab, v, sub) in listOf(Triple("Pressão", pr, Osm.pressureLabel(pr)), Triple("Estilo", me, Osm.mentalityLabel(me)), Triple("Ritmo", te, Osm.tempoLabel(te)))) {
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.dp, Color(0x332AB4FF), RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(lab, fontSize = 12.sp, color = C.MUTED)
+                    Text(v.toString(), fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(sub, fontSize = 11.5.sp, color = C.PRIMARY, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        FlowRow(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+            Pill("Marcação: " + j.optString("marking"))
+            Pill("Fora-de-jogo: " + j.optString("offside"))
+            Pill("Desarme: " + j.optString("tackle"))
+        }
+        d.win?.let { w ->
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Chance de vitória", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.weight(1f))
+                Text("${w.win}%", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = if (w.win >= 50) C.OK else C.GOLD)
+            }
+            Box(Modifier.padding(top = 6.dp)) { WinBar(w, 8.dp) }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SlotTactic(slot: Int, d: SlotData) {
     val ctx = LocalContext.current
@@ -4032,6 +4125,7 @@ private fun SlotTactic(slot: Int, d: SlotData) {
         Hint(Director.ENDED_MSG)
         return
     }
+    TacticHero(d)
     if (d.rivalChanged.isNotEmpty()) RivalChangedCard(d.rivalChanged) { startGeneration(ctx, "tactic", slot) }
     d.rivalPred?.takeIf { it.guesses.isNotEmpty() }?.let { RivalPredictCard(it, known(d.fields, K.RIVAL_NICK)) }
     // Checklist: o que ainda falta ler e em qual tela do OSM (a tática sai melhor com tudo lido).
@@ -4320,7 +4414,7 @@ private fun StepHeader(n: Int, icon: String, title: String, badge: String? = nul
 @Composable
 private fun SlotDirector(slot: Int, d: SlotData) {
     val ctx = LocalContext.current
-    d.progress?.let { EvolutionPanel(it) }
+    d.progress?.let { EvolutionPanel(it, known(d.fields, K.TEAM) ?: known(d.fields, K.HUB_TITLE), slot) }
     val plan = d.marketPlan
     if (plan == null) {
         EmptyState("👕", "Leia o seu elenco primeiro", "No jogo: Plantel do SEU time, role a lista até o fim. Aí o diretor monta treinos, vendas e compras.")
@@ -5311,7 +5405,7 @@ private fun SettingsTab() {
     var pref by remember { mutableStateOf(Settings.get(ctx, Settings.PREFERRED, "auto")) }
     var saved by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        Text("Ajustes", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        PageTitle("⚙", "Ajustes")
         SectionLabel("Avisos", "Como o app te chama quando algo precisa de você")
         NotificationsPanel()
         SectionLabel("Preferências", "Regras do app e táticas da comunidade")
