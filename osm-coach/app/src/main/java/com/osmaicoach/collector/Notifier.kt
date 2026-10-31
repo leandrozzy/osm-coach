@@ -423,6 +423,14 @@ object Notifier {
         post(ctx, CH_GAME, slot * 10 + 6, "⚠ S$slot: $rival mudou a tática", body, slot, 4, false)
     }
 
+    /** Aviso do calendário que venceu sem o alarme local ter tocado (o celular matou o app). */
+    fun postCalendarReminder(ctx: Context, seq: String, title: String, text: String) {
+        ensureChannels(ctx)
+        logFire(ctx, "calendário avisou: " + title.take(40))
+        val slot = Regex("^[tg](\\d)_").find(seq)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        post(ctx, CH_TIMER, 7000 + (seq.hashCode() and 0xFFF), title, text, slot, if (seq.startsWith("g")) 4 else 0, true)
+    }
+
     private fun post(ctx: Context, channel: String, id: Int, title: String, text: String, slot: Int, tab: Int, withOsm: Boolean) {
         if (!canPost(ctx)) { logFire(ctx, "bloqueado: sem permissão de notificação"); return }
         val nmg = ctx.getSystemService(NotificationManager::class.java)
@@ -496,6 +504,24 @@ class BootReceiver : BroadcastReceiver() {
                 KeepAliveService.start(app)
             } catch (e: Exception) {
                 Diag.lastError = "Notificação: " + (e.message ?: e.javaClass.simpleName)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+}
+
+/** Recebe o aviso do sistema de agenda (EVENT_REMINDER) e notifica os lembretes do app que venceram. */
+class CalendarReminderReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val pending = goAsync()
+        val app = context.applicationContext
+        Health.install(app)
+        AppScope.scope.launch(Dispatchers.IO) {
+            try {
+                CalendarSync.onReminder(app)
+            } catch (e: Exception) {
+                Diag.lastError = "Lembrete do calendário: " + (e.message ?: e.javaClass.simpleName)
             } finally {
                 pending.finish()
             }
