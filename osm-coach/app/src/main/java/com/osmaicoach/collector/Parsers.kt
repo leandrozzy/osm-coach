@@ -202,6 +202,8 @@ object Parsers {
             if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick == null) {
                 f[K.RIVAL_HUMAN] = Reading("Não", 0.95)
             }
+            // Sem usuário embaixo do nome do rival e com a força dele à vista: é CPU (se depois aparecer o apelido, "Sim" vence).
+            if (rivalNick == null && rivalStr != null && f[K.RIVAL_HUMAN] == null) f[K.RIVAL_HUMAN] = Reading("Não", 0.7)
             // Humano (nome de usuário embaixo) sem bônus de login hoje: o círculo dele fica na força -> bônus 0%.
             if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick != null) {
                 f[K.RIVAL_LOGIN_BONUS] = Reading("+0%", 0.8)

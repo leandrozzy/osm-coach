@@ -674,7 +674,9 @@ object Coach {
     data class Game(
         val round: Int, val rival: String, val result: String?, val gf: Int?, val ga: Int?,
         val formation: String?, val style: String?, val poss: Int?, val shots: Int?, val oppShots: Int?, val fouls: Int?,
-        val oppFormation: String?, val advice: String?
+        val oppFormation: String?, val advice: String?,
+        /** Força do meu time e do rival naquele jogo (círculos do pré-jogo). */
+        val myStr: Int? = null, val rivalStr: Int? = null
     )
 
     data class Review(val game: Game, val wrong: List<String>, val right: List<String>)
@@ -724,7 +726,8 @@ object Coach {
                     if (gf > ga) "V" else if (gf == ga) "E" else "D", gf, ga,
                     log?.let { opt(it, "formation") }, log?.let { opt(it, "playStyle") },
                     num(side("posse de bola", true), true), num(side("remates", true)), num(side("remates", false)),
-                    num(side("faltas", true)), side("formacao", false), opt(r, "advice")
+                    num(side("faltas", true)), side("formacao", false), opt(r, "advice"),
+                    log?.takeIf { it.has("myStrength") }?.optInt("myStrength")?.takeIf { it > 0 }, log?.takeIf { it.has("rivalStrength") }?.optInt("rivalStrength")?.takeIf { it > 0 }
                 )
             )
         }
@@ -739,7 +742,8 @@ object Coach {
                     opt(l, "formation"), opt(l, "playStyle"),
                     if (l.has("myPossession")) num(l.optString("myPossession"), true) else null,
                     if (l.has("myShots")) l.optInt("myShots") else null, if (l.has("oppShots")) l.optInt("oppShots") else null,
-                    if (l.has("myFouls")) l.optInt("myFouls") else null, opt(l, "oppFormation"), null
+                    if (l.has("myFouls")) l.optInt("myFouls") else null, opt(l, "oppFormation"), null,
+                    if (l.has("myStrength")) l.optInt("myStrength").takeIf { it > 0 } else null, if (l.has("rivalStrength")) l.optInt("rivalStrength").takeIf { it > 0 } else null
                 )
             )
         }

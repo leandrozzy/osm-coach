@@ -49,6 +49,13 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DateRange
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
@@ -64,7 +71,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.LaunchedEffect
@@ -123,10 +132,10 @@ import org.json.JSONObject
 
 // Cores do OSM: azul-marinho de estádio à noite, azul vivo dos botões e o amarelo dos destaques.
 private object C {
-    val BG = Color(0xFF0A1220)
-    val SURFACE = Color(0xFF111B2E)
-    val SURFACE2 = Color(0xFF1A2742)
-    val PRIMARY = Color(0xFF1E9BFF)
+    val BG = Color(0xFF081A3C)
+    val SURFACE = Color(0xFF0F2347)
+    val SURFACE2 = Color(0xFF16325F)
+    val PRIMARY = Color(0xFF2AB4FF)
     val GOLD = Color(0xFFFFC21A)
     val OK = Color(0xFF3DDC84)
     val BAD = Color(0xFFFF5C5C)
@@ -799,42 +808,76 @@ private fun MatchupHero(slot: Int, d: SlotData) {
     val at = known(d.fields, K.MATCH_AT)?.toLongOrNull()
     val home = known(d.fields, K.HOME)
     val human = known(d.fields, K.RIVAL_HUMAN)
-    Box(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF0E2A5A), Color(0xFF16213D), Color(0xFF0B1C3E))))
-            .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp)).padding(14.dp)
-    ) {
-        Column(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Crest(slot, 60.dp)
-                    Text(known(d.fields, K.TEAM) ?: "Meu time", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "VS", fontWeight = FontWeight.ExtraBold, fontSize = 30.sp, color = OsmColors.YELLOW,
-                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                    )
-                    if (at != null) Text(countdown(at).removePrefix("em "), fontSize = 11.5.sp, color = Color(0xCCFFFFFF), modifier = Modifier.padding(top = 4.dp), maxLines = 1)
-                }
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    RivalShield(rival, 60.dp)
-                    Text(rival ?: "rival não lido", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp), color = if (rival == null) C.WARN else Color.White)
-                }
+    val myStr = known(d.fields, K.MY_STRENGTH)?.toIntOrNull()
+    val rivalStr = known(d.fields, K.RIVAL_STRENGTH)?.toIntOrNull()
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(14.dp)) {
+        Text("📅  Próximo jogo", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+        val sub = listOfNotNull(known(d.fields, K.COMPETITION), known(d.fields, K.ROUND)?.let { "Rodada $it" }).joinToString(" • ")
+        if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) { Crest(slot, 64.dp); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(myStr, 30.dp, true) } }
+                Text(known(d.fields, K.TEAM) ?: "Meu time", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp))
             }
-            FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
-                if (at != null) Pill("📅 " + fmtTime(at))
-                if (home != null) Pill(if (home == "Casa") "🏠 em casa" else "✈ fora")
-                if (human != null) Pill(if (human == "Sim") "👤 humano" else "🖥 CPU", human == "Sim")
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (at != null && at > System.currentTimeMillis()) {
+                    val cc = countdownColor(at)
+                    Column(
+                        Modifier.clip(RoundedCornerShape(16.dp)).background(cc.copy(alpha = 0.14f)).border(1.dp, cc.copy(alpha = 0.55f), RoundedCornerShape(16.dp)).padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("Faltam", fontSize = 12.sp, color = C.MUTED)
+                        Text(countdownShort(at), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = cc, maxLines = 1)
+                    }
+                } else if (at != null) {
+                    Text(countdown(at), fontSize = 13.sp, color = C.WARN, textAlign = TextAlign.Center)
+                }
+                Text("VS", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
             }
-            Spacer(Modifier.height(6.dp))
-            Duel("FORÇA", known(d.fields, K.MY_STRENGTH), known(d.fields, K.RIVAL_STRENGTH))
-            val myB = known(d.fields, K.MY_BONUS)
-            val rvB = known(d.fields, K.RIVAL_LOGIN_BONUS)
-            if (myB != null || rvB != null) Duel("BÔNUS %", myB, rvB)
-            Spacer(Modifier.height(6.dp))
-            RefereeMeter(known(d.fields, K.REFEREE), compact = true)
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(rival, 64.dp); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(rivalStr, 30.dp) } }
+                Text(rival ?: "rival não lido", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp), color = if (rival == null) C.WARN else Color.White)
+            }
         }
+        FlowRow(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.Center) {
+            if (at != null) Pill("📅 " + fmtTime(at))
+            if (home != null) Pill(if (home == "Casa") "🏠 em casa" else "✈ fora")
+            if (human != null) Pill(if (human == "Sim") "👤 humano" else "🖥 CPU", human == "Sim")
+        }
+        Spacer(Modifier.height(6.dp))
+        Duel("FORÇA", known(d.fields, K.MY_STRENGTH), known(d.fields, K.RIVAL_STRENGTH))
+        val myB = known(d.fields, K.MY_BONUS)
+        val rvB = known(d.fields, K.RIVAL_LOGIN_BONUS)
+        if (myB != null || rvB != null) Duel("BÔNUS %", myB, rvB)
+        Spacer(Modifier.height(6.dp))
+        RefereeMeter(known(d.fields, K.REFEREE), compact = true)
+    }
+}
+
+/** Dois cartões lado a lado: onde você é melhor que o rival e onde precisa de atenção (a partir dos setores lidos). */
+@Composable
+private fun StrengthsAttention(d: SlotData) {
+    fun n(k: String) = known(d.fields, k)?.toIntOrNull()
+    val sectors = listOf(
+        Triple("Goleiro", n(K.MY_GOL), n(K.RIVAL_GOL)), Triple("Defesa", n(K.MY_DEF), n(K.RIVAL_DEF)),
+        Triple("Meio-campo", n(K.MY_MID), n(K.RIVAL_MID)), Triple("Ataque", n(K.MY_ATK), n(K.RIVAL_ATK))
+    ).filter { it.second != null && it.third != null }
+    val good = sectors.filter { it.second!! - it.third!! >= 3 }.sortedByDescending { it.second!! - it.third!! }.map { "${it.first}: ${it.second} × ${it.third}" }
+    val bad = ArrayList(sectors.filter { it.second!! - it.third!! <= -3 }.sortedBy { it.second!! - it.third!! }.map { "${it.first}: ${it.second} × ${it.third}" })
+    if (known(d.fields, K.RIVAL_HUMAN) == "Sim") bad.add("Rival humano: ele pode trocar a tática; releia a análise perto do jogo")
+    d.win?.let { if (it.win < 40) bad.add("Chance de vitória baixa (${it.win}%)") }
+    if (sectors.isEmpty() && bad.isEmpty()) return
+    @Composable
+    fun Box2(title: String, icon: String, lines: List<String>, col: Color, empty: String, mod: Modifier) {
+        Column(mod.clip(RoundedCornerShape(16.dp)).background(col.copy(alpha = 0.10f)).border(1.3.dp, col.copy(alpha = 0.7f), RoundedCornerShape(16.dp)).padding(12.dp)) {
+            Text("$icon $title", fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold, color = col)
+            if (lines.isEmpty()) Text(empty, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+            for (l in lines.take(4)) Text("• $l", fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box2("Pontos fortes", "✅", good, C.OK, "Nenhum setor claramente melhor", Modifier.weight(1f).fillMaxHeight())
+        Box2("Atenção", "⚠", bad, C.BAD, "Nada preocupante nos setores", Modifier.weight(1f).fillMaxHeight())
     }
 }
 
@@ -1216,7 +1259,10 @@ data class SlotSummary(
     /** Última vez que o app conferiu o rival e a tática gerada continuou valendo (geração automática). */
     val autoChk: Long? = null,
     /** Quando a tática foi gerada sozinha pela última vez. */
-    val autoAt: Long? = null
+    val autoAt: Long? = null,
+    /** Força do meu time e do rival (círculos do pré-jogo). */
+    val myStr: Int? = null,
+    val rivalStr: Int? = null
 )
 
 data class TodayData(val active: Boolean = false, val slots: List<SlotSummary> = emptyList(), val work: List<SlotWork> = emptyList(), val needs: List<Fresh.Need> = emptyList(), val accuracy: Accuracy.Summary? = null)
@@ -1423,6 +1469,7 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
                 rivalChanged = rivalChangesOf(repo, slot),
+                myStr = known(f, K.MY_STRENGTH)?.toIntOrNull(), rivalStr = known(f, K.RIVAL_STRENGTH)?.toIntOrNull(),
                 autoChk = repo.dao.plan(slot, "autogen")?.json?.let { runCatching { JSONObject(it).optLong("chk", 0L) }.getOrNull() }?.takeIf { it > 0L },
                 autoAt = repo.dao.plan(slot, "autogen")?.json?.let { runCatching { JSONObject(it).optLong("at", 0L) }.getOrNull() }?.takeIf { it > 0L }
             )
@@ -1526,17 +1573,22 @@ private fun App() {
     }
     Scaffold(
         containerColor = Color.Transparent,
+        topBar = { BrandBar() },
         floatingActionButton = { if (openSlot == 0) OsmButton() },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF0D1627), tonalElevation = 0.dp) {
+            NavigationBar(containerColor = Color(0xFF071530), tonalElevation = 0.dp) {
                 items.forEachIndexed { i, (icon, name) ->
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i; openSlot = 0 },
-                        icon = { Text(icon, fontSize = 22.sp) },
+                        icon = {
+                            val vec = when (i) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.DateRange; 2 -> Icons.Outlined.List; 3 -> Icons.Outlined.Person; else -> Icons.Outlined.Settings }
+                            Icon(vec, contentDescription = name, modifier = Modifier.size(26.dp))
+                        },
                         label = { Text(name, fontSize = 13.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal) },
                         colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                            indicatorColor = C.PRIMARY.copy(alpha = 0.22f), selectedTextColor = Color.White, unselectedTextColor = C.MUTED
+                            indicatorColor = C.PRIMARY.copy(alpha = 0.20f), selectedTextColor = C.PRIMARY, unselectedTextColor = C.MUTED,
+                            selectedIconColor = C.PRIMARY, unselectedIconColor = C.MUTED
                         )
                     )
                 }
@@ -1767,6 +1819,54 @@ private fun AccuracyCard(s: Accuracy.Summary, scope: String = "") {
     }
 }
 
+/** Barra de marca no topo de todas as telas: nome do app e se a leitura do OSM está ativa. */
+@Composable
+private fun BrandBar() {
+    val ctx = LocalContext.current
+    val tick = rememberTick(3000L)
+    val ready = tick >= 0 && serviceEnabled(ctx) && Diag.serviceConnected
+    val col = if (ready) C.OK else C.BAD
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.ic_launcher_fg), contentDescription = null, modifier = Modifier.size(42.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row {
+                    Text("OSM AI ", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Coach", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY)
+                }
+                Text("Assistente tático e analítico para o OSM", fontSize = 12.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Row(
+                Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.5f), RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(col))
+                Spacer(Modifier.width(6.dp))
+                Text(if (ready) "Online" else "Parado", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = col)
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x662AB4FF), Color.Transparent))))
+    }
+}
+
+/** Título de página como nas referências: ícone, título grande com traço ciano e um chip à direita. */
+@Composable
+private fun PageTitle(icon: String, title: String, chip: String? = null) {
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(icon, fontSize = 26.sp)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+            Box(Modifier.padding(top = 2.dp).width(44.dp).height(3.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
+        }
+        if (chip != null) Box(
+            Modifier.clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, Color(0x552AB4FF), RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 8.dp)
+        ) { Text(chip, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+    }
+}
+
 /** Próximo jogo entre todos os slots: o cartão principal de Hoje (quanto falta, contra quem, chance e o que fazer). */
 @Composable
 private fun NextGameHero(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
@@ -1869,6 +1969,122 @@ private fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
             }
         }
         if (sorted.size > 6) Text("+ ${sorted.size - 6} outras pendências", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+    }
+}
+
+/** Círculo com a força do time (como no pré-jogo do OSM). */
+@Composable
+private fun StrengthBadge(value: Int?, size: Dp = 34.dp, highlight: Boolean = false) {
+    val col = if (highlight) C.PRIMARY else Color(0x992AB4FF)
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(50)).background(Color(0xFF0A1830)).border(2.dp, col, RoundedCornerShape(50)),
+        contentAlignment = Alignment.Center
+    ) { Text(value?.toString() ?: "?", fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.ExtraBold, color = if (value == null) C.MUTED else Color.White) }
+}
+
+/** Barra fina com rótulo e valor (confiança, dados lidos, tática). */
+@Composable
+private fun MetricBar(label: String, pct: Int, valueText: String, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(valueText, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        }
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(Color(0xFF14264A))) {
+            Box(Modifier.fillMaxWidth(pct.coerceIn(0, 100) / 100f).height(6.dp).clip(RoundedCornerShape(50)).background(color))
+        }
+    }
+}
+
+/** Botão grande ciano → azul, como nas referências. */
+@Composable
+private fun CtaButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(if (enabled) listOf(Color(0xFF19C3FF), Color(0xFF1B6BFF)) else listOf(Color(0xFF28406B), Color(0xFF28406B))))
+            .clickable(enabled = enabled) { onClick() }.padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+            Text("  ›", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+/** Cartão do slot: quem joga contra quem (com a força de cada um), quanto falta, três barras e o botão da ação certa. */
+@Composable
+private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit) {
+    val now = System.currentTimeMillis()
+    val at = s.nextAt?.takeIf { it > now && !s.ended && s.state == null }
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().clickable { onOpen() }.padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Brush.horizontalGradient(listOf(Color(0xFF1E88E5), Color(0xFF1565C0)))).padding(horizontal = 10.dp, vertical = 5.dp)) {
+                Text("S${s.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(s.title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (s.known) Color.White else C.MUTED)
+                val kind = when (s.compType) { "Batalha" -> "⚔ Batalha"; "Copa" -> "🏆 Copa"; else -> null }
+                val sub = listOfNotNull(kind, s.competition, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
+                if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            s.win?.takeIf { at != null }?.let { w ->
+                val (txt, col) = if (w.win >= 60) Pair("★ Favorito", C.GOLD) else if (w.win >= 40) Pair("⚖ Equilíbrio", C.PRIMARY) else Pair("⚠ Azarão", C.WARN)
+                Box(Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.6f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    Text(txt, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = col)
+                }
+            }
+        }
+        if (s.state != null || s.ended || at == null) {
+            val msg = when {
+                s.state == "vazio" -> "➕ Sem liga ou batalha. Comece uma no OSM; o app acompanha sozinho."
+                s.state == "preepoca" -> "🗓 Pré-época: a competição nova começa em breve."
+                s.state != null -> "🔎 Procurando adversário. Quando aparecer a jornada, o slot volta ao normal."
+                s.ended -> "🏁 Competição encerrada. Aguardando a próxima."
+                s.needsResult -> "📊 O jogo já passou: registre o resultado para o app aprender."
+                else -> "📖 Leia o Pré-jogo e o Calendário no OSM para o app saber o próximo jogo."
+            }
+            Text(msg, fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).padding(12.dp))
+            if (s.needsResult) CtaButton("Registrar resultado", Modifier.padding(top = 12.dp)) { onTab(5) } else CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }
+            return@Column
+        }
+        // quem joga contra quem
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) { Crest(s.slot, 48.dp); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
+                Text(s.title, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("VS", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = C.MUTED)
+                Column(
+                    Modifier.padding(top = 4.dp).clip(RoundedCornerShape(14.dp)).background(countdownColor(at!!).copy(alpha = 0.14f)).border(1.dp, countdownColor(at).copy(alpha = 0.5f), RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Faltam", fontSize = 11.5.sp, color = C.MUTED)
+                    Text(countdownShort(at), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = countdownColor(at), maxLines = 1)
+                }
+            }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
+                Text(s.rival ?: "rival não lido", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp), color = if (s.rival != null) Color.White else C.WARN)
+            }
+        }
+        s.human?.let { Text(if (it == "Sim") "👤 rival humano" else "🖥 rival CPU", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center) }
+        // três barras
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            val w = s.win
+            MetricBar("Chance de vitória", w?.win ?: 0, w?.let { "${it.win}%" } ?: "—", if ((w?.win ?: 0) >= 50) C.OK else C.GOLD, Modifier.weight(1f))
+            MetricBar("Dados lidos", s.pct, "${s.pct}%", if (s.pct >= 80) C.OK else if (s.pct >= 50) C.GOLD else C.WARN, Modifier.weight(1f))
+            MetricBar("Tática", if (s.tacticReady) 100 else 0, if (s.tacticReady) "pronta" else "falta", if (s.tacticReady) C.OK else C.GOLD, Modifier.weight(1f))
+        }
+        TacticStatusLine(s)
+        val inWindow = at!! - now <= Director.TACTIC_WINDOW_MS
+        when {
+            !s.tacticReady && inWindow -> CtaButton("⚡ Gerar tática", Modifier.padding(top = 12.dp)) { onTab(4) }
+            s.tacticReady -> CtaButton("Ver a tática", Modifier.padding(top = 12.dp)) { onTab(4) }
+            else -> CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }
+        }
     }
 }
 
@@ -2076,15 +2292,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
     val hasKey = Settings.get(ctx, Settings.GEMINI_KEY, "").isNotBlank()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 96.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.ic_launcher_fg), contentDescription = null, modifier = Modifier.size(40.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("OSM AI Coach", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Seu assistente para ganhar sem gastar Boss Coins", fontSize = 12.5.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Pill(if (ready) "Leitura ativa" else "Leitura desligada", ready)
-        }
+        PageTitle("🏠", "Hoje", SimpleDateFormat("EEE, d 'de' MMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() })
 
         KilledBanner(ctx, enabled, connected, batteryOk)
         if (!ready || !batteryOk || !hasKey) SetupBanner(ctx, enabled, connected, batteryOk, hasKey, onGoSettings)
@@ -2130,10 +2338,10 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
         if (msg.isNotBlank()) Text(msg, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
         ProcessCard()
 
-        NextGameHero(data, onOpenSlot)
         TodoCard(data, onOpenSlot)
         Title("Seus slots")
-        for (s in data.slots) SlotRow(s) { onOpenSlot(s.slot, 0) }
+        val nowT = System.currentTimeMillis()
+        for (s in data.slots.sortedBy { sl -> sl.nextAt?.takeIf { it > nowT && !sl.ended && sl.state == null } ?: Long.MAX_VALUE }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
         data.accuracy?.let { AccuracyCard(it) }
         if (data.work.isNotEmpty()) {
@@ -2639,7 +2847,7 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
     val ctx = LocalContext.current
     val tick = rememberTick(6000L)
     val data = rememberLoaded(SlotData(), tick, Pair(slot, UiBus.version)) { loadSlot(ctx, slot) }
-    val tabs = listOf("Resumo", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Diretor", "Aprendizado")
+    val tabs = listOf("Visão geral", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Diretor", "Aprendizado")
     val title = known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2649,6 +2857,12 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("Slot $slot • " + (known(data.fields, K.COMPETITION) ?: if (data.ready) "competição não lida" else ""), color = C.MUTED, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            data.completeness?.let { c ->
+                Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.End) {
+                    Text("Slot ativo", fontSize = 11.5.sp, color = C.MUTED)
+                    Text("${c.percent}%", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = if (c.percent >= 80) C.OK else if (c.percent >= 50) C.GOLD else C.WARN)
+                }
             }
             OsmButton()
         }
@@ -2704,6 +2918,7 @@ private fun SlotSummaryTab(slot: Int, d: SlotData) {
         if (d.board.size > 1) Fold("💬", "Mensagens da direção", d.board.size.toString()) { BoardLines(d.board) }
     } else {
         MatchupHero(slot, d)
+        StrengthsAttention(d)
         Panel { WinCard(d.win) }
     }
     // números da temporada em blocos
@@ -4539,6 +4754,7 @@ private fun GameCard(g: Coach.Game, rv: Coach.Review?) {
                     if (g.formation != null) "Sua tática: ${g.formation}" + (g.style?.let { " • $it" } ?: "") else "Tática não registrada no app",
                     fontSize = 12.5.sp, color = if (g.formation != null) C.GOLD else C.MUTED
                 )
+                if (g.myStr != null || g.rivalStr != null) Text("Força: ${g.myStr ?: "?"} × ${g.rivalStr ?: "?"}", fontSize = 12.5.sp, color = C.MUTED)
             }
             Text(if (open) "▲" else "▼", color = C.MUTED, fontSize = 13.sp)
         }
