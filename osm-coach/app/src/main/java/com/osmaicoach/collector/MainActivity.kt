@@ -1013,9 +1013,11 @@ private fun Steps(s: SlotSummary) {
     val dataOk = s.missing == 0
     val done = listOf(dataOk, s.tacticReady, s.needsResult, false)
     // o "agora" é a primeira etapa de ação pendente (dados não travam: dá para gerar a tática com o que foi lido)
+    // longe do jogo (mais de 8 h) a tática ainda não é pendência: o rival humano pode mudar até lá
+    val far = s.nextAt != null && s.nextAt - System.currentTimeMillis() > Director.TACTIC_WINDOW_MS
     val now = when {
         s.needsResult -> 3
-        !s.tacticReady -> 1
+        !s.tacticReady && !far -> 1
         else -> 2
     }
     val labels = listOf("📋 dados", "⚡ tática", "⚽ jogo", "📊 resultado")
@@ -1054,7 +1056,7 @@ private fun Steps(s: SlotSummary) {
     val msg = when (now) {
         3 -> "👉 Agora: registrar o resultado do jogo"
         1 -> "👉 Agora: gerar a tática" + if (!dataOk) " · faltam ${s.missing} dado${if (s.missing > 1) "s" else ""}" else ""
-        else -> "✓ Tática pronta: aplique no OSM antes do jogo"
+        else -> if (!s.tacticReady && far) "⏳ Jogo longe: gere a tática nas últimas 8 h antes dele" else "✓ Tática pronta: aplique no OSM antes do jogo"
     }
     Text(msg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = nowCol, modifier = Modifier.padding(top = 6.dp))
 }
@@ -2228,7 +2230,7 @@ private suspend fun loadDirector(ctx: Context): List<DirSlot> {
         val freeSeat = seats.firstOrNull { it.state == "empty" || it.state == "done" }
         val next = when {
             s.needsResult -> "registrar o resultado do último jogo"
-            !s.ended && !s.tacticReady && s.nextAt != null -> "gerar a tática do próximo jogo"
+            !s.ended && !s.tacticReady && s.nextAt != null && s.nextAt - System.currentTimeMillis() <= Director.TACTIC_WINDOW_MS -> "gerar a tática do próximo jogo"
             freeSeat != null -> (if (freeSeat.state == "done") "pegar o treino concluído e " else "") +
                 "ocupar o treinador " + (if (freeSeat.role == "UNI") "universal" else freeSeat.role) +
                 (plan?.train?.firstOrNull { (TRAINER_ROLE[it.trainer] ?: "UNI") == freeSeat.role }?.let { " com ${it.name}" } ?: "")
@@ -4472,6 +4474,8 @@ private fun NotificationsPanel() {
         SwitchRow("20 min antes de cada jogo: reler o pré-jogo e a análise do rival", pre) { pre = it; toggle("pre", it) }
         SwitchRow("1 h antes, se a tática da rodada ainda não foi gerada", tac) { tac = it; toggle("tactic", it) }
         SwitchRow("30 min depois do jogo: registrar ou ler o resultado", res) { res = it; toggle("result", it) }
+        var autoT by remember { mutableStateOf(Settings.get(ctx, "auto_tactic", "1") == "1") }
+        SwitchRow("Gerar a tática sozinho depois de ler o Pré-jogo e a Análise do rival (nas 8 h antes do jogo)", autoT) { autoT = it; Settings.put(ctx, "auto_tactic", if (it) "1" else "0") }
         SwitchRow("Alertas do diretor (ao encerrar a leitura e a cada hora, com o app fechado)", dir) { dir = it; toggle("director", it) }
         SwitchRow("Fim de cada treino e de cada obra do estádio (lidos nas telas do OSM)", tim) { tim = it; toggle("timers", it) }
         // Com o app fechado: alarme exato liberado e bateria sem restrição (senão o Android atrasa ou corta os avisos).

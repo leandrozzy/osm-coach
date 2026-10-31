@@ -67,12 +67,16 @@ object Notifier {
     data class Alarm(val kind: String, val at: Long)
 
     /** Alarmes futuros para um jogo: tática (1 h antes), reanálise (20 min antes) e resultado (30 min depois). */
-    fun alarms(nextAt: Long, now: Long): List<Alarm> =
-        listOf(Alarm("tactic", nextAt - 60 * MIN), Alarm("pre", nextAt - 20 * MIN), Alarm("result", nextAt + 30 * MIN))
+    fun alarms(nextAt: Long, now: Long, human: Boolean = false): List<Alarm> =
+        listOf(Alarm("tactic", nextAt - 60 * MIN), Alarm("pre", nextAt - preLead(human) * MIN), Alarm("result", nextAt + 30 * MIN))
             .filter { it.at > now + 5000L }
 
-    /** Já está dentro da janela de 20 minutos (e o jogo ainda não começou)? Então o aviso sai agora. */
-    fun dueNow(nextAt: Long, now: Long): Boolean = now >= nextAt - 20 * MIN && now < nextAt - MIN
+    /** Minutos antes do jogo do aviso de reanálise: contra humano o mais perto possível (ele troca a tática até a última hora),
+     *  ainda com tempo de reler a análise (~2 min), gerar (~1 min) e montar no OSM (~3 min). */
+    fun preLead(human: Boolean): Long = if (human) 12L else 20L
+
+    /** Já está dentro da janela do aviso (e o jogo ainda não começou)? Então o aviso sai agora. */
+    fun dueNow(nextAt: Long, now: Long, human: Boolean = false): Boolean = now >= nextAt - preLead(human) * MIN && now < nextAt - MIN
 
     fun enabled(ctx: Context, key: String): Boolean = Settings.get(ctx, "notif_$key", "1") == "1"
 
@@ -286,14 +290,15 @@ object Notifier {
             val nextAt = (try { repo.syncRound(slot, now).at } catch (e: Exception) { repo.fieldMap(slot)[K.MATCH_AT]?.value?.toLongOrNull() })
                 // competição encerrada: não há jogo para avisar
                 ?.takeIf { !Fixtures.seasonEnded(repo.fieldMap(slot), repo.dao.matchesOf(slot), now) }
-            val wanted = if (nextAt == null) emptyList() else alarms(nextAt, now)
+            val human = repo.fieldMap(slot)[K.RIVAL_HUMAN]?.value == "Sim"
+            val wanted = if (nextAt == null) emptyList() else alarms(nextAt, now, human)
             if (nextAt != null) {
                 // reserva na nuvem (ntfy) dos avisos de jogo
                 val pf = repo.fieldMap(slot)
                 val head = "S$slot • ${pf[K.TEAM]?.value ?: pf[K.HUB_TITLE]?.value ?: "Slot $slot"} vs ${pf[K.RIVAL_TEAM]?.value ?: "adversário"}"
                 for (a in wanted) {
                     if (!enabled(ctx, a.kind)) continue
-                    if (a.kind == "pre") gameItems.add(Push.Item("g${slot}_pre", a.at, "⚽ Faltam 20 min: $head", "Abra o OSM e passe pelo Pré-jogo e pela análise do rival para o app reler os dados e revisar a tática."))
+                    if (a.kind == "pre") gameItems.add(Push.Item("g${slot}_pre", a.at, "⚽ Faltam ${preLead(human)} min: $head", if (human) "Rival HUMANO: abra a Análise do rival agora (ele pode ter trocado a tática), gere a tática de novo se mudou e monte no OSM." else "Abra o OSM e passe pelo Pré-jogo e pela análise do rival para o app reler os dados e revisar a tática."))
                     else if (a.kind == "tactic" && !tacticReady(repo, slot, pf)) gameItems.add(Push.Item("g${slot}_tactic", a.at, "🧠 Falta a tática: $head", "O jogo é em cerca de 1 hora e a tática desta rodada ainda não foi gerada."))
                 }
             }
@@ -314,7 +319,7 @@ object Notifier {
                     p.edit().putLong(key, at).apply()
                 }
             }
-            if (nextAt != null && enabled(ctx, "pre") && dueNow(nextAt, now)) {
+            if (nextAt != null && enabled(ctx, "pre") && dueNow(nextAt, now, human)) {
                 if (p.getLong(firedKey(slot), -1L) != nextAt / MIN) fire(ctx, "pre", slot)
             }
         }
@@ -355,7 +360,8 @@ object Notifier {
             val extra = if (sw > 0) " ⚠ Este usuário já trocou a tática na última hora ($sw de $chk): releia a análise dele AGORA e gere de novo." else ""
             post(
                 ctx, CH_GAME, slot * 10 + 1, "⚽ Faltam $mins min: $head",
-                "Abra o OSM e passe pelo Pré-jogo e pela análise do rival para o app reler os dados (rival humano pode mudar a tática) e revisar a tática.$extra",
+                (if (f[K.RIVAL_HUMAN]?.value == "Sim") "Rival HUMANO: abra a Análise do rival agora (ele pode ter trocado a tática), gere a tática de novo se mudou e monte no OSM antes do jogo."
+                else "Abra o OSM e passe pelo Pré-jogo e pela análise do rival para o app reler os dados (rival humano pode mudar a tática) e revisar a tática.") + extra,
                 slot, 4, true
             )
         } else if (kind == "tactic") {

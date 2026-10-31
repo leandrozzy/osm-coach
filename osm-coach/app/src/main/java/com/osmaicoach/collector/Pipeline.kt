@@ -8,6 +8,8 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
@@ -131,6 +133,53 @@ class FramePipeline private constructor(private val ctx: Context) {
         Diag.log("Tática no OSM → $msg")
         CaptureService.instance?.notice(msg)
     }
+    private val autoTacticAt = HashMap<Int, Long>()
+
+    /**
+     * Gera a tática sozinho depois de ler o Pré-jogo ou a Análise do rival (só nas últimas horas antes do jogo e só se o
+     * que importa mudou: rival, formação/estilo dele, força, árbitro, treino secreto). Avisa por cima do jogo quando
+     * ficou pronta, para montar no OSM na hora.
+     */
+    private suspend fun autoTactic(slot: Int, now: Long) {
+        if (Settings.get(ctx, "auto_tactic", "1") != "1") return
+        val f = repo.fieldMap(slot)
+        val st = f[K.SLOT_STATE]?.value
+        if (!(st == null || st == "ativo") || f[K.TEAM]?.value == null) return
+        val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull() ?: return
+        if (matchAt <= now + 60_000L || matchAt - now > Director.TACTIC_WINDOW_MS) return
+        if (Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return
+        if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
+        if (now - (autoTacticAt[slot] ?: 0L) < 25_000L) return
+        val sig = listOf(
+            K.ROUND, K.RIVAL_TEAM, K.RIVAL_NICK, K.RIVAL_STRENGTH, K.MY_STRENGTH, K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE,
+            K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET, K.REFEREE, K.HOME
+        ).joinToString("|") { f[it]?.value.orEmpty() }
+        val old = repo.dao.plan(slot, "autogen")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val p = repo.dao.plan(slot, "tactic")
+        val valid = p != null && runCatching { Director.tacticValid(JSONObject(p.json), p.at, f, now) }.getOrDefault(false)
+        val same = old?.optString("sig") == sig
+        // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
+        if (same && valid) return
+        if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
+        repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
+        autoTacticAt[slot] = now
+        val rivalChanged = valid && old != null && !same
+        CaptureService.instance?.notice("S$slot: " + (if (rivalChanged) "o rival mudou; gerando a tática de novo…" else "gerando a tática…"))
+        startGeneration(ctx, "tactic", slot)
+        AppScope.scope.launch {
+            var waited = 0
+            while (GenState.running("tactic", slot) && waited < 150) { delay(1000L); waited++ }
+            val job = GenState.get("tactic", slot)
+            val j = repo.dao.plan(slot, "tactic")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+            val msg = if (job?.ok == true && j != null) {
+                "✅ S$slot: tática pronta" + (if (rivalChanged) " (rival mudou)" else "") + ": ${j.optString("formation")} • ${j.optString("playStyle")}. Monte no OSM: toque em 📱 App ou abra a tela de Tática."
+            } else "⚠ S$slot: não consegui gerar a tática sozinho" + (job?.error?.let { ": $it" } ?: "") + ". Gere no app."
+            CaptureService.instance?.notice(msg)
+            // o rival pode ter mudado enquanto gerava (Análise lida logo depois do Pré-jogo): confere de novo
+            runCatching { autoTactic(slot, System.currentTimeMillis()) }
+        }
+    }
+
     private var seasonSlot: Int? = null
     private var seasonSlotAt = 0L
     private var reportCandidates = 0
@@ -450,6 +499,9 @@ class FramePipeline private constructor(private val ctx: Context) {
                     changed += repo.recordSeasonScreen(ss, sr, now)
                     Diag.log("Fim de temporada/direção → S$ss" + (sr.rank?.let { " (${it}º lugar)" } ?: "") + (if (sr.over) " • competição encerrada" else ""))
                 }
+            }
+            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT) && asgSlot != null && changed > 0) {
+                try { autoTactic(asgSlot, now) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }

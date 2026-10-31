@@ -343,3 +343,29 @@ class IntelTest {
         assertTrue(b.mentality > t.mentality)
     }
 }
+
+class HumanPriorTest {
+    private fun g(f: String, st: String, m: Int, res: String, my: Int, rv: Int) =
+        org.json.JSONObject().put("formation", f).put("playStyle", st).put("mentality", m).put("result", res).put("human", true).put("myStrength", my).put("rivalStrength", rv)
+
+    @org.junit.Test fun learnsWhatWinsAndLosesAgainstHumans() {
+        val logs = List(6) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) } +
+            List(6) { g("5-4-1 A", "Contra-ataque", 38, "D", 70, 78) } + List(3) { g("5-3-2", "Contra-ataque", 40, "E", 74, 78) }
+        val p = HumanPrior.build(logs, null)!!
+        val good = HumanPrior.bonus(p, "4-3-3 B", "Jogar pelas alas", 70)
+        val bad = HumanPrior.bonus(p, "5-4-1 A", "Contra-ataque", 38)
+        org.junit.Assert.assertTrue(good > 0.1 && bad < -0.1 && good <= 0.5 && bad >= -0.5)
+        org.junit.Assert.assertNotNull(HumanPrior.note(p, "4-3-3 A", "Jogar pelas alas", 70))
+    }
+
+    @org.junit.Test fun fewGamesGiveNoPrior() {
+        org.junit.Assert.assertNull(HumanPrior.build(List(4) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) }, null))
+    }
+
+    @org.junit.Test fun humanGamesAreRemindedCloserToKickoff() {
+        val t0 = 10_000_000L
+        val human = Notifier.alarms(t0, 0L, human = true).first { it.kind == "pre" }.at
+        val cpu = Notifier.alarms(t0, 0L).first { it.kind == "pre" }.at
+        org.junit.Assert.assertTrue(human > cpu && t0 - human >= 10 * 60_000L)
+    }
+}
