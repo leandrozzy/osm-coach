@@ -113,6 +113,13 @@ object CalendarSync {
         return id
     }
 
+    private fun eventText(ctx: Context, id: Long): Pair<String, String>? = runCatching {
+        ctx.contentResolver.query(
+            ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
+            arrayOf(CalendarContract.Events.TITLE, CalendarContract.Events.DESCRIPTION), null, null, null
+        )?.use { c -> if (c.moveToFirst()) Pair(c.getString(0).orEmpty(), c.getString(1).orEmpty()) else null }
+    }.getOrNull()
+
     private fun deleteEvent(ctx: Context, id: Long): Boolean =
         runCatching { ctx.contentResolver.delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), null, null) >= 0 }.getOrDefault(false)
 
@@ -162,7 +169,11 @@ object CalendarSync {
             for ((seq, v) in m.entries.toList()) {
                 if (v.first > now + 60_000L || v.first < now - 6 * 3600_000L) continue
                 val t = tx.optJSONArray(seq)
-                Notifier.postCalendarReminder(ctx, seq, t?.optString(0).orEmpty().ifBlank { "OSM Coach" }, t?.optString(1).orEmpty())
+                // título e texto vêm do próprio evento (vale também para eventos criados antes de guardarmos o texto)
+                val ev = eventText(ctx, v.second)
+                val title = ev?.first?.takeIf { it.isNotBlank() } ?: t?.optString(0).orEmpty().ifBlank { "Aviso do OSM Coach" }
+                val body = ev?.second?.takeIf { it.isNotBlank() } ?: t?.optString(1).orEmpty()
+                Notifier.postCalendarReminder(ctx, seq, title, body)
                 deleteEvent(ctx, v.second)
                 m.remove(seq); tx.remove(seq); changed = true
             }
