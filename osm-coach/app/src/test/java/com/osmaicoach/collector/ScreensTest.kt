@@ -56,6 +56,23 @@ class ScreensTest {
         assertEquals("GIORGIAN DE ARRASCAETA", j.getString("escanteio"))
     }
 
+    @Test fun doctorTreatmentScreenWithoutTitleIsRecognized() {
+        val o = Fx.ocr(
+            Fx.line("10 VALENTÍN BARCO", 0.25f, 0.28f), Fx.line("Tíbia partida", 0.25f, 0.84f),
+            Fx.line("Tratamento em curso...", 0.75f, 0.30f), Fx.line("5h 40m 23s", 0.75f, 0.67f), Fx.line("Tratar imediatamente", 0.75f, 0.75f)
+        )
+        assertEquals(ScreenType.DOCTOR, Screens.classify(Txt.norm(o.fullText)))
+        val r = Screens.roster(o)
+        assertEquals(true, r.getBoolean("busy"))
+        assertEquals(5 * 3600L + 40 * 60 + 23, r.getLong("endsIn"))
+    }
+
+    @Test fun lawyerSaysNoAppealIsRead() {
+        val o = Fx.ocr(Fx.line("Advogado", 0.9f, 0.9f), Fx.line("Lawrence Bailey", 0.9f, 0.95f), Fx.line("Sinto muito, não posso apresentar recurso!", 0.5f, 0.5f))
+        assertEquals(true, Screens.roster(o).getBoolean("noAppeal"))
+        assertEquals(false, Screens.roster(Fx.ocr(Fx.line("Rodrigo Zalazar", 0.2f, 0.4f))).getBoolean("noAppeal"))
+    }
+
     @Test fun rosterEmptyMessage() {
         val j = Screens.roster(Fx.ocr(Fx.line("Não tens qualquer jogador lesionado neste momento.", 0.4f, 0.8f, 0.4f)))
         assertTrue(j.getBoolean("empty"))

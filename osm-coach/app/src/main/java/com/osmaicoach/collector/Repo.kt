@@ -766,6 +766,12 @@ class Repo(private val ctx: Context) {
                     if (secs != null) updateTimers(slot, mapOf(tk to Pair(now + secs * 1000L, if (tk == "lawyer") "advogado: recurso" else "médico: tratamento")), now)
                     else if (!x.optBoolean("busy")) updateTimers(slot, mapOf(tk to null), now)
                 }
+                if (ex.type == ScreenType.LAWYER) {
+                    // sem recurso possível: vale até passar a rodada (a suspensão cumpre sozinha)
+                    val round = fieldMap(slot)[K.ROUND]?.value?.toIntOrNull() ?: -1
+                    if (x.optBoolean("noAppeal")) dao.putPlan(PlanEntity(slot, "noappeal", JSONObject().put("round", round).put("at", now).toString(), now))
+                    else if (!x.optBoolean("empty") && planJson(slot, "noappeal").length() > 0) dao.putPlan(PlanEntity(slot, "noappeal", "{}", now))
+                }
                 val kind = if (ex.type == ScreenType.DOCTOR) "injured" else "suspended"
                 val mine = dao.playersOf(slot).filter { it.owner == "MY" }
                 val lines = x.optJSONArray("lines")

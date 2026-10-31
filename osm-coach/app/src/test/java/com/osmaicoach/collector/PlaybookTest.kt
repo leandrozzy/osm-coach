@@ -15,6 +15,15 @@ class PlaybookTest {
         p("Atk A", "ATA", 23, 83, "10M"), p("Atk B", "ATA", 26, 80, "8M"), p("Atk C", "ATA", 30, 71, "2M")
     )
 
+    @Test fun noLawyerTipWhenNoAppealIsPossible() {
+        val base = Playbook.Input(
+            squad, setOf("gka"), 3.0, listedUsed = 1, capLevel = 1, pitchLevel = 1, trainLevel = 1, stadiumBuilding = false,
+            round = 2, roundTotal = 22, seats = emptyList(), matchAt = 5_000L, now = 0L, suspended = setOf("atka")
+        )
+        assertTrue(Playbook.tips(base).any { it.title.contains("advogado") })
+        assertTrue(Playbook.tips(base.copy(noAppeal = true)).none { it.title.contains("advogado") })
+    }
+
     @Test fun suspendedStarterTrainingIsNotAClash() {
         val xi = setOf("gka", "defa", "defb", "defc", "mida", "midb", "midc", "atka", "atkb", "atkc", "defd")
         val tips = Playbook.tips(

@@ -587,6 +587,9 @@ object Director {
         return true
     }
 
+    /** Só pede a tática nas últimas horas antes do jogo: antes disso o rival humano ainda pode mudar tudo. */
+    const val TACTIC_WINDOW_MS = 8L * 3600_000L
+
     suspend fun tacticReady(repo: Repo, slot: Int): Boolean {
         val p = repo.dao.plan(slot, "tactic") ?: return false
         val j = try { JSONObject(p.json) } catch (e: Exception) { return false }

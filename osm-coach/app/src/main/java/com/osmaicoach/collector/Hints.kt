@@ -58,6 +58,8 @@ object Hints {
         val prep = repo.dao.plan(slot, "prep")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optJSONObject(k)?.optBoolean("done") ?: false } } } ?: emptyMap()
         val prepAt = repo.dao.plan(slot, "prep")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().mapNotNull { k -> o.optJSONObject(k)?.optLong("at") }.maxOrNull() } }
         val (inj, susp) = repo.outByDoctorOrLawyer(slot)
+        val noAppeal = repo.dao.plan(slot, "noappeal")?.json?.let { j -> runCatching { JSONObject(j).optInt("round", -2) }.getOrDefault(-2) }
+            ?.let { r -> r != -2 && r == (f[K.ROUND]?.value?.toIntOrNull() ?: -1) } ?: false
         val yellow = repo.dao.plan(slot, "cards")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() } } ?: emptySet()
         val spec = repo.dao.plan(slot, "spec")?.json?.let { j -> JSONObject(j).let { o -> Screens.SPEC_ROLES.filter { o.has(it) }.associateWith { o.optString(it) } } } ?: emptyMap()
         val state = f[K.SLOT_STATE]?.value
@@ -79,6 +81,7 @@ object Hints {
                 trainLevel = f[K.MY_STAD_TRAIN]?.value?.toIntOrNull(),
                 stadiumBuilding = timers.any { it.key.startsWith("stad_") && it.at > now },
                 lawyerBusy = timers.any { it.lawyer && it.at > now },
+                noAppeal = noAppeal,
                 doctorBusy = timers.any { it.doctor && it.at > now },
                 listings = repo.dao.listingsOf(slot),
                 round = kv(f, K.ROUND)?.toIntOrNull(), roundTotal = kv(f, K.ROUND_TOTAL)?.toIntOrNull(),
@@ -138,7 +141,7 @@ object Hints {
         val tj = tp?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val tacticOk = tp != null && tj != null && Director.tacticValid(tj, tp.at, f, now)
         val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
-        val gameSoon = matchAt != null && matchAt > now && matchAt - now <= 24L * 3600000L
+        val gameSoon = matchAt != null && matchAt > now && matchAt - now <= Director.TACTIC_WINDOW_MS
         val ch = rivalChangesOf(repo, slot)
         if (activeSlot && tacticOk.not() && gameSoon) pend.add(Hint("⚡", "Gere a tática deste jogo no app", "Toque em 📱 App → Slots → Tática → Gerar.", true))
         if (activeSlot && ch.isNotEmpty()) pend.add(Hint("⚠", "O rival mudou: gere a tática de novo", RivalWatch.headline(ch), true))

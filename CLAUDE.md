@@ -25,7 +25,7 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
     `Learn` (`Learned`, regressão sobre gols reais), `Director` (validadores, geração de tática/mercado), `Smart`
     (`OsmEvents`, `SellPrices`, `Sponsors`, `TrainLearn`, `RivalPredict`), `Playbook` (dicas), `Hints` (bolha/Diretor),
     `Fresh` ("telas para atualizar": só pede o que muda uma decisão — calendário só sem jogo conhecido, preparação ≤3 h do jogo,
-    Médico/Advogado só após um jogo), `Screens` (leitores das telas novas), `Progress` (inclui `Accuracy`: % de acerto da previsão V/E/D
+    Médico/Advogado só após um jogo; tática só vira pendência nas 8 h antes do jogo: `Director.TACTIC_WINDOW_MS`; advogado que diz "não posso apresentar recurso" cala a dica até a rodada mudar: plano `noappeal`), `Screens` (leitores das telas novas), `Progress` (inclui `Accuracy`: % de acerto da previsão V/E/D
     contra o resultado real, com dicas), `RivalWatch`.
   - Avisos: `Notifier` (alarmes locais) + `Push` (reserva na nuvem via ntfy.sh, opt-in em Ajustes: agenda cada aviso no
     servidor com `sequence_id` fixo; cancela quando o alarme local toca) + `CalendarSync` (reserva: lembretes num calendário local

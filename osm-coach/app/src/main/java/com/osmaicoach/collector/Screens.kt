@@ -20,6 +20,7 @@ object Screens {
         // o menu lateral lista os dois; a tela de cada um tem só o seu nome e o aviso de "ninguém"/a lista
         t.contains("medico") && !t.contains("advogado") &&
             (t.contains("lesion") || t.contains("lesao") || t.contains("nao tens") || t.contains("tratamento") || t.contains("tratar")) -> ScreenType.DOCTOR
+        t.contains("tratamento em curso") && t.contains("tratar imediatamente") -> ScreenType.DOCTOR
         t.contains("advogado") && !t.contains("medico") &&
             (t.contains("suspens") || t.contains("expuls") || t.contains("castig") || t.contains("nao tens") || t.contains("recurso") || t.contains("recorr")) -> ScreenType.LAWYER
         Regex("acordo de patrocinio").findAll(t).count() >= 2 -> ScreenType.SPONSORS
@@ -79,7 +80,10 @@ object Screens {
         // Advogado "A apresentar recurso..." + cronômetro: recurso em andamento
         val busy = t.contains("a apresentar recurso") || t.contains("tratamento em curso")
         val secs = if (busy) o.lines.mapNotNull { Parsers.timerSecs(it.text) }.firstOrNull() else null
-        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("endsIn", secs ?: JSONObject.NULL)
+        // o advogado avisa que não dá para recorrer (ex.: "não posso apresentar recurso!"): sem dica de mandar ao advogado
+        val noAppeal = t.contains("nao posso apresentar recurso") || t.contains("nao ha recurso") || t.contains("nao e possivel recorrer") ||
+            t.contains("nao podes recorrer") || t.contains("nao pode recorrer")
+        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
     }
 
     // ------------------------------------------------------------ especialistas
