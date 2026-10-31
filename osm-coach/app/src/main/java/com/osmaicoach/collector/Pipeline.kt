@@ -134,6 +134,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         CaptureService.instance?.notice(msg)
     }
     private val autoTacticAt = HashMap<Int, Long>()
+    private val autoNoticeAt = HashMap<Int, Long>()
 
     /**
      * Gera a tática sozinho depois de ler o Pré-jogo ou a Análise do rival (só nas últimas horas antes do jogo e só se o
@@ -146,8 +147,17 @@ class FramePipeline private constructor(private val ctx: Context) {
         val st = f[K.SLOT_STATE]?.value
         if (!(st == null || st == "ativo") || f[K.TEAM]?.value == null) return
         val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull() ?: return
-        if (matchAt <= now + 60_000L || matchAt - now > Director.TACTIC_WINDOW_MS) return
+        if (matchAt <= now + 60_000L) return
         if (Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return
+        if (matchAt - now > Director.TACTIC_WINDOW_MS) {
+            // longe do jogo: explica por que nada foi gerado (no máx. 1 vez a cada 5 min por slot)
+            if (now - (autoNoticeAt[slot] ?: 0L) > 300_000L) {
+                autoNoticeAt[slot] = now
+                val h = (matchAt - now) / 3600000L
+                CaptureService.instance?.notice("S$slot: jogo em ${h}h. A tática é gerada sozinha quando faltarem 8 h (o rival humano ainda pode mudar até lá).")
+            }
+            return
+        }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
         if (now - (autoTacticAt[slot] ?: 0L) < 25_000L) return
         val sig = listOf(
@@ -159,7 +169,14 @@ class FramePipeline private constructor(private val ctx: Context) {
         val valid = p != null && runCatching { Director.tacticValid(JSONObject(p.json), p.at, f, now) }.getOrDefault(false)
         val same = old?.optString("sig") == sig
         // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
-        if (same && valid) return
+        if (same && valid) {
+            if (now - (autoNoticeAt[slot] ?: 0L) > 60_000L) {
+                autoNoticeAt[slot] = now
+                repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).put("chk", now).toString(), now))
+                CaptureService.instance?.notice("✅ S$slot: o rival não mudou a tática — a tática gerada continua valendo.")
+            }
+            return
+        }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
         repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
         autoTacticAt[slot] = now
@@ -500,7 +517,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                     Diag.log("Fim de temporada/direção → S$ss" + (sr.rank?.let { " (${it}º lugar)" } ?: "") + (if (sr.over) " • competição encerrada" else ""))
                 }
             }
-            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT) && asgSlot != null && changed > 0) {
+            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT) && asgSlot != null) {
                 try { autoTactic(asgSlot, now) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
