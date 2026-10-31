@@ -4629,7 +4629,7 @@ private fun NotificationsPanel() {
     }
     Fold("📅", "Lembretes no calendário do celular", if (cal) "ligados" else "desligados") {
         Text(
-            "A reserva mais firme: o aviso de fim de treino/obra e de jogo vira um lembrete num calendário próprio (\"OSM Coach avisos\") e quem toca é o app Calendário do Android, que o celular não fecha junto com o app. Precisa da permissão do calendário.",
+            "Notificação normal, como a de qualquer app: o aviso de fim de treino/obra e de jogo vira um evento na sua agenda do Google (se não houver conta Google, num calendário local) e quem avisa é o app Calendário, que o celular não fecha junto com este app. Confira que o app Calendário do Google está instalado e com notificações ligadas. Precisa da permissão do calendário.",
             fontSize = 12.sp, color = C.MUTED
         )
         SwitchRow("Ligar lembretes no calendário", cal) { v ->

@@ -45,7 +45,23 @@ object CalendarSync {
         prefs(ctx).edit().putString("ev", j.toString()).apply()
     }
 
+    /** Agenda principal da conta Google (a que o app Calendário do Google já avisa): é a que o celular acorda de verdade. */
+    private fun googleCalendarId(ctx: Context): Long? {
+        val cr = ctx.contentResolver
+        cr.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.OWNER_ACCOUNT, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.VISIBLE),
+            "${CalendarContract.Calendars.ACCOUNT_TYPE}=?", arrayOf("com.google"), null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                if (c.getInt(3) >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR && c.getInt(4) == 1 && c.getString(1) == c.getString(2)) return c.getLong(0)
+            }
+        }
+        return null
+    }
+
     private fun calendarId(ctx: Context): Long? {
+        googleCalendarId(ctx)?.let { return it }
         val cr = ctx.contentResolver
         cr.query(
             CalendarContract.Calendars.CONTENT_URI, arrayOf(CalendarContract.Calendars._ID),
@@ -140,6 +156,7 @@ object CalendarSync {
         lock.withLock {
             runCatching {
                 val cal = calendarId(ctx) ?: return@runCatching false
+                Notifier.logFire(ctx, if (cal == googleCalendarId(ctx)) "calendário: usando a agenda do Google" else "calendário: usando agenda local (sem conta Google)")
                 val m = read(ctx)
                 m["test"]?.let { deleteEvent(ctx, it.second) }
                 val start = System.currentTimeMillis() + 2 * 60_000L
