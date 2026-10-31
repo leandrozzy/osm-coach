@@ -689,8 +689,9 @@ object Director {
         val scen = scenarios(repo, slot, base)
         val hist = history(repo, slot)
         val lost = lostAgainst(repo, slot)
-        val draftPts = score(rules.tactic, rules.rows, scen, hist, lost)
-        val cands = candidates(rules, inp, scen, hist, lost)
+        val prior = if (inp.rivalHuman == true) HumanPrior.build(allLogs(repo), rules.diff) else null
+        val draftPts = score(rules.tactic, rules.rows, scen, hist, lost, prior)
+        val cands = candidates(rules, inp, scen, hist, lost, prior)
         val top = cands.firstOrNull()
         // Exploração: com duas opções praticamente empatadas, testa a menos usada (assim o app aprende qual é melhor).
         fun used(c: Cand): Int = hist.count { Formations.base(it.formation) == Formations.base(c.tactic.formation) && it.playStyle == c.tactic.playStyle }
@@ -708,6 +709,7 @@ object Director {
                 "Simulação: ${best.tactic.formation} • ${best.tactic.playStyle} rende ${"%.2f".format(best.points)} pontos esperados " +
                     "contra ${"%.2f".format(draftPts)} da regra."
             )
+            prior?.let { HumanPrior.note(it, best.tactic.formation, best.tactic.playStyle, best.tactic.mentality) }?.let { why.add(it) }
             if (scen.size > 1) why.add("Rival humano: testada contra ${scen.size - 1} táticas que ele pode usar (as dele já vistas ou as mais comuns entre humanos), não só a atual.")
             if (lost.isNotEmpty()) why.add("Evitei o que já perdeu para este rival: ${lost.keys.joinToString { it.replace("|", " • ") }}.")
             rules.copy(tactic = best.tactic.copy(notes = why + rules.tactic.notes), rows = best.rows)
@@ -872,7 +874,7 @@ object Director {
     }
 
     /** Nota de uma tática: pontos esperados médios nos cenários do rival, menos o que já deu errado contra ele. */
-    private fun score(t: Tactic, rows: List<List<PlayerEntity?>>, scen: List<Pair<WinModel.Input, Double>>, hist: List<HistRow>, lost: Map<String, Int>): Double? {
+    private fun score(t: Tactic, rows: List<List<PlayerEntity?>>, scen: List<Pair<WinModel.Input, Double>>, hist: List<HistRow>, lost: Map<String, Int>, prior: HumanPrior.Prior? = null): Double? {
         val sp = simPlan(t, rows)
         var sum = 0.0
         var wsum = 0.0
@@ -889,7 +891,7 @@ object Director {
         // média e pior caso pesam juntos. Contra CPU só há o cenário lido.
         val mean = sum / wsum
         val robust = if (scen.size > 1) 0.6 * mean + 0.4 * worst else mean
-        return robust - penalty
+        return robust - penalty + (prior?.let { HumanPrior.bonus(it, t.formation, t.playStyle, t.mentality) } ?: 0.0)
     }
 
     /** As 3 melhores das regras e, contra rival bem mais fraco, sempre as formações de 3 atacantes. */
@@ -910,7 +912,7 @@ object Director {
 
     private fun candidates(
         res: TacticEngine.Result, inp: TacticEngine.Input, scen: List<Pair<WinModel.Input, Double>>,
-        hist: List<HistRow>, lost: Map<String, Int>
+        hist: List<HistRow>, lost: Map<String, Int>, prior: HumanPrior.Prior? = null
     ): List<Cand> {
         val out = ArrayList<Cand>()
         val t0 = res.tactic
@@ -951,7 +953,7 @@ object Director {
             rowsBy[f] = rows
             for (st in SIM_STYLES) for (dm in listOf(-12, 0, 12)) {
                 val t = build(f, st, dm, tk0, off0, t0.marking, t0.advMid, t0.advAttack, 0)
-                val ep = score(t, rows, scen, hist, lost) ?: continue
+                val ep = score(t, rows, scen, hist, lost, prior) ?: continue
                 coarse.add(Coarse(f, st, dm, ep))
                 out.add(Cand(t, rows, ep))
             }
@@ -960,7 +962,7 @@ object Director {
             val rows = rowsBy[c.f] ?: continue
             for (tk in tackles) for (off in offs) for (mk in listOf("À zona", "Homem-a-homem")) for (md in mids) for (aa in atks) for (dt in tempos) {
                 val t = build(c.f, c.st, c.dm, tk, off, mk, md, aa, dt)
-                val ep = score(t, rows, scen, hist, lost) ?: continue
+                val ep = score(t, rows, scen, hist, lost, prior) ?: continue
                 out.add(Cand(t, rows, ep))
             }
         }
@@ -1018,7 +1020,8 @@ object Director {
     private class Prep(
         val inp: TacticEngine.Input, val res: TacticEngine.Result, val f: Map<String, StoredField>, val round: Int?, val rival: String?,
         val hist: List<HistRow>, val base: WinModel.Input, val scen: List<Pair<WinModel.Input, Double>>, val lost: Map<String, Int>,
-        val draftProb: WinModel.Prob?, val draftPts: Double, val best: Cand?, val allowed: List<String>, val prompt: String
+        val draftProb: WinModel.Prob?, val draftPts: Double, val best: Cand?, val allowed: List<String>, val prompt: String,
+        val prior: HumanPrior.Prior? = null
     )
 
     private suspend fun prep(repo: Repo, slot: Int): Prep? {
@@ -1037,9 +1040,10 @@ object Director {
         AiStatus.set("Simulando táticas alternativas…")
         val scen = scenarios(repo, slot, base)
         val lost = lostAgainst(repo, slot)
-        val cands = candidates(res, inp, scen, hist, lost)
+        val prior = if (inp.rivalHuman == true) HumanPrior.build(allLogs(repo), res.diff) else null
+        val cands = candidates(res, inp, scen, hist, lost, prior)
         val draftProb = prob(res.tactic, res.rows)
-        val draftPts = score(res.tactic, res.rows, scen, hist, lost) ?: draftProb?.points ?: 0.0
+        val draftPts = score(res.tactic, res.rows, scen, hist, lost, prior) ?: draftProb?.points ?: 0.0
         val best = cands.firstOrNull()
         val table = cands.distinctBy { it.tactic.formation + it.tactic.playStyle }.take(8).joinToString("\n") { c ->
             val p = prob(c.tactic, c.rows)
@@ -1062,10 +1066,19 @@ object Director {
         // a IA pode escolher qualquer formação que o elenco consiga montar (antes só as 3 do cálculo)
         val allowed = Formations.BASES.filter { TacticEngine.lineup(it, inp.players, inp.fitness) != null }
         val allowedNames = allowed.flatMap { Formations.variants(it).ifEmpty { listOf(it) } }
-        val learned = learnedText(inp, res.diff)
+        // contra humano: o que os jogos reais dele mostram por formação/estilo/mentalidade (a IA vê os mesmos números)
+        val priorLines = prior?.let { p ->
+            listOfNotNull(
+                "Seus jogos reais contra humanos (${p.bucket}, ${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo):",
+                p.form.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} pts/jogo em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "formação — $it" },
+                p.style.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "estilo — $it" },
+                p.ment.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "mentalidade — $it" }
+            ).joinToString("\n")
+        }
+        val learned = learnedText(inp, res.diff) + (priorLines?.let { "\n" + it } ?: "")
 
         val prompt = tacticRefinePrompt(context(repo, slot), draft, pct(draftProb), table, stats, learned, allowedNames, Osm.allowedTackles(inp.referee), base.learned?.trusted == true)
-        return Prep(inp, res, f, round, rival, hist, base, scen, lost, draftProb, draftPts, best, allowed, prompt)
+        return Prep(inp, res, f, round, rival, hist, base, scen, lost, draftProb, draftPts, best, allowed, prompt, prior)
     }
 
     /** Jogos dos 4 slots em situação parecida, com a tática, o motivo da IA na época e o resultado. */
@@ -1167,7 +1180,7 @@ object Director {
                 val rows = TacticEngine.lineup(t2.formation, inp.players, inp.fitness)?.first
                 if (okLimits && rows != null) {
                     val t = t2
-                    val pts = score(t, rows, scen, hist, lost) ?: prob(t, rows)?.points ?: 0.0
+                    val pts = score(t, rows, scen, hist, lost, pp.prior) ?: prob(t, rows)?.points ?: 0.0
                     val bestPts = best?.points ?: pts
                     val repeated = same(t, res.tactic)
                     val provenT = proven(hist, t)

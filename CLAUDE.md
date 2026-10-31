@@ -22,12 +22,12 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
   - Dados: `Db` (Room `osm_coach.db`, **version = 1, exportSchema=false, sem migrações**), `Repo` (regras de gravação,
     `apply`, `applyExtra`, `noteScreen`, timers, dedupe do elenco), `Merge` (fusão de campos).
   - Decisão: `Engine` (`TacticEngine`, `Formations`), `Intel` (`WinModel` Poisson, `Fixtures`, `Evidence`, `Coach`),
-    `Learn` (`Learned`, regressão sobre gols reais), `Director` (validadores, geração de tática/mercado), `Smart`
+    `Learn` (`Learned`, regressão sobre gols reais), `HumanPrior` (pts/jogo reais contra humanos por formação/estilo/mentalidade e faixa de força, 4 slots; vira bônus ±0,5 na nota da simulação e vai ao prompt da IA; diagnóstico de 31/10: 28 derrotas em 58 jogos contra humano, postura defensiva ≈0,5 pts/jogo, 4-3-3 + alas ≈2,0), `Director` (validadores, geração de tática/mercado), `Smart`
     (`OsmEvents`, `SellPrices`, `Sponsors`, `TrainLearn`, `RivalPredict`), `Playbook` (dicas), `Hints` (bolha/Diretor),
     `Fresh` ("telas para atualizar": só pede o que muda uma decisão — calendário só sem jogo conhecido, preparação ≤3 h do jogo,
     Médico/Advogado só após um jogo; tática só vira pendência nas 8 h antes do jogo: `Director.TACTIC_WINDOW_MS`; advogado que diz "não posso apresentar recurso" cala a dica até a rodada mudar: plano `noappeal`), `Screens` (leitores das telas novas), `Progress` (inclui `Accuracy`: % de acerto da previsão V/E/D
     contra o resultado real, com dicas), `RivalWatch`.
-  - Avisos: `Notifier` (alarmes locais) + `Push` (reserva na nuvem via ntfy.sh, opt-in em Ajustes: agenda cada aviso no
+  - Avisos: `Notifier` (alarmes locais; aviso "pre" a 12 min do jogo contra humano, 20 min contra CPU: `preLead`) + `Push` (reserva na nuvem via ntfy.sh, opt-in em Ajustes: agenda cada aviso no
     servidor com `sequence_id` fixo; cancela quando o alarme local toca) + `CalendarSync` (reserva: lembretes num calendário local
     "OSM Coach avisos", prefere a agenda principal do Google; o app também recebe o broadcast `EVENT_REMINDER` do provedor (`CalendarReminderReceiver`) e notifica sozinho o que venceu; opt-in com permissão) + `KeepAliveService` (monitor em primeiro plano,
     confere alarmes a cada minuto). Diagnóstico em Ajustes: log de eventos de aviso (`Notifier.fireLog`) e status do `Push`; botão para a Inicialização automática da ASUS/ROG.
