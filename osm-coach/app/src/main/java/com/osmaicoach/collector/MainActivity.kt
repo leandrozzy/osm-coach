@@ -4629,7 +4629,7 @@ private fun NotificationsPanel() {
     }
     Fold("📅", "Lembretes no calendário do celular", if (cal) "ligados" else "desligados") {
         Text(
-            "A reserva mais firme: o aviso de fim de treino/obra e de jogo vira um lembrete num calendário próprio (\"OSM Coach avisos\") e quem toca é o app Calendário do Android, que o celular não fecha junto com o app. Precisa da permissão do calendário.",
+            "Notificação normal, como a de qualquer app: o aviso de fim de treino/obra e de jogo vira um evento na sua agenda do Google (se não houver conta Google, num calendário local) e quem avisa é o app Calendário, que o celular não fecha junto com este app. Confira que o app Calendário do Google está instalado e com notificações ligadas. Precisa da permissão do calendário.",
             fontSize = 12.sp, color = C.MUTED
         )
         SwitchRow("Ligar lembretes no calendário", cal) { v ->
@@ -4656,30 +4656,6 @@ private fun NotificationsPanel() {
             },
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
         ) { Text("Testar no calendário (2 min)", fontSize = 12.sp) }
-    }
-
-    // Alarme no app Relógio do celular (sistema): toca mesmo com este app fechado pelo fabricante.
-    var clk by remember { mutableStateOf(ClockSync.enabled(ctx)) }
-    Fold("⏰", "Alarme no Relógio do celular", if (clk) "ligado" else "desligado") {
-        Text(
-            "A reserva mais certa para o ROG: cria alarmes no app Relógio do Android (que o celular nunca fecha) para fim de treino/obra e jogo das próximas 23 h. Toca como alarme comum, uns 60 s depois do aviso do app. Se o aviso do app tocar antes, o app pede ao Relógio para apagar o alarme (alguns Relógios não atendem: apague à mão).",
-            fontSize = 12.sp, color = C.MUTED
-        )
-        SwitchRow("Criar alarmes no Relógio", clk) { v ->
-            clk = v
-            Settings.put(ctx, "clock_on", if (v) "1" else "0")
-            if (v) pushScope.launch(Dispatchers.IO) { Notifier.reschedule(ctx.applicationContext) } else ClockSync.disable(ctx.applicationContext)
-        }
-        OutlinedButton(
-            onClick = {
-                if (!clk) Toast.makeText(ctx, "Ligue o alarme no Relógio primeiro.", Toast.LENGTH_SHORT).show()
-                else {
-                    val ok = ClockSync.test(ctx)
-                    Toast.makeText(ctx, if (ok) "Criado. Feche o app: o Relógio toca em ~2 minutos." else "Não consegui criar o alarme no Relógio.", Toast.LENGTH_LONG).show()
-                }
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-        ) { Text("Testar no Relógio (2 min)", fontSize = 12.sp) }
     }
 }
 
