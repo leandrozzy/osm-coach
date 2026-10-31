@@ -29,7 +29,7 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
     contra o resultado real, com dicas), `RivalWatch`.
   - Avisos: `Notifier` (alarmes locais) + `Push` (reserva na nuvem via ntfy.sh, opt-in em Ajustes: agenda cada aviso no
     servidor com `sequence_id` fixo; cancela quando o alarme local toca) + `CalendarSync` (reserva: lembretes num calendário local
-    "OSM Coach avisos", tocados pelo app Calendário do sistema; opt-in com permissão) + `KeepAliveService` (monitor em primeiro plano,
+    "OSM Coach avisos", prefere a agenda principal do Google; o app também recebe o broadcast `EVENT_REMINDER` do provedor (`CalendarReminderReceiver`) e notifica sozinho o que venceu; opt-in com permissão) + `KeepAliveService` (monitor em primeiro plano,
     confere alarmes a cada minuto). Diagnóstico em Ajustes: log de eventos de aviso (`Notifier.fireLog`) e status do `Push`; botão para a Inicialização automática da ASUS/ROG.
   - IA: `Ai.kt` (`Settings`, `AiClient`, `Processor`, `MetaRefresh`): Gemini, Groq/compatível, OpenRouter, Mistral, Claude.
     Chaves ficam em SharedPreferences `settings` (nunca no código/repositório).

@@ -60,6 +60,11 @@ object CalendarSync {
         return null
     }
 
+    /** seq -> [título, texto] do evento, para o app notificar sozinho quando o calendário avisar. */
+    private fun readTx(ctx: Context): JSONObject = runCatching { JSONObject(prefs(ctx).getString("tx", "{}") ?: "{}") }.getOrDefault(JSONObject())
+
+    private fun writeTx(ctx: Context, j: JSONObject) { prefs(ctx).edit().putString("tx", j.toString()).apply() }
+
     private fun calendarId(ctx: Context): Long? {
         googleCalendarId(ctx)?.let { return it }
         val cr = ctx.contentResolver
@@ -94,7 +99,7 @@ object CalendarSync {
             put(CalendarContract.Events.TITLE, title)
             put(CalendarContract.Events.DESCRIPTION, text)
             put(CalendarContract.Events.DTSTART, start)
-            put(CalendarContract.Events.DTEND, start + 5 * 60_000L)
+            put(CalendarContract.Events.DTEND, start + 60_000L)
             put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
             put(CalendarContract.Events.HAS_ALARM, 1)
         }
@@ -122,11 +127,14 @@ object CalendarSync {
             for ((k, v) in have) if (v.first > now && k !in p.delete) out[k] = v
             for (k in p.delete) have[k]?.let { if (!deleteEvent(ctx, it.second)) out[k] = it }
             val cal = if (p.publish.isNotEmpty()) calendarId(ctx) else null
+            val tx = readTx(ctx)
             if (cal != null) for (it in p.publish) {
                 have[it.seq]?.let { old -> deleteEvent(ctx, old.second) }
                 val start = it.at + Push.LATE_MS
-                insertEvent(ctx, cal, it.title, it.text, start)?.let { id -> out[it.seq] = Pair(start, id) }
+                insertEvent(ctx, cal, it.title, it.text, start)?.let { id -> out[it.seq] = Pair(start, id); tx.put(it.seq, org.json.JSONArray().put(it.title).put(it.text)) }
             }
+            for (k in tx.keys().asSequence().toList()) if (k !in out) tx.remove(k)
+            writeTx(ctx, tx)
             write(ctx, out)
         } }
     }
@@ -137,6 +145,28 @@ object CalendarSync {
         withContext(Dispatchers.IO) { lock.withLock {
             val m = read(ctx)
             m[seq]?.let { if (deleteEvent(ctx, it.second)) { m.remove(seq); write(ctx, m) } }
+        } }
+    }
+
+    /**
+     * O sistema de agenda avisou (broadcast EVENT_REMINDER, que chega mesmo com este app fechado): notifica por conta
+     * própria os lembretes nossos que já venceram, sem depender de o app Calendário mostrar a notificação.
+     */
+    suspend fun onReminder(ctx: Context) {
+        if (!enabled(ctx) || !hasPermission(ctx)) return
+        withContext(Dispatchers.IO) { lock.withLock {
+            val now = System.currentTimeMillis()
+            val m = read(ctx)
+            val tx = readTx(ctx)
+            var changed = false
+            for ((seq, v) in m.entries.toList()) {
+                if (v.first > now + 60_000L || v.first < now - 6 * 3600_000L) continue
+                val t = tx.optJSONArray(seq)
+                Notifier.postCalendarReminder(ctx, seq, t?.optString(0).orEmpty().ifBlank { "OSM Coach" }, t?.optString(1).orEmpty())
+                deleteEvent(ctx, v.second)
+                m.remove(seq); tx.remove(seq); changed = true
+            }
+            if (changed) { write(ctx, m); writeTx(ctx, tx) }
         } }
     }
 
@@ -163,6 +193,7 @@ object CalendarSync {
                 val id = insertEvent(ctx, cal, "✅ Teste do OSM Coach", "O lembrete pelo calendário do celular está funcionando.", start) ?: return@runCatching false
                 m["test"] = Pair(start, id)
                 write(ctx, m)
+                writeTx(ctx, readTx(ctx).put("test", org.json.JSONArray().put("✅ Teste do OSM Coach").put("O lembrete pelo calendário do celular está funcionando.")))
                 true
             }.onFailure { Notifier.logFire(ctx, "calendário: teste falhou (${it.javaClass.simpleName})") }
                 .getOrDefault(false).also { ok -> if (ok) Notifier.logFire(ctx, "calendário: teste criado para daqui a 2 min") else Notifier.logFire(ctx, "calendário: teste não criado") }
