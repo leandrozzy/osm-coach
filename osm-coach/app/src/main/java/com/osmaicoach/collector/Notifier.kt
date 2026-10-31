@@ -428,7 +428,7 @@ object Notifier {
         ensureChannels(ctx)
         logFire(ctx, "calendário avisou: " + title.take(40))
         val slot = Regex("^[tg](\\d)_").find(seq)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        post(ctx, CH_TIMER, 7000 + (seq.hashCode() and 0xFFF), title, text, slot, if (seq.startsWith("g")) 4 else 0, true)
+        post(ctx, CH_TIMER, 7000 + (seq.hashCode() and 0xFFF), title, text, slot, if (seq.startsWith("g")) 4 else 5, true)
     }
 
     private fun post(ctx: Context, channel: String, id: Int, title: String, text: String, slot: Int, tab: Int, withOsm: Boolean) {
