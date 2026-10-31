@@ -16,7 +16,7 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
 
 ## Estrutura (só o que importa)
 - `osm-coach/app/src/main/java/com/osmaicoach/collector/` — todo o app (pacote único, ~20 mil linhas):
-  - Captura/leitura: `CaptureService` (acessibilidade + overlay/bolha + loop de captura), `Pipeline` (OCR ML Kit →
+  - Captura/leitura: `CaptureService` (acessibilidade + overlay/bolha + loop de captura), `Pipeline` (gera a tática sozinho após ler Pré-jogo/Análise do rival nas 8 h antes do jogo, só se o rival/árbitro/forças mudaram: `autoTactic`, plano `autogen`, opção `auto_tactic`; OCR ML Kit →
     `ScreenClassifier`/`Screens.classify` → `Parsers`/`Screens` → `Repo.apply`), `SlotStateMachine` (`SlotMatcher`:
     casa o time lido com um slot; **não inventa** slot), `PixelProbe` (sondas de cor), `Models` (`ScreenType`, `Extraction`, `Txt`).
   - Dados: `Db` (Room `osm_coach.db`, **version = 1, exportSchema=false, sem migrações**), `Repo` (regras de gravação,
