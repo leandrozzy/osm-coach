@@ -1307,6 +1307,7 @@ data class SlotSummary(
     val readPre: Boolean = false,
     val readAna: Boolean = false,
     val readSquad: Boolean = false,
+    val readMine: Boolean = false,
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
     val needsResult: Boolean = false,
@@ -1533,9 +1534,10 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 nextAt = known(f, K.MATCH_AT)?.toLongOrNull(),
                 tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && Director.rivalConfirmed(f, now) },
                 rivalGaps = Director.tacticGaps(f, now).isNotEmpty(),
-                readPre = Director.tacticGaps(f, now).none { it.first.startsWith("Pré-jogo") },
-                readAna = Director.tacticGaps(f, now).none { it.first.startsWith("Análise") },
-                readSquad = Director.tacticAdvice(f, now) == null,
+                readPre = Director.groups(f, now)[0].ok,
+                readAna = Director.groups(f, now)[1].ok,
+                readSquad = Director.groups(f, now)[2].ok,
+                readMine = Director.groups(f, now)[3].ok,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
@@ -2222,12 +2224,12 @@ private fun SlotRow(s: SlotSummary, onClick: () -> Unit) {
 @Composable
 private fun ReadChips(s: SlotSummary) {
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        for ((ok, label) in listOf(s.readPre to "Pré-jogo", s.readAna to "Análise", s.readSquad to "Plantel")) {
-            val col = if (ok) C.OK else if (label == "Plantel") C.MUTED else C.WARN
+        for ((ok, label) in listOf(s.readPre to "Pré-jogo", s.readAna to "Análise", s.readSquad to "Rival", s.readMine to "Meu time")) {
+            val col = if (ok) C.OK else C.WARN
             Row(
                 Modifier.weight(1f).clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.55f), RoundedCornerShape(50)).padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
-            ) { Text((if (ok) "✓ " else "○ ") + label, fontSize = 12.5.sp, color = col, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+            ) { Text((if (ok) "✓ " else "○ ") + label, fontSize = 12.sp, color = col, fontWeight = FontWeight.SemiBold, maxLines = 1) }
         }
     }
 }
@@ -4364,13 +4366,13 @@ private fun SlotTactic(slot: Int, d: SlotData) {
     }
     val gaps = Director.tacticGaps(d.fields, System.currentTimeMillis())
     if (gaps.isEmpty()) {
-        Director.tacticAdvice(d.fields, System.currentTimeMillis())?.let { Text("💡 $it", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 6.dp)) }
+        Text("✓ " + Director.checklist(d.fields, System.currentTimeMillis()), fontSize = 12.5.sp, color = C.OK, modifier = Modifier.padding(bottom = 6.dp))
         GenPanel("tactic", slot, "⚡ Gerar tática para o próximo jogo") { startGeneration(ctx, "tactic", slot) }
     } else {
         Panel {
             Text("🔎 Leia antes de gerar (a tática precisa do rival)", color = C.WARN, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             for ((what, where) in gaps) Text("• $what → $where", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-            Text("Leituras valem por 3 h (o rival humano pode mudar a tática). Com o app ligado, passe por essas telas no OSM; a leitura repetida renova o prazo.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+            Text("Tudo é obrigatório (a tática precisa do rival inteiro). Leituras valem por 3 h (o rival humano pode mudar a tática). Com o app ligado, passe por essas telas no OSM; a leitura repetida renova o prazo.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
         }
         GenPanel("tactic", slot, "Gerar mesmo assim (menos precisa)") { startGeneration(ctx, "tactic", slot, force = true) }
     }

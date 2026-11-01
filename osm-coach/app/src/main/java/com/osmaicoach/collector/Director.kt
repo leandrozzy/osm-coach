@@ -598,25 +598,41 @@ object Director {
     const val RIVAL_FRESH_MS = 3L * 3600_000L
     fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean = tacticGaps(f, now).isEmpty()
 
-    /**
-     * O que falta ler (ou reler) antes de gerar a tática do próximo jogo: Pré-jogo (forças dos dois), Análise do rival
-     * (formação/estilo) e a tela de forças do rival (valor do elenco). Treino secreto esconde força/estilo: aí só o valor.
-     */
-    fun tacticGaps(f: Map<String, StoredField>, now: Long): List<Pair<String, String>> {
-        fun fresh(k: String, ms: Long = RIVAL_FRESH_MS) = f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= ms } == true
+    /** Leituras obrigatórias do rival para gerar a tática, em grupos (cada grupo = uma tela do OSM). */
+    class Group(val name: String, val where: String, val ok: Boolean, val missing: List<String>)
+
+    private val LB = listOf(K.RIVAL_GOL to "setor GOL", K.RIVAL_DEF to "setor DEF", K.RIVAL_MID to "setor MEI", K.RIVAL_ATK to "setor ATA")
+
+    fun groups(f: Map<String, StoredField>, now: Long): List<Group> {
+        fun fresh(k: String) = f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS } == true
         val secret = SecretTraining.on(f)
-        val out = ArrayList<Pair<String, String>>()
-        if (!fresh(K.MY_STRENGTH) || (!secret && !fresh(K.RIVAL_STRENGTH)))
-            out.add("Pré-jogo (forças dos dois times)" to "Central → toque no card do slot (Próximo jogo)")
-        if (!secret && (!fresh(K.RIVAL_FORMATION) || !fresh(K.RIVAL_PLAN)))
-            out.add("Análise do rival (formação e estilo)" to "Menu ☰ → Analista de Dados → Ver relatório")
-        return out
+        val pre = ArrayList<String>()
+        if (!fresh(K.MY_STRENGTH)) pre.add("sua força")
+        if (!secret && !fresh(K.RIVAL_STRENGTH)) pre.add("força do rival")
+        val ana = ArrayList<String>()
+        if (!secret && !fresh(K.RIVAL_FORMATION)) ana.add("formação")
+        if (!secret && !fresh(K.RIVAL_PLAN)) ana.add("estilo de jogo")
+        val sq = ArrayList<String>()
+        for ((k, n) in LB) if (!fresh(k)) sq.add(n)
+        if (!fresh(K.RIVAL_VALUE)) sq.add("valor do elenco")
+        val mine = listOf(K.MY_GOL to "GOL", K.MY_DEF to "DEF", K.MY_MID to "MEI", K.MY_ATK to "ATA")
+            .filter { !FieldMerge.known(f[it.first]?.value) }.map { "setor ${it.second}" }
+        return listOf(
+            Group("Pré-jogo (forças e bônus)", "Central → toque no card do slot (Próximo jogo)", pre.isEmpty(), pre),
+            Group("Análise do rival", "Menu ☰ → Analista de Dados → Ver relatório", ana.isEmpty(), ana),
+            Group("Plantel do rival (setores e valor)", "Analista de Dados → time do rival (forças por setor e valor do elenco)", sq.isEmpty(), sq),
+            Group("Seu plantel (setores)", "Menu ☰ → Plantel do seu time", mine.isEmpty(), mine)
+        )
     }
 
-    /** Recomendado, não obrigatório (o OCR do valor falha às vezes): valor do elenco do rival, lido no Plantel dele. */
-    fun tacticAdvice(f: Map<String, StoredField>, now: Long): String? =
-        if (f[K.RIVAL_VALUE]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= 12L * 3600_000L } == true) null
-        else "Leia também o Plantel do rival (valor do elenco dele) para a tática ficar mais precisa."
+    /** O que falta ler antes de gerar a tática (tudo é obrigatório). Vazio = pode gerar. */
+    fun tacticGaps(f: Map<String, StoredField>, now: Long): List<Pair<String, String>> =
+        groups(f, now).filter { !it.ok }.map { (it.name + ": falta " + it.missing.joinToString(", ")) to it.where }
+
+    /** "Pré-jogo ✓ • Análise ✗ (falta: formação)": o que já foi lido e o que falta. */
+    fun checklist(f: Map<String, StoredField>, now: Long): String = groups(f, now).joinToString(" • ") {
+        (if (it.ok) "✓ " else "✗ ") + it.name.substringBefore(" (") + (if (it.ok) "" else " (falta: " + it.missing.joinToString(", ") + ")")
+    }
 
     suspend fun tacticReady(repo: Repo, slot: Int): Boolean {
         val p = repo.dao.plan(slot, "tactic") ?: return false

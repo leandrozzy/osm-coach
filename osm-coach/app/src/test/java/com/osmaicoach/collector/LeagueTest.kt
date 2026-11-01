@@ -79,30 +79,34 @@ class LeagueTest {
 
 class RivalConfirmedTest {
     private fun sf(v: String, at: Long) = StoredField(v, 0.9, at)
-    @org.junit.Test fun rivalConfirmedExigeLeituraRecente() {
-        val now = 100L * 3600_000L
-        val ok = mapOf(K.MY_STRENGTH to sf("80", now), K.RIVAL_FORMATION to sf("4-3-3", now - 3_600_000L), K.RIVAL_PLAN to sf("Ofensivo", now - 3_600_000L), K.RIVAL_STRENGTH to sf("70", now - 60_000L))
-        org.junit.Assert.assertTrue(Director.rivalConfirmed(ok, now))
-        org.junit.Assert.assertFalse(Director.rivalConfirmed(ok + (K.RIVAL_FORMATION to sf("4-3-3", now - 5 * 3_600_000L)), now))
-        org.junit.Assert.assertFalse(Director.rivalConfirmed(ok - K.RIVAL_PLAN, now))
-        org.junit.Assert.assertFalse(Director.rivalConfirmed(ok + (K.RIVAL_STRENGTH to sf("NI", now)), now))
+    private val now = 100L * 3600_000L
+    private fun full(at: Long = now) = mapOf(
+        K.MY_STRENGTH to sf("80", at), K.RIVAL_STRENGTH to sf("75", at), K.RIVAL_FORMATION to sf("4-3-3", at), K.RIVAL_PLAN to sf("Ofensivo", at),
+        K.RIVAL_GOL to sf("70", at), K.RIVAL_DEF to sf("71", at), K.RIVAL_MID to sf("72", at), K.RIVAL_ATK to sf("73", at), K.RIVAL_VALUE to sf("50,0M", at),
+        K.MY_GOL to sf("80", at), K.MY_DEF to sf("81", at), K.MY_MID to sf("82", at), K.MY_ATK to sf("83", at)
+    )
+    @org.junit.Test fun tudoLidoLiberaEPassadoDe3hTrava() {
+        org.junit.Assert.assertTrue(Director.rivalConfirmed(full(), now))
+        org.junit.Assert.assertFalse(Director.rivalConfirmed(full(now - 4 * 3_600_000L), now))
+        org.junit.Assert.assertFalse(Director.rivalConfirmed(full() - K.RIVAL_VALUE, now))
+        org.junit.Assert.assertFalse(Director.rivalConfirmed(full() - K.RIVAL_ATK, now))
+        org.junit.Assert.assertFalse(Director.rivalConfirmed(full() - K.RIVAL_PLAN, now))
+        org.junit.Assert.assertFalse(Director.rivalConfirmed(full() - K.MY_DEF, now))
+    }
+    @org.junit.Test fun checklistDizOQueFalta() {
+        val c = Director.checklist(full() - K.RIVAL_VALUE, now)
+        org.junit.Assert.assertTrue(c, c.contains("✓ Pré-jogo") && c.contains("✓ Análise do rival") && c.contains("✗ Plantel do rival (falta: valor do elenco)"))
+        org.junit.Assert.assertEquals(4, Director.tacticGaps(emptyMap(), now).size)
+    }
+    @org.junit.Test fun treinoSecretoNaoExigeOQueOJogoEsconde() {
+        val f = full() - K.RIVAL_STRENGTH - K.RIVAL_PLAN - K.RIVAL_FORMATION + (K.RIVAL_SECRET to sf("Sim", now))
+        org.junit.Assert.assertTrue(Director.rivalConfirmed(f, now))
     }
 }
 
 class TacticGateTest {
     private fun sf(v: String, at: Long) = StoredField(v, 0.9, at)
     private val now = 100L * 3600_000L
-    private fun full() = mapOf(
-        K.MY_STRENGTH to sf("80", now), K.RIVAL_STRENGTH to sf("75", now), K.RIVAL_FORMATION to sf("4-3-3", now),
-        K.RIVAL_PLAN to sf("Ofensivo", now), K.RIVAL_VALUE to sf("50,0M", now)
-    )
-    @org.junit.Test fun semLeituraNaoGera() {
-        org.junit.Assert.assertEquals(2, Director.tacticGaps(emptyMap(), now).size)
-        org.junit.Assert.assertTrue(Director.tacticGaps(full(), now).isEmpty())
-        val g = Director.tacticGaps(full() - K.RIVAL_FORMATION, now)
-        org.junit.Assert.assertEquals(1, g.size)
-        org.junit.Assert.assertTrue(g[0].first.startsWith("Análise"))
-    }
     private fun inp(reds: Int = 0, injured: Int = 0, timers: List<Timers.Entry> = emptyList()) =
         Fresh.In(1, emptyMap(), timers, now + 3_600_000L, false, now, true, now - 86_400_000L, reds, injured)
     @org.junit.Test fun medicoAdvogadoSoComProblemaNoPlantel() {
