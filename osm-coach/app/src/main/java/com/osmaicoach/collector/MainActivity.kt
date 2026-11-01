@@ -1303,6 +1303,10 @@ data class SlotSummary(
     val tacticStale: Boolean = false,
     /** Faltam leituras (Pré-jogo, Análise, valor do rival) para gerar a tática. */
     val rivalGaps: Boolean = false,
+    /** Leituras do rival frescas (3 h): Pré-jogo (forças), Análise (formação/estilo), Plantel (valor, 12 h). */
+    val readPre: Boolean = false,
+    val readAna: Boolean = false,
+    val readSquad: Boolean = false,
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
     val needsResult: Boolean = false,
@@ -1529,6 +1533,9 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 nextAt = known(f, K.MATCH_AT)?.toLongOrNull(),
                 tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && Director.rivalConfirmed(f, now) },
                 rivalGaps = Director.tacticGaps(f, now).isNotEmpty(),
+                readPre = Director.tacticGaps(f, now).none { it.first.startsWith("Pré-jogo") },
+                readAna = Director.tacticGaps(f, now).none { it.first.startsWith("Análise") },
+                readSquad = Director.tacticAdvice(f, now) == null,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
@@ -2211,6 +2218,20 @@ private fun SlotRow(s: SlotSummary, onClick: () -> Unit) {
     }
 }
 
+/** Três "passos" de leitura do rival, em pílulas: o que já foi lido (verde) e o que falta (amarelo). */
+@Composable
+private fun ReadChips(s: SlotSummary) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for ((ok, label) in listOf(s.readPre to "Pré-jogo", s.readAna to "Análise", s.readSquad to "Plantel")) {
+            val col = if (ok) C.OK else if (label == "Plantel") C.MUTED else C.WARN
+            Row(
+                Modifier.weight(1f).clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.55f), RoundedCornerShape(50)).padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+            ) { Text((if (ok) "✓ " else "○ ") + label, fontSize = 12.5.sp, color = col, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+        }
+    }
+}
+
 /** Uma linha que diz o que está acontecendo com a tática deste jogo (gerando, pronta, rival mudou, longe do jogo). */
 @Composable
 private fun TacticStatusLine(s: SlotSummary) {
@@ -2221,12 +2242,12 @@ private fun TacticStatusLine(s: SlotSummary) {
     val (icon, text, col) = when {
         GenState.running("tactic", s.slot) || GenState.running("tactic_ai", s.slot) -> Triple("⚙", "Gerando a tática…", C.PRIMARY)
         s.rivalChanged.isNotEmpty() -> Triple("⚠", "O rival mudou: gere a tática de novo", C.WARN)
-        s.tacticStale -> Triple("🔎", "Falta reler Pré-jogo e Análise do rival (formação, estilo e força) antes de confiar na tática", C.WARN)
+        s.tacticStale -> Triple("🔎", "Releia o rival (passos abaixo) antes de confiar na tática", C.WARN)
         s.tacticReady && s.autoChk != null && s.autoChk > (s.autoAt ?: 0L) -> Triple("✅", "Rival conferido ${ago(s.autoChk)}: não mudou, a tática continua valendo", C.OK)
         s.tacticReady && s.autoAt != null -> Triple("✅", "Tática gerada ${ago(s.autoAt)}: monte no OSM antes do jogo", C.OK)
         s.tacticReady -> Triple("✅", "Tática pronta: monte no OSM antes do jogo", C.OK)
         far -> Triple("⏳", "Jogo longe: a tática é gerada nas últimas 8 h antes dele", C.MUTED)
-        s.rivalGaps -> Triple("🔎", "Antes de gerar a tática: leia o Pré-jogo, a Análise e as forças do rival", C.WARN)
+        s.rivalGaps -> Triple("🔎", "Antes de gerar a tática, leia o rival (passos abaixo)", C.WARN)
         else -> Triple("⚡", "Falta gerar a tática deste jogo", C.GOLD)
     }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2234,6 +2255,7 @@ private fun TacticStatusLine(s: SlotSummary) {
         Spacer(Modifier.width(6.dp))
         Text(text, fontSize = 13.sp, color = col, fontWeight = FontWeight.Medium)
     }
+    ReadChips(s)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

@@ -134,7 +134,15 @@ class FramePipeline private constructor(private val ctx: Context) {
         CaptureService.instance?.notice(msg)
     }
     private val autoTacticAt = HashMap<Int, Long>()
-    private val autoNoticeAt = HashMap<Int, Long>()
+    private val lastNote = HashMap<Int, Pair<String, Long>>()
+
+    /** Aviso por cima do jogo; o mesmo texto não se repete em menos de 1 min por slot (avisos diferentes passam sempre). */
+    private fun note(slot: Int, text: String, now: Long) {
+        val l = lastNote[slot]
+        if (l != null && l.first == text && now - l.second < 60_000L) return
+        lastNote[slot] = text to now
+        CaptureService.instance?.notice(text)
+    }
 
     /**
      * Gera a tática sozinho depois de ler o Pré-jogo ou a Análise do rival (só nas últimas horas antes do jogo e só se o
@@ -153,12 +161,18 @@ class FramePipeline private constructor(private val ctx: Context) {
         val tag = (f[K.ROUND]?.value ?: "") + "|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")
         val oldJ = repo.dao.plan(slot, "rivalsnap")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val sameGame = oldJ?.optString("tag") == tag
-        val old = if (sameGame) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
+        // leitura feita há pouco, na mesma passada (fp): ainda é a primeira leitura, não dá para dizer "manteve"
+        val firstAt = oldJ?.optLong("first", 0L) ?: 0L
+        val inFirstPass = sameGame && oldJ?.optBoolean("fp", false) == true && now - firstAt < 10 * 60_000L
+        val old = if (sameGame && !inFirstPass) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
+        val prev = if (sameGame) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
         val merged = cur.mapIndexed { i, v -> if (v.isNotBlank()) v else old?.get(i).orEmpty() }
         val diffs = ArrayList<String>()
         if (old != null) for (i in keys.indices) if (cur[i].isNotBlank() && old[i].isNotBlank() && !cur[i].equals(old[i], ignoreCase = true)) diffs.add("${labels[i]} ${old[i]} → ${cur[i]}")
-        if (old == null || merged != old) {
-            repo.dao.putPlan(PlanEntity(slot, "rivalsnap", JSONObject().put("tag", tag).put("v", org.json.JSONArray(merged)).put("at", now).toString(), now))
+        if (prev == null || merged != prev || (inFirstPass.not() && oldJ?.optBoolean("fp", false) == true)) {
+            val fresh = !sameGame
+            repo.dao.putPlan(PlanEntity(slot, "rivalsnap", JSONObject().put("tag", tag).put("v", org.json.JSONArray(merged)).put("at", now)
+                .put("first", if (fresh) now else firstAt).put("fp", fresh || inFirstPass).toString(), now))
         }
         val head = merged.getOrNull(0).orEmpty() + (merged.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: "")
         return when {
@@ -179,20 +193,22 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (matchAt == null) { why(slot, "horário do jogo não lido"); return }
         if (matchAt <= now + 60_000L) { why(slot, "jogo já começou"); return }
         if (Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return
-        // o rival mudou ou manteve a tática? (qualquer hora; no máx. 1 aviso por minuto por slot)
-        val delta = runCatching { rivalDelta(slot, f, now) }.getOrNull()
-        val noticeOk = now - (autoNoticeAt[slot] ?: 0L) > 60_000L
-        if (delta != null && noticeOk) {
-            autoNoticeAt[slot] = now
-            CaptureService.instance?.notice(delta)
-            why(slot, delta.substringAfter(": "))
+        // Só afirma "mudou/manteve" com a Análise do rival lida AGORA (últimos 10 min); antes disso pede a leitura.
+        val secret = SecretTraining.on(f)
+        val readNow = secret || listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN).all { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= 10 * 60_000L } == true }
+        val gaps = Director.tacticGaps(f, now)
+        if (!readNow) {
+            why(slot, "Análise do rival não lida agora: sem aviso de mudou/manteve")
+            note(slot, "S$slot: ainda não li a Análise do rival nesta passada. Abra Menu ☰ → Analista de Dados → Ver relatório para eu dizer se ele mudou a tática." +
+                (gaps.firstOrNull { it.first.startsWith("Pré-jogo") }?.let { " Leia também o Pré-jogo (forças)." } ?: ""), now)
+            return
         }
+        val delta = runCatching { rivalDelta(slot, f, now) }.getOrNull()
+        val strengthGap = gaps.firstOrNull { it.first.startsWith("Pré-jogo") }?.let { " Falta ler o Pré-jogo (forças dos dois times)." }.orEmpty()
         if (matchAt - now > Director.TACTIC_WINDOW_MS) {
-            if (delta == null && noticeOk) {
-                autoNoticeAt[slot] = now
-                val h = (matchAt - now) / 3600000L
-                CaptureService.instance?.notice("S$slot: jogo em ${h}h. A tática é gerada sozinha quando faltarem 8 h (o rival humano ainda pode mudar até lá).")
-            }
+            val h = (matchAt - now) / 3600000L
+            note(slot, (delta ?: "S$slot: rival lido.") + strengthGap + " Jogo em ${h}h: a tática sai sozinha nas últimas 8 h.", now)
+            delta?.let { why(slot, it.substringAfter(": ")) }
             return
         }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
@@ -205,27 +221,21 @@ class FramePipeline private constructor(private val ctx: Context) {
         val p = repo.dao.plan(slot, "tactic")
         val valid = p != null && runCatching { Director.tacticValid(JSONObject(p.json), p.at, f, now) }.getOrDefault(false)
         val same = old?.optString("sig") == sig
+        if (gaps.isNotEmpty()) {
+            why(slot, "faltam leituras antes de gerar: " + gaps.joinToString("; ") { it.first })
+            note(slot, (delta ?: "S$slot:") + " Para gerar a tática falta ler: " + gaps.joinToString(" • ") { it.first } + ".", now)
+            return
+        }
         // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
         if (same && valid) {
             repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).put("chk", now).toString(), now))
-            if (delta == null && now - (autoNoticeAt[slot] ?: 0L) > 60_000L) {
-                autoNoticeAt[slot] = now
-                CaptureService.instance?.notice("✅ S$slot: nada mudou — a tática gerada continua valendo.")
-            }
+            note(slot, (delta ?: "✅ S$slot: nada mudou.") + " A tática gerada continua valendo.", now)
+            delta?.let { why(slot, it.substringAfter(": ")) }
             return
         }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
         repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
         autoTacticAt[slot] = now
-        val gaps = Director.tacticGaps(f, now)
-        if (gaps.isNotEmpty()) {
-            why(slot, "faltam leituras antes de gerar: " + gaps.joinToString("; ") { it.first })
-            if (now - (autoNoticeAt[slot] ?: 0L) > 60_000L) {
-                autoNoticeAt[slot] = now
-                CaptureService.instance?.notice("S$slot: para gerar a tática falta ler: " + gaps.joinToString(" • ") { it.first })
-            }
-            return
-        }
         val rivalChanged = valid && old != null && !same
         CaptureService.instance?.notice("S$slot: " + (if (rivalChanged) "o rival mudou; gerando a tática de novo…" else "gerando a tática…"))
         startGeneration(ctx, "tactic", slot)
