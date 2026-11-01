@@ -1558,7 +1558,7 @@ private fun App() {
     LaunchedEffect(tab, openSlot, openTab) {
         ui.edit().putInt("tab", tab).putInt("slot", openSlot).putInt("slotTab", openTab).apply()
     }
-    val items = listOf("🏠" to "Hoje", "🕘" to "Sessões", "⚽" to "Slots", "🧠" to "Diretor", "⚙️" to "Ajustes")
+    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "⚙️" to "Ajustes")
     // Botão Voltar do Android: fecha o slot aberto, depois volta para Hoje (em vez de fechar o app).
     BackHandler(enabled = openSlot > 0) { openSlot = 0 }
     BackHandler(enabled = openSlot == 0 && tab != 0) { tab = 0 }
@@ -1598,7 +1598,7 @@ private fun App() {
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (tab) {
                 0 -> TodayTab(onGoSettings = { tab = 4 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
-                1 -> SessionsTab()
+                1 -> AgendaTab()
                 2 -> if (openSlot > 0) {
                     key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
                 } else SlotsTab { slot, t -> openSlot = slot; openTab = t }
@@ -2507,8 +2507,66 @@ private fun SavedScreens(tick: Int) {
     }
 }
 
+/** Linha do tempo de tudo o que tem hora: jogos, fim de treino e obra do estádio, de todos os slots, por dia. */
 @Composable
-private fun SessionsTab() {
+private fun AgendaTab() {
+    val ctx = LocalContext.current
+    val tick = rememberTick(1000L)
+    val data = rememberLoaded(TodayCache.last, tick / 5, UiBus.version) { loadToday(ctx) }
+    val now = System.currentTimeMillis()
+    class Ev(val at: Long, val icon: String, val title: String, val sub: String, val slot: Int, val col: Color)
+    val evs = ArrayList<Ev>()
+    for (s in data.slots) {
+        val at = s.nextAt ?: continue
+        if (!s.ended && s.state == null && at > now - 3600000L) evs.add(Ev(at, "⚽", "Jogo" + (s.rival?.let { " vs $it" } ?: ""), s.title + (s.human?.let { if (it == "Sim") " • rival humano" else " • rival CPU" } ?: ""), s.slot, C.PRIMARY))
+    }
+    for (w in data.work) {
+        for (seat in w.seats) seat.endAt?.takeIf { it > now - 3600000L }?.let {
+            evs.add(Ev(it, "🏋", "Treino ${Timers.roleLabel(seat.role)} termina", seat.name ?: "treinador ocupado", w.slot, C.OK))
+        }
+        for (c in w.cards) c.endAt?.takeIf { it > now - 3600000L }?.let { evs.add(Ev(it, "🏟", "Obra do estádio termina: ${c.label}", "nível ${c.level ?: "?"}", w.slot, C.GOLD)) }
+    }
+    val sorted = evs.sortedBy { it.at }
+    val dayFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
+    val hourFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
+    fun dayKey(ms: Long) = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(ms))
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
+        PageTitle("📅", "Agenda", "${sorted.size} eventos")
+        Text("Tudo o que tem hora nos seus 4 slots, em ordem. Toque para abrir o slot.", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        if (sorted.isEmpty()) {
+            EmptyState("📅", "Nada agendado ainda", "Passe pelo Calendário, pelo Treinamento e pelo Estádio no OSM com a captura ligada: jogos, fim de treino e de obra aparecem aqui.")
+        }
+        var lastDay = ""
+        for (e in sorted) {
+            val dk = dayKey(e.at)
+            if (dk != lastDay) {
+                lastDay = dk
+                val today = dayKey(now); val tomorrow = dayKey(now + 86400000L)
+                val label = when (dk) { today -> "Hoje"; tomorrow -> "Amanhã"; else -> dayFmt.format(Date(e.at)).replaceFirstChar { it.uppercase() } }
+                Title(label)
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().clickable { }.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.width(60.dp)) {
+                    Text(hourFmt.format(Date(e.at)), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = e.col)
+                    Text(if (e.at < now) "já passou" else countdownShort(e.at), fontSize = 12.sp, color = C.MUTED, maxLines = 1)
+                }
+                Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(e.col.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) { Text(e.icon, fontSize = 19.sp) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(e.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(e.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text("S${e.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionsBody() {
     val ctx = LocalContext.current
     val tick = rememberTick(2000L)
     val rows = rememberLoaded(emptyList<SessionRow>(), tick, null) {
@@ -2518,8 +2576,7 @@ private fun SessionsTab() {
             SessionRow(sess, counts, dao.unassignedCount(sess.id))
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        PageTitle("🕘", "Sessões", "${rows.size} capturas")
+    Column(Modifier.fillMaxWidth()) {
         // resumo: o que o app já guardou
         Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("📼", rows.size.toString(), "capturas", C.PRIMARY, Modifier.weight(1f))
@@ -3231,26 +3288,39 @@ private fun SlotSquad(slot: Int, d: SlotData) {
     val mine = d.players.filter { it.owner == "MY" }
     val counts = HashMap<String, Int>()
     for (p in mine) p.cat?.let { counts[it] = (counts[it] ?: 0) + 1 }
-    Panel {
-        Text("Meu elenco: ${mine.size} jogadores", fontWeight = FontWeight.Bold)
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            for (n in MarketPlanner.needs(counts)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(catColor(n.cat).copy(alpha = 0.25f)).padding(horizontal = 14.dp, vertical = 8.dp)) {
-                        Text("${n.have}/${n.target}", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
-                    }
-                    Text(n.cat, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 3.dp))
+    // titulares da tática gerada (só quando ela vale para o próximo jogo)
+    val xiNames: Set<String> = run {
+        val tp = d.tactic ?: return@run emptySet<String>()
+        val o = runCatching { JSONObject(tp.json) }.getOrNull() ?: return@run emptySet<String>()
+        if (!Director.tacticValid(o, tp.at, d.fields, System.currentTimeMillis())) return@run emptySet<String>()
+        val rows = o.optJSONArray("lineup") ?: return@run emptySet<String>()
+        buildSet { for (i in 0 until rows.length()) { val r = rows.optJSONArray(i) ?: continue; for (k in 0 until r.length()) r.optJSONObject(k)?.optString("n")?.let { add(it) } } }
+    }
+    var filter by remember { mutableStateOf("TODOS") }
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("👥 Seu elenco", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            Pill("${mine.size} jogadores", null)
+        }
+        Text("Força de cada setor do seu time (a de cima é o time todo)", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((lab, k, col) in listOf(Triple("Geral", K.MY_STRENGTH, C.PRIMARY), Triple("GOL", K.MY_GOL, catColor("GOL")), Triple("DEF", K.MY_DEF, catColor("DEF")), Triple("MEI", K.MY_MID, catColor("MEI")), Triple("ATA", K.MY_ATK, catColor("ATA")))) {
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(col.copy(alpha = 0.16f)).border(1.dp, col.copy(alpha = 0.55f), RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(known(d.fields, k) ?: "?", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp)
+                    Text(lab, fontSize = 12.sp, color = C.MUTED)
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for ((lab, k) in listOf("Geral" to K.MY_STRENGTH, "GOL" to K.MY_GOL, "DEF" to K.MY_DEF, "MEI" to K.MY_MID, "ATA" to K.MY_ATK)) {
-                Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(C.SURFACE2).padding(vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(known(d.fields, k) ?: "?", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                    Text(lab, fontSize = 11.sp, color = C.MUTED)
+        Text("Quantos jogadores você tem em cada posição (tem / ideal)", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 14.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (n in MarketPlanner.needs(counts)) {
+                val ok = n.have >= n.target
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("${n.have}/${n.target}", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = if (ok) C.OK else C.WARN)
+                    Text(n.cat, fontSize = 12.sp, color = C.MUTED)
                 }
             }
         }
@@ -3278,8 +3348,15 @@ private fun SlotSquad(slot: Int, d: SlotData) {
     if (mine.isEmpty()) {
         EmptyState("👕", "Nenhum jogador seu lido ainda", "No jogo: Plantel do SEU time, depois role a lista devagar até o fim.")
     }
+    if (mine.isNotEmpty()) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (f in listOf("TODOS", "ATA", "MEI", "DEF", "GOL")) FilterPill(if (f == "TODOS") "Todos" else f, filter == f) { filter = f }
+        }
+        Text("⚡ Cond. = condição física • 🙂 Moral • ★ titular da tática gerada", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+    }
     for (cat in listOf("ATA", "MEI", "DEF", "GOL", "?")) {
         // "?": lidos sem posição — antes ficavam invisíveis (mas contavam), sem como remover.
+        if (filter != "TODOS" && cat != filter) continue
         val list = mine.filter { (it.cat ?: "?") == cat }.sortedByDescending { it.strength ?: 0 }
         if (list.isEmpty()) continue
         Title(if (cat == "?") "Sem posição (confira)" else cat)
@@ -3291,13 +3368,16 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                     }
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(p.name, fontWeight = FontWeight.SemiBold)
-                        Text("${p.posCode ?: "?"} • ${p.age ?: "?"}a • ${p.valueText ?: "?"}", fontSize = 13.sp, color = C.MUTED)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(p.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+                        Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}", fontSize = 13.sp, color = C.MUTED)
                         val ft = d.fitness[p.nameKey]
                         if (ft != null) {
                             Row(Modifier.fillMaxWidth().padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                for ((ic, v) in listOf("⚡" to ft.first, "🙂" to ft.second)) {
-                                    Text(ic, fontSize = 11.5.sp)
+                                for ((ic, v) in listOf("Cond." to ft.first, "Moral" to ft.second)) {
+                                    Text(ic, fontSize = 11.5.sp, color = C.MUTED)
                                     LinearProgressIndicator(
                                         progress = { v.coerceIn(0, 100) / 100f },
                                         modifier = Modifier.weight(1f).height(5.dp).clip(RoundedCornerShape(50)),
@@ -4262,7 +4342,7 @@ private fun SlotTactic(slot: Int, d: SlotData) {
     }
 
     // ---- Equipa inicial
-    OsmTitle("Equipa inicial")
+    OsmTitle("Escalação: quem joga")
     Column(Modifier.fillMaxWidth().osmPanel().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         OsmCaption("Formação", j.optString("formation"), valueSize = 22)
         Spacer(Modifier.height(6.dp))
@@ -4277,7 +4357,7 @@ private fun SlotTactic(slot: Int, d: SlotData) {
     }
 
     // ---- Tática
-    OsmTitle("Define a tua tática para o próximo jogo")
+    OsmTitle("Tática: o que montar no OSM")
     OsmSplitCard(
         left = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -5440,7 +5520,8 @@ private fun SettingsTab() {
                 "como o app usa"
             )
         }
-        SectionLabel("Dados", "Exportar para análise ou restaurar")
+        SectionLabel("Dados", "Capturas guardadas, leitura com IA e diagnóstico")
+        Fold("📼", "Capturas e leitura com IA") { SessionsBody() }
         Fold("📦", "Exportar diagnóstico") {
             Hint(
                 "Gera um arquivo com TUDO o que o app tem (campos, elenco, calendário, análises do fim do jogo, táticas, telas lidas, " +

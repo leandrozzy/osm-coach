@@ -498,10 +498,11 @@ fun OsmSplitCard(left: @Composable () -> Unit, right: @Composable () -> Unit) {
 /** Título de seção do jogo ("Define a tua tática para o próximo jogo"). */
 @Composable
 fun OsmTitle(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center,
-        modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)
-    )
+    Row(modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(4.dp).height(22.dp).clip(RoundedCornerShape(50)).background(OsmColors.BLUE))
+        Spacer(Modifier.width(10.dp))
+        Text(text, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+    }
 }
 
 
