@@ -141,17 +141,54 @@ class FramePipeline private constructor(private val ctx: Context) {
      * que importa mudou: rival, formação/estilo dele, força, árbitro, treino secreto). Avisa por cima do jogo quando
      * ficou pronta, para montar no OSM na hora.
      */
+    /**
+     * Compara o que o rival mostra agora (formação, estilo, marcação, fora-de-jogo, desarme, pressão, estilo, ritmo) com a
+     * última leitura deste mesmo jogo e diz se ele MUDOU ou MANTEVE a tática. Vale em qualquer hora antes do jogo.
+     */
+    private suspend fun rivalDelta(slot: Int, f: Map<String, StoredField>, now: Long): String? {
+        val keys = listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_PRESSURE, K.RIVAL_MENTALITY, K.RIVAL_TEMPO)
+        val labels = listOf("formação", "estilo", "marcação", "fora-de-jogo", "desarme", "pressão", "estilo (nível)", "ritmo")
+        val cur = keys.map { f[it]?.value?.takeIf { v -> v.isNotBlank() && FieldMerge.known(v) }.orEmpty() }
+        if (cur.count { it.isNotBlank() } < 2) return null
+        val tag = (f[K.ROUND]?.value ?: "") + "|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")
+        val oldJ = repo.dao.plan(slot, "rivalsnap")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val sameGame = oldJ?.optString("tag") == tag
+        val old = if (sameGame) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
+        val merged = cur.mapIndexed { i, v -> if (v.isNotBlank()) v else old?.get(i).orEmpty() }
+        val diffs = ArrayList<String>()
+        if (old != null) for (i in keys.indices) if (cur[i].isNotBlank() && old[i].isNotBlank() && !cur[i].equals(old[i], ignoreCase = true)) diffs.add("${labels[i]} ${old[i]} → ${cur[i]}")
+        if (old == null || merged != old) {
+            repo.dao.putPlan(PlanEntity(slot, "rivalsnap", JSONObject().put("tag", tag).put("v", org.json.JSONArray(merged)).put("at", now).toString(), now))
+        }
+        val head = merged.getOrNull(0).orEmpty() + (merged.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: "")
+        return when {
+            diffs.isNotEmpty() -> "⚠ S$slot: o rival MUDOU a tática: " + diffs.take(3).joinToString("; ") + ". Gere a tática de novo."
+            old != null -> "✅ S$slot: o rival MANTEVE a tática ($head)."
+            else -> "👀 S$slot: tática do rival lida ($head). Passe de novo perto do jogo para ver se ele muda."
+        }
+    }
+
+    private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
+
     private suspend fun autoTactic(slot: Int, now: Long) {
-        if (Settings.get(ctx, "auto_tactic", "1") != "1") return
+        if (Settings.get(ctx, "auto_tactic", "1") != "1") { why(slot, "desligada em Ajustes"); return }
         val f = repo.fieldMap(slot)
         val st = f[K.SLOT_STATE]?.value
-        if (!(st == null || st == "ativo") || f[K.TEAM]?.value == null) return
-        val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull() ?: return
-        if (matchAt <= now + 60_000L) return
+        if (!(st == null || st == "ativo") || f[K.TEAM]?.value == null) { why(slot, "slot sem competição ativa lida"); return }
+        val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
+        if (matchAt == null) { why(slot, "horário do jogo não lido"); return }
+        if (matchAt <= now + 60_000L) { why(slot, "jogo já começou"); return }
         if (Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return
+        // o rival mudou ou manteve a tática? (qualquer hora; no máx. 1 aviso por minuto por slot)
+        val delta = runCatching { rivalDelta(slot, f, now) }.getOrNull()
+        val noticeOk = now - (autoNoticeAt[slot] ?: 0L) > 60_000L
+        if (delta != null && noticeOk) {
+            autoNoticeAt[slot] = now
+            CaptureService.instance?.notice(delta)
+            why(slot, delta.substringAfter(": "))
+        }
         if (matchAt - now > Director.TACTIC_WINDOW_MS) {
-            // longe do jogo: explica por que nada foi gerado (no máx. 1 vez a cada 5 min por slot)
-            if (now - (autoNoticeAt[slot] ?: 0L) > 300_000L) {
+            if (delta == null && noticeOk) {
                 autoNoticeAt[slot] = now
                 val h = (matchAt - now) / 3600000L
                 CaptureService.instance?.notice("S$slot: jogo em ${h}h. A tática é gerada sozinha quando faltarem 8 h (o rival humano ainda pode mudar até lá).")
@@ -170,10 +207,10 @@ class FramePipeline private constructor(private val ctx: Context) {
         val same = old?.optString("sig") == sig
         // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
         if (same && valid) {
-            if (now - (autoNoticeAt[slot] ?: 0L) > 60_000L) {
+            repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).put("chk", now).toString(), now))
+            if (delta == null && now - (autoNoticeAt[slot] ?: 0L) > 60_000L) {
                 autoNoticeAt[slot] = now
-                repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).put("chk", now).toString(), now))
-                CaptureService.instance?.notice("✅ S$slot: o rival não mudou a tática — a tática gerada continua valendo.")
+                CaptureService.instance?.notice("✅ S$slot: nada mudou — a tática gerada continua valendo.")
             }
             return
         }
@@ -517,7 +554,9 @@ class FramePipeline private constructor(private val ctx: Context) {
                     Diag.log("Fim de temporada/direção → S$ss" + (sr.rank?.let { " (${it}º lugar)" } ?: "") + (if (sr.over) " • competição encerrada" else ""))
                 }
             }
-            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT) && asgSlot != null) {
+            val rivalSquad = type == ScreenType.SQUAD && asgSlot != null && ex.ownerTeam != null &&
+                Txt.key(repo.fieldMap(asgSlot)[K.RIVAL_TEAM]?.value ?: "").let { rk -> rk.length >= 3 && Txt.sim(Txt.key(ex.ownerTeam), rk) >= 0.8 }
+            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT || rivalSquad) && asgSlot != null) {
                 try { autoTactic(asgSlot, now) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
