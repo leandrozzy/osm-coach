@@ -1299,6 +1299,8 @@ data class SlotSummary(
     val updated: Long,
     val nextAt: Long? = null,
     val tacticReady: Boolean = false,
+    /** Tática existe, mas o rival (formação/estilo/força) não foi relido nas últimas 3 h: não confiar ainda. */
+    val tacticStale: Boolean = false,
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
     val needsResult: Boolean = false,
@@ -1523,7 +1525,8 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 missing = gameMissing.size,
                 missingNames = gameMissing.map { it.label },
                 nextAt = known(f, K.MATCH_AT)?.toLongOrNull(),
-                tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()),
+                tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && Director.rivalConfirmed(f, now) },
+                tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
                 rivalChanged = rivalChangesOf(repo, slot),
@@ -1989,10 +1992,12 @@ private fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         if (s.ended || s.state != null) continue
         val at = s.nextAt
         if (s.needsResult) todo.add(Todo(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
-        if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
+        if (at != null && at > now && s.tacticStale && at - now <= Director.TACTIC_WINDOW_MS)
+            todo.add(Todo(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
+        else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
             todo.add(Todo(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
         if (s.rivalChanged.isNotEmpty()) todo.add(Todo(s.slot, "⚠", "O rival mudou a tática", "Gere a tática de novo antes do jogo", 6, 4))
-        if (s.tacticReady && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
+        if (s.tacticReady && !s.tacticStale && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
     }
     for (w in data.work) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }
@@ -2144,7 +2149,7 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
             val w = s.win
             MetricBar("Chance de vitória", w?.win ?: 0, w?.let { "${it.win}%" } ?: "—", if ((w?.win ?: 0) >= 50) C.OK else C.GOLD, Modifier.weight(1f))
             MetricBar("Dados lidos", s.pct, "${s.pct}%", if (s.pct >= 80) C.OK else if (s.pct >= 50) C.GOLD else C.WARN, Modifier.weight(1f))
-            MetricBar("Tática", if (s.tacticReady) 100 else 0, if (s.tacticReady) "pronta" else "falta", if (s.tacticReady) C.OK else C.GOLD, Modifier.weight(1f))
+            MetricBar("Tática", if (s.tacticReady) 100 else if (s.tacticStale) 50 else 0, if (s.tacticReady) "pronta" else if (s.tacticStale) "reler rival" else "falta", if (s.tacticReady) C.OK else C.GOLD, Modifier.weight(1f))
         }
         TacticStatusLine(s)
         val inWindow = at!! - now <= Director.TACTIC_WINDOW_MS
@@ -2182,6 +2187,7 @@ private fun SlotRow(s: SlotSummary, onClick: () -> Unit) {
                 s.state != null -> "🔎 Procurando adversário"
                 s.ended -> "🏁 Competição encerrada"
                 s.needsResult -> "📊 Falta registrar o resultado"
+                at != null && s.tacticStale -> "🔎 Reler rival"
                 at != null && s.tacticReady -> "✅ Tática pronta" + (if (s.rivalChanged.isNotEmpty()) " • rival mudou" else "")
                 at != null && at - now <= Director.TACTIC_WINDOW_MS -> "⚡ Falta gerar a tática"
                 at != null -> "⏳ Tática nas últimas 8 h"
@@ -2210,6 +2216,7 @@ private fun TacticStatusLine(s: SlotSummary) {
     val (icon, text, col) = when {
         GenState.running("tactic", s.slot) || GenState.running("tactic_ai", s.slot) -> Triple("⚙", "Gerando a tática…", C.PRIMARY)
         s.rivalChanged.isNotEmpty() -> Triple("⚠", "O rival mudou: gere a tática de novo", C.WARN)
+        s.tacticStale -> Triple("🔎", "Falta reler Pré-jogo e Análise do rival (formação, estilo e força) antes de confiar na tática", C.WARN)
         s.tacticReady && s.autoChk != null && s.autoChk > (s.autoAt ?: 0L) -> Triple("✅", "Rival conferido ${ago(s.autoChk)}: não mudou, a tática continua valendo", C.OK)
         s.tacticReady && s.autoAt != null -> Triple("✅", "Tática gerada ${ago(s.autoAt)}: monte no OSM antes do jogo", C.OK)
         s.tacticReady -> Triple("✅", "Tática pronta: monte no OSM antes do jogo", C.OK)

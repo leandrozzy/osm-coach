@@ -594,6 +594,13 @@ object Director {
     /** Só pede a tática nas últimas horas antes do jogo: antes disso o rival humano ainda pode mudar tudo. */
     const val TACTIC_WINDOW_MS = 8L * 3600_000L
 
+    /** Rival conferido: formação, estilo e força lidos há pouco (3 h). Sem isso a tática pode estar baseada em dado velho. */
+    const val RIVAL_FRESH_MS = 3L * 3600_000L
+    fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean {
+        val ks = listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_STRENGTH)
+        return ks.all { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS } == true }
+    }
+
     suspend fun tacticReady(repo: Repo, slot: Int): Boolean {
         val p = repo.dao.plan(slot, "tactic") ?: return false
         val j = try { JSONObject(p.json) } catch (e: Exception) { return false }
