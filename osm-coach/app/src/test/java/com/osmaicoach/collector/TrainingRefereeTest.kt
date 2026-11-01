@@ -139,6 +139,7 @@ class TrainingRefereeTest {
     @Test fun ownAppScreensAreRecognized() {
         assertTrue(OwnApp.looksLikeApp("Elenco Controles O número na camisa é a força do titular. Marcação"))
         assertTrue(OwnApp.looksLikeApp("S2• Levski Sofia Bulgária Hoje Sessões Slots Diretor Ajustes"))
+        assertTrue(OwnApp.looksLikeApp("OSM AI Coach Hoje Agenda Slots Diretor Ajustes Online"))
         assertTrue(!OwnApp.looksLikeApp("Estilo de jogo Jogar pelas alas Táticas por sector Pressão Equilibrado"))
     }
 

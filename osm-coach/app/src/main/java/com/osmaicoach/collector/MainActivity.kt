@@ -1044,11 +1044,53 @@ private fun SeasonEndCard(d: SlotData) {
                 }
                 if (info.fired) Box(Modifier.padding(top = 8.dp)) { Pill("⚠ risco de demissão: o slot pode mudar de clube", false) }
             }
+            SeasonReview(d, rank)
             Text(
-                "Sem próximo jogo. Até a nova competição: use o Diretor deste slot para treinos, vendas e compras.",
-                fontSize = 12.5.sp, color = Color(0xB3FFFFFF), modifier = Modifier.padding(top = 8.dp)
+                "✅ Esta tela já encerra a competição: o app não pede mais nada neste slot até a próxima liga ou batalha começar.",
+                fontSize = 13.sp, color = C.OK, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp)
             )
         }
+    }
+}
+
+/** O que a competição que acabou ensinou: força contra os rivais, postura da tática, tamanho do elenco e o que fazer na próxima. */
+@Composable
+private fun SeasonReview(d: SlotData, rank: Int?) {
+    val logs = d.logs.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }.filter { it.optString("result") in listOf("V", "E", "D") && !it.optBoolean("archived") }
+    val lines = ArrayList<Pair<String, String>>()
+    val both = logs.filter { it.optInt("myStrength") > 0 && it.optInt("rivalStrength") > 0 }
+    if (both.size >= 5) {
+        val my = both.map { it.optInt("myStrength") }.average()
+        val rv = both.map { it.optInt("rivalStrength") }.average()
+        val stronger = both.count { it.optInt("rivalStrength") > it.optInt("myStrength") + 2 }
+        lines.add(
+            "🆚" to "Seu time jogou com força média ${"%.0f".format(my)} contra ${"%.0f".format(rv)} dos rivais" +
+                (if (rv > my + 1) " (${"%.0f".format(rv - my)} a menos)" else "") + ". Em $stronger de ${both.size} jogos o rival era mais forte."
+        )
+        val hum = logs.count { it.optBoolean("human") }
+        if (hum * 2 >= logs.size) lines.add("👤" to "$hum de ${logs.size} jogos foram contra humanos: eles trocam a tática até o último minuto.")
+        fun ppg(g: List<JSONObject>): Double = g.sumOf { j -> val r = j.optString("result"); (if (r == "V") 3 else if (r == "E") 1 else 0).toInt() }.toDouble() / g.size
+        val weak = both.filter { it.optInt("rivalStrength") > it.optInt("myStrength") + 2 }
+        val def = weak.filter { it.optInt("mentality", 50) < 45 }
+        val att = weak.filter { it.optInt("mentality", 50) >= 45 }
+        if (def.size >= 2 && att.size >= 2) {
+            lines.add("🛡" to "Contra rival mais forte: postura defensiva rendeu ${"%.1f".format(ppg(def)).replace('.', ',')} pts/jogo (${def.size} jogos) e a postura de ataque ${"%.1f".format(ppg(att)).replace('.', ',')} (${att.size}).")
+        } else if (def.size >= 4 && ppg(def) < 0.8) {
+            lines.add("🛡" to "Contra rival mais forte você jogou recuado em ${def.size} jogos e fez só ${"%.1f".format(ppg(def)).replace('.', ',')} pts/jogo: recuar não segurou o placar.")
+        }
+    }
+    val mine = d.players.count { it.owner == "MY" }
+    if (mine in 1..20) lines.add("👥" to "Elenco curto ($mine jogadores): lesão e suspensão sem reposição derrubam o time. Na próxima, tenha 21 ou mais.")
+    if (lines.isEmpty() && rank == null) return
+    Column(Modifier.fillMaxWidth().padding(top = 14.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x22000000)).padding(12.dp)) {
+        Text("📚 O que esta competição ensinou", fontSize = 14.5.sp, fontWeight = FontWeight.ExtraBold)
+        for ((ic, t) in lines) Text("$ic  $t", fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Text("Para a próxima:", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = C.GOLD, modifier = Modifier.padding(top = 10.dp))
+        for (t in listOf(
+            "Comece pelo plano de arranque do Diretor: vender cedo o que sobra e treinar nos 5 treinadores sem parar.",
+            "Contra humano mais forte, jogue no 4-3-3 com estilo ofensivo: o app já aprende isso dos seus jogos.",
+            "Compare o valor do seu elenco com o da liga (aba Valor do plantel) a cada semana."
+        )) Text("• $t", fontSize = 13.sp, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -1461,7 +1503,7 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 roundDone = known(f, K.ROUND_DONE), roundTotal = known(f, K.ROUND_TOTAL),
                 rival = known(f, K.RIVAL_TEAM), human = known(f, K.RIVAL_HUMAN),
                 pct = c.percent, updated = f.values.maxOfOrNull { it.updatedAt } ?: 0L,
-                ended = Fixtures.seasonEnded(f, all, now),
+                ended = Hints.competitionOver(repo, slot, f, now),
                 missing = gameMissing.size,
                 missingNames = gameMissing.map { it.label },
                 nextAt = known(f, K.MATCH_AT)?.toLongOrNull(),

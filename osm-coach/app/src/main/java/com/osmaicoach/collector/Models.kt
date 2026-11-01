@@ -676,7 +676,7 @@ object OwnApp {
 
     fun looksLikeApp(fullText: String): Boolean {
         val t = Txt.norm(fullText)
-        if (t.contains("sessoes") && t.contains("ajustes") && t.contains("diretor")) return true
+        if ((t.contains("sessoes") || t.contains("agenda")) && t.contains("ajustes") && t.contains("diretor")) return true
         return MARKS.count { t.contains(Txt.norm(it)) } >= 1
     }
 }

@@ -29,7 +29,15 @@ object Hints {
     private fun kv(f: Map<String, StoredField>, k: String): String? = f[k]?.value?.takeIf { FieldMerge.known(it) }
 
     /** Telas desatualizadas deste slot (com as regras do Fresh). */
+    /** A competição deste slot terminou (todas as rodadas jogadas ou tela de fim de época lida): não há mais nada a pedir. */
+    suspend fun competitionOver(repo: Repo, slot: Int, f: Map<String, StoredField> = emptyMap(), now: Long = System.currentTimeMillis()): Boolean {
+        val fields = f.ifEmpty { repo.fieldMap(slot) }
+        if (Fixtures.seasonEnded(fields, repo.dao.matchesOf(slot), now)) return true
+        return repo.dao.plan(slot, "season")?.json?.let { runCatching { JSONObject(it).optBoolean("over") }.getOrNull() } == true
+    }
+
     suspend fun needsFor(repo: Repo, slot: Int, matchAt: Long?, active: Boolean, now: Long = System.currentTimeMillis()): List<Fresh.Need> {
+        if (competitionOver(repo, slot, now = now)) return emptyList()
         val sp = Sponsors.fromJson(repo.dao.plan(slot, "sponsor")?.json)?.first.orEmpty()
         val lastMatch = runCatching {
             repo.dao.matchesOf(slot).filter { it.scoreMine != null || it.result != null }.mapNotNull { Fixtures.kickoff(it) }.filter { it <= now }.maxOrNull()
@@ -43,6 +51,7 @@ object Hints {
     ): List<Playbook.Tip> = runCatching {
         val now = System.currentTimeMillis()
         val f = repo.fieldMap(slot)
+        if (competitionOver(repo, slot, f, now)) return@runCatching emptyList<Playbook.Tip>()
         val xi = xi0 ?: runCatching {
             TacticEngine.recommend(Director.tacticInput(repo, slot))?.rows?.flatten()?.mapNotNull { it?.nameKey }?.toSet()
         }.getOrNull() ?: emptySet()
@@ -125,6 +134,8 @@ object Hints {
         val f = repo.fieldMap(slot)
         val title = kv(f, K.TEAM) ?: kv(f, K.HUB_TITLE) ?: "Slot $slot"
         val spend = Settings.get(ctx, "spend_bc", "0") == "1"
+        // fim da liga/batalha: a tela de fim de época basta; nada mais a pedir até começar outra competição
+        if (competitionOver(repo, slot, f)) return listOf(Hint("🏁", "Competição encerrada", "Nada a fazer neste slot até a nova liga ou batalha começar.", false))
         val tips = slotTips(repo, slot, null, null, title, trainRates(repo), spend)
         val now = System.currentTimeMillis()
         val st0 = f[K.SLOT_STATE]?.value
