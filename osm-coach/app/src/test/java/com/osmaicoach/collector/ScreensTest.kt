@@ -140,7 +140,7 @@ class ScreensTest {
         val byType = needs.associateBy { it.type }
         assertEquals(2, byType[ScreenType.TRAINING]!!.urgency)       // terminou
         assertEquals(2, byType[ScreenType.PREGAME]!!.urgency)        // jogo em 30 min, lido há 5 h
-        assertEquals(2, byType[ScreenType.DOCTOR]!!.urgency)         // jogo hoje, nunca li
+        assertNull(byType[ScreenType.DOCTOR])                         // plantel sem lesionado: não pede o médico
         assertNull(byType[ScreenType.SQUAD])                          // lido há 2 h
         assertTrue(needs.first().urgency >= needs.last().urgency)
         assertTrue(Fresh.needs(Fresh.In(2, seen, emptyList(), null, false, now, active = false)).isEmpty())
@@ -224,7 +224,7 @@ class ScreensTest {
         val now = 100 * h
         fun need(seen: Map<String, Long>, last: Long?) = Fresh.needs(
             Fresh.In(1, seen + mapOf("SQUAD" to now, "MARKET" to now, "TRAINING" to now, "PREGAME" to now, "CALENDAR" to now, "SPONSORS" to now, "SPECIALISTS" to now, "STADIUM" to now, "STATS" to now, "DEALS" to now),
-                emptyList(), now + 5 * h, false, now, true, last)
+                emptyList(), now + 5 * h, false, now, true, last, injured = 1)
         ).filter { it.type == ScreenType.DOCTOR }
         // lido depois do último jogo: tudo certo, sem cobrar de novo (mesmo "hoje")
         assertTrue(need(mapOf("DOCTOR" to now - 30 * h, "LAWYER" to now - 30 * h), now - 40 * h).isEmpty())

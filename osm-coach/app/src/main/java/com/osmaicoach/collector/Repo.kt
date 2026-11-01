@@ -855,6 +855,9 @@ class Repo(private val ctx: Context) {
         }
     }
 
+    /** Jogadores com cartão vermelho no plantel (nameKeys). */
+    suspend fun redsOf(slot: Int): Set<String> = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
+
     /** Lesionados e suspensos lidos do Médico/Advogado (nameKeys). */
     suspend fun outByDoctorOrLawyer(slot: Int): Pair<Set<String>, Set<String>> {
         fun names(j: JSONObject): Set<String> {

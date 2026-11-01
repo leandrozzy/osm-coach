@@ -601,6 +601,23 @@ object Director {
         return ks.all { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS } == true }
     }
 
+    /**
+     * O que falta ler (ou reler) antes de gerar a tática do próximo jogo: Pré-jogo (forças dos dois), Análise do rival
+     * (formação/estilo) e a tela de forças do rival (valor do elenco). Treino secreto esconde força/estilo: aí só o valor.
+     */
+    fun tacticGaps(f: Map<String, StoredField>, now: Long): List<Pair<String, String>> {
+        fun fresh(k: String, ms: Long = RIVAL_FRESH_MS) = f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= ms } == true
+        val secret = SecretTraining.on(f)
+        val out = ArrayList<Pair<String, String>>()
+        if (!fresh(K.MY_STRENGTH) || (!secret && !fresh(K.RIVAL_STRENGTH)))
+            out.add("Pré-jogo (forças dos dois times)" to "Central → toque no card do slot (Próximo jogo)")
+        if (!secret && (!fresh(K.RIVAL_FORMATION) || !fresh(K.RIVAL_PLAN)))
+            out.add("Análise do rival (formação e estilo)" to "Menu ☰ → Analista de Dados → Ver relatório")
+        if (!fresh(K.RIVAL_VALUE, 12L * 3600_000L))
+            out.add("Forças do rival (valor do elenco dele)" to "Plantel do rival (topo) ou tela de forças")
+        return out
+    }
+
     suspend fun tacticReady(repo: Repo, slot: Int): Boolean {
         val p = repo.dao.plan(slot, "tactic") ?: return false
         val j = try { JSONObject(p.json) } catch (e: Exception) { return false }

@@ -169,7 +169,7 @@ object GenState {
     }
 }
 
-fun startGeneration(ctx: Context, kind: String, slot: Int) {
+fun startGeneration(ctx: Context, kind: String, slot: Int, force: Boolean = false) {
     val app = ctx.applicationContext
     if (!GenState.begin(kind, slot)) return
     if (kind == "tactic" || kind == "tactic_ai") MetaRefresh.refreshIfStale(app)
@@ -178,6 +178,8 @@ fun startGeneration(ctx: Context, kind: String, slot: Int) {
         val r = try {
             when (kind) {
                 "tactic" -> {
+                    val gaps = if (force) emptyList() else Director.tacticGaps(Repo(app).fieldMap(slot), System.currentTimeMillis())
+                    if (gaps.isNotEmpty()) Director.Outcome(false, null, "Antes de gerar, leia: " + gaps.joinToString("; ") { it.first } + ".") else {
                     // Um toque: tática pela simulação e, se houver IA configurada, a IA revisa na sequência
                     // (Gemini, Groq… o que tiver cota); se a IA falhar, fica a da simulação.
                     val local = Director.generateTacticLocal(Repo(app), slot)
@@ -187,6 +189,7 @@ fun startGeneration(ctx: Context, kind: String, slot: Int) {
                         AiStatus.set("")
                         if (ai != null && ai.ok) ai else local
                     } else local
+                    }
                 }
                 "tactic_ai" -> Director.refineTactic(app, Repo(app), slot)
                 else -> Director.marketNote(app, Repo(app), slot)

@@ -217,6 +217,15 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
         repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
         autoTacticAt[slot] = now
+        val gaps = Director.tacticGaps(f, now)
+        if (gaps.isNotEmpty()) {
+            why(slot, "faltam leituras antes de gerar: " + gaps.joinToString("; ") { it.first })
+            if (now - (autoNoticeAt[slot] ?: 0L) > 60_000L) {
+                autoNoticeAt[slot] = now
+                CaptureService.instance?.notice("S$slot: para gerar a tática falta ler: " + gaps.joinToString(" • ") { it.first })
+            }
+            return
+        }
         val rivalChanged = valid && old != null && !same
         CaptureService.instance?.notice("S$slot: " + (if (rivalChanged) "o rival mudou; gerando a tática de novo…" else "gerando a tática…"))
         startGeneration(ctx, "tactic", slot)

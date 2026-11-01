@@ -88,3 +88,28 @@ class RivalConfirmedTest {
         org.junit.Assert.assertFalse(Director.rivalConfirmed(ok + (K.RIVAL_STRENGTH to sf("NI", now)), now))
     }
 }
+
+class TacticGateTest {
+    private fun sf(v: String, at: Long) = StoredField(v, 0.9, at)
+    private val now = 100L * 3600_000L
+    private fun full() = mapOf(
+        K.MY_STRENGTH to sf("80", now), K.RIVAL_STRENGTH to sf("75", now), K.RIVAL_FORMATION to sf("4-3-3", now),
+        K.RIVAL_PLAN to sf("Ofensivo", now), K.RIVAL_VALUE to sf("50,0M", now)
+    )
+    @org.junit.Test fun semLeituraNaoGera() {
+        org.junit.Assert.assertEquals(3, Director.tacticGaps(emptyMap(), now).size)
+        org.junit.Assert.assertTrue(Director.tacticGaps(full(), now).isEmpty())
+        val g = Director.tacticGaps(full() - K.RIVAL_FORMATION, now)
+        org.junit.Assert.assertEquals(1, g.size)
+        org.junit.Assert.assertTrue(g[0].first.startsWith("Análise"))
+    }
+    private fun inp(reds: Int = 0, injured: Int = 0, timers: List<Timers.Entry> = emptyList()) =
+        Fresh.In(1, emptyMap(), timers, now + 3_600_000L, false, now, true, now - 86_400_000L, reds, injured)
+    @org.junit.Test fun medicoAdvogadoSoComProblemaNoPlantel() {
+        org.junit.Assert.assertTrue(Fresh.needs(inp()).none { it.type == ScreenType.LAWYER || it.type == ScreenType.DOCTOR })
+        org.junit.Assert.assertTrue(Fresh.needs(inp(reds = 1)).any { it.type == ScreenType.LAWYER })
+        org.junit.Assert.assertTrue(Fresh.needs(inp(injured = 2)).any { it.type == ScreenType.DOCTOR })
+        val busy = listOf(Timers.Entry(1, "lawyer", now + 3_600_000L, "advogado: recurso"))
+        org.junit.Assert.assertTrue(Fresh.needs(inp(reds = 1, timers = busy)).none { it.type == ScreenType.LAWYER })
+    }
+}

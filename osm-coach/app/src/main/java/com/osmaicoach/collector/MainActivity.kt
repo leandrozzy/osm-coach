@@ -1301,6 +1301,8 @@ data class SlotSummary(
     val tacticReady: Boolean = false,
     /** Tática existe, mas o rival (formação/estilo/força) não foi relido nas últimas 3 h: não confiar ainda. */
     val tacticStale: Boolean = false,
+    /** Faltam leituras (Pré-jogo, Análise, valor do rival) para gerar a tática. */
+    val rivalGaps: Boolean = false,
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
     val needsResult: Boolean = false,
@@ -1526,6 +1528,7 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 missingNames = gameMissing.map { it.label },
                 nextAt = known(f, K.MATCH_AT)?.toLongOrNull(),
                 tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && Director.rivalConfirmed(f, now) },
+                rivalGaps = Director.tacticGaps(f, now).isNotEmpty(),
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
@@ -1971,6 +1974,7 @@ private fun NextGameHero(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         TacticStatusLine(s)
         val (label, tab, primary) = when {
             s.needsResult -> Triple("📊 Registrar resultado", 5, true)
+            s.tacticStale || (!s.tacticReady && s.rivalGaps) -> Triple("🔎 Ler o rival antes da tática", 4, true)
             !s.tacticReady && inWindow -> Triple("⚡ Gerar tática agora", 4, true)
             s.tacticReady -> Triple("Ver a tática", 4, false)
             else -> Triple("Abrir o slot", 0, false)
@@ -1992,7 +1996,7 @@ private fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         if (s.ended || s.state != null) continue
         val at = s.nextAt
         if (s.needsResult) todo.add(Todo(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
-        if (at != null && at > now && s.tacticStale && at - now <= Director.TACTIC_WINDOW_MS)
+        if (at != null && at > now && (s.tacticStale || s.rivalGaps) && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
             todo.add(Todo(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
         else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
             todo.add(Todo(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
@@ -2154,6 +2158,7 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
         TacticStatusLine(s)
         val inWindow = at!! - now <= Director.TACTIC_WINDOW_MS
         when {
+            s.tacticStale || (!s.tacticReady && s.rivalGaps) -> CtaButton("🔎 Ler o rival antes da tática",  Modifier.padding(top = 12.dp)) { onTab(4) }
             !s.tacticReady && inWindow -> CtaButton("⚡ Gerar tática", Modifier.padding(top = 12.dp)) { onTab(4) }
             s.tacticReady -> CtaButton("Ver a tática", Modifier.padding(top = 12.dp)) { onTab(4) }
             else -> CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }
@@ -2221,6 +2226,7 @@ private fun TacticStatusLine(s: SlotSummary) {
         s.tacticReady && s.autoAt != null -> Triple("✅", "Tática gerada ${ago(s.autoAt)}: monte no OSM antes do jogo", C.OK)
         s.tacticReady -> Triple("✅", "Tática pronta: monte no OSM antes do jogo", C.OK)
         far -> Triple("⏳", "Jogo longe: a tática é gerada nas últimas 8 h antes dele", C.MUTED)
+        s.rivalGaps -> Triple("🔎", "Antes de gerar a tática: leia o Pré-jogo, a Análise e as forças do rival", C.WARN)
         else -> Triple("⚡", "Falta gerar a tática deste jogo", C.GOLD)
     }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -4334,7 +4340,17 @@ private fun SlotTactic(slot: Int, d: SlotData) {
     } else {
         Text("✔ Tudo lido para este jogo", color = C.OK, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
     }
-    GenPanel("tactic", slot, "⚡ Gerar tática para o próximo jogo") { startGeneration(ctx, "tactic", slot) }
+    val gaps = Director.tacticGaps(d.fields, System.currentTimeMillis())
+    if (gaps.isEmpty()) {
+        GenPanel("tactic", slot, "⚡ Gerar tática para o próximo jogo") { startGeneration(ctx, "tactic", slot) }
+    } else {
+        Panel {
+            Text("🔎 Leia antes de gerar (a tática precisa do rival)", color = C.WARN, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            for ((what, where) in gaps) Text("• $what → $where", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            Text("Leituras valem por 3 h (o rival humano pode mudar a tática). Com o app ligado, passe por essas telas no OSM.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+        }
+        GenPanel("tactic", slot, "Gerar mesmo assim (menos precisa)") { startGeneration(ctx, "tactic", slot, force = true) }
+    }
     val plan = d.tactic
     if (plan == null) {
         EmptyState("⚡", "Nenhuma tática gerada ainda", "A tática é calculada na hora com o seu elenco, a força do rival, o árbitro e o que já deu certo ou errado antes. Toque no botão acima.")

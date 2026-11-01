@@ -42,7 +42,11 @@ object Hints {
         val lastMatch = runCatching {
             repo.dao.matchesOf(slot).filter { it.scoreMine != null || it.result != null }.mapNotNull { Fixtures.kickoff(it) }.filter { it <= now }.maxOrNull()
         }.getOrNull()
-        return Fresh.needs(Fresh.In(slot, repo.seenMap(slot), repo.timers(slot), matchAt, sp.any { it.games <= 1 }, now, active, lastMatch))
+        val (inj, susp) = repo.outByDoctorOrLawyer(slot)
+        val reds = repo.redsOf(slot).size
+        val noAppeal = repo.dao.plan(slot, "noappeal")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?.let { it.optInt("round", -2) == (repo.fieldMap(slot)[K.ROUND]?.value?.toIntOrNull() ?: -1) } == true
+        return Fresh.needs(Fresh.In(slot, repo.seenMap(slot), repo.timers(slot), matchAt, sp.any { it.games <= 1 }, now, active, lastMatch, reds, inj.size, noAppeal))
     }
 
     suspend fun slotTips(

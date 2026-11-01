@@ -199,7 +199,19 @@ class CaptureService : AccessibilityService() {
                 val ok = Director.tacticValid(j, p.at, repo.fieldMap(slot), now)
                 val ch = rivalChangesOf(repo, slot)
                 val warn = if (ch.isNotEmpty()) "⚠ O rival mudou: " + RivalWatch.headline(ch) + ". Gere uma nova tática.\n" else ""
-                "S$slot • vs ${j.optString("rival")}\n" + (if (ok) "" else "⚠ Tática de outro jogo: gere de novo.\n") + warn + Director.tacticSummary(j)
+                if (!ok) {
+                    val f = repo.fieldMap(slot)
+                    val next = f[K.RIVAL_TEAM]?.value?.takeIf { FieldMerge.known(it) }
+                    val at = f[K.MATCH_AT]?.value?.toLongOrNull()
+                    val gaps = Director.tacticGaps(f, now)
+                    "S$slot" + (next?.let { " • próximo jogo vs $it" } ?: "") + "\n" +
+                        "Ainda não há tática para este jogo (a guardada era contra ${j.optString("rival")}).\n" +
+                        (if (at != null && at - now > Director.TACTIC_WINDOW_MS) "Ela é gerada nas últimas 8 h antes do jogo."
+                        else if (gaps.isNotEmpty()) "Antes de gerar, leia: " + gaps.joinToString(", ") { it.first } + "."
+                        else "Toque em 📱 App → Tática para gerar.")
+                } else {
+                    "S$slot • vs ${j.optString("rival")}\n" + warn + Director.tacticSummary(j)
+                }
             }
         }
     } catch (e: Exception) {
