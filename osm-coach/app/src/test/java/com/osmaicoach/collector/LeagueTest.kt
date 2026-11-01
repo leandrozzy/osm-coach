@@ -81,7 +81,7 @@ class RivalConfirmedTest {
     private fun sf(v: String, at: Long) = StoredField(v, 0.9, at)
     @org.junit.Test fun rivalConfirmedExigeLeituraRecente() {
         val now = 100L * 3600_000L
-        val ok = mapOf(K.RIVAL_FORMATION to sf("4-3-3", now - 3_600_000L), K.RIVAL_PLAN to sf("Ofensivo", now - 3_600_000L), K.RIVAL_STRENGTH to sf("70", now - 60_000L))
+        val ok = mapOf(K.MY_STRENGTH to sf("80", now), K.RIVAL_FORMATION to sf("4-3-3", now - 3_600_000L), K.RIVAL_PLAN to sf("Ofensivo", now - 3_600_000L), K.RIVAL_STRENGTH to sf("70", now - 60_000L))
         org.junit.Assert.assertTrue(Director.rivalConfirmed(ok, now))
         org.junit.Assert.assertFalse(Director.rivalConfirmed(ok + (K.RIVAL_FORMATION to sf("4-3-3", now - 5 * 3_600_000L)), now))
         org.junit.Assert.assertFalse(Director.rivalConfirmed(ok - K.RIVAL_PLAN, now))
@@ -97,7 +97,7 @@ class TacticGateTest {
         K.RIVAL_PLAN to sf("Ofensivo", now), K.RIVAL_VALUE to sf("50,0M", now)
     )
     @org.junit.Test fun semLeituraNaoGera() {
-        org.junit.Assert.assertEquals(3, Director.tacticGaps(emptyMap(), now).size)
+        org.junit.Assert.assertEquals(2, Director.tacticGaps(emptyMap(), now).size)
         org.junit.Assert.assertTrue(Director.tacticGaps(full(), now).isEmpty())
         val g = Director.tacticGaps(full() - K.RIVAL_FORMATION, now)
         org.junit.Assert.assertEquals(1, g.size)

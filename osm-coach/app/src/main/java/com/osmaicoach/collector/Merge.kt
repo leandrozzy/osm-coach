@@ -40,7 +40,9 @@ object FieldMerge {
             // bônus de outro jogo (até o digitado à mão): a leitura de agora vale (e renova a data da leitura)
             return StoredField(v, incoming.conf, now)
         }
-        if (old.value == v) return if (incoming.conf > old.conf) StoredField(v, incoming.conf, now) else null
+        // mesma leitura: só renova a data (a tática confere "lido há pouco"); sem escrever a cada quadro (30 s)
+        if (old.value == v) return if (incoming.conf > old.conf) StoredField(v, incoming.conf, now)
+        else if (now - old.updatedAt > 30_000L) StoredField(v, old.conf, now) else null
         if (key == K.MATCH_AT) {
             // O horário do calendário (confiança alta) é o do jogo. A contagem do pré-jogo só vale se
             // ainda não houver horário futuro guardado.

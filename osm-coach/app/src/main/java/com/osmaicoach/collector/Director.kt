@@ -596,10 +596,7 @@ object Director {
 
     /** Rival conferido: formação, estilo e força lidos há pouco (3 h). Sem isso a tática pode estar baseada em dado velho. */
     const val RIVAL_FRESH_MS = 3L * 3600_000L
-    fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean {
-        val ks = listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_STRENGTH)
-        return ks.all { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS } == true }
-    }
+    fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean = tacticGaps(f, now).isEmpty()
 
     /**
      * O que falta ler (ou reler) antes de gerar a tática do próximo jogo: Pré-jogo (forças dos dois), Análise do rival
@@ -613,10 +610,13 @@ object Director {
             out.add("Pré-jogo (forças dos dois times)" to "Central → toque no card do slot (Próximo jogo)")
         if (!secret && (!fresh(K.RIVAL_FORMATION) || !fresh(K.RIVAL_PLAN)))
             out.add("Análise do rival (formação e estilo)" to "Menu ☰ → Analista de Dados → Ver relatório")
-        if (!fresh(K.RIVAL_VALUE, 12L * 3600_000L))
-            out.add("Forças do rival (valor do elenco dele)" to "Plantel do rival (topo) ou tela de forças")
         return out
     }
+
+    /** Recomendado, não obrigatório (o OCR do valor falha às vezes): valor do elenco do rival, lido no Plantel dele. */
+    fun tacticAdvice(f: Map<String, StoredField>, now: Long): String? =
+        if (f[K.RIVAL_VALUE]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= 12L * 3600_000L } == true) null
+        else "Leia também o Plantel do rival (valor do elenco dele) para a tática ficar mais precisa."
 
     suspend fun tacticReady(repo: Repo, slot: Int): Boolean {
         val p = repo.dao.plan(slot, "tactic") ?: return false

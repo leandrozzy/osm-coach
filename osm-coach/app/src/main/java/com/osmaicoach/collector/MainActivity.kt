@@ -4342,12 +4342,13 @@ private fun SlotTactic(slot: Int, d: SlotData) {
     }
     val gaps = Director.tacticGaps(d.fields, System.currentTimeMillis())
     if (gaps.isEmpty()) {
+        Director.tacticAdvice(d.fields, System.currentTimeMillis())?.let { Text("💡 $it", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 6.dp)) }
         GenPanel("tactic", slot, "⚡ Gerar tática para o próximo jogo") { startGeneration(ctx, "tactic", slot) }
     } else {
         Panel {
             Text("🔎 Leia antes de gerar (a tática precisa do rival)", color = C.WARN, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             for ((what, where) in gaps) Text("• $what → $where", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-            Text("Leituras valem por 3 h (o rival humano pode mudar a tática). Com o app ligado, passe por essas telas no OSM.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+            Text("Leituras valem por 3 h (o rival humano pode mudar a tática). Com o app ligado, passe por essas telas no OSM; a leitura repetida renova o prazo.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
         }
         GenPanel("tactic", slot, "Gerar mesmo assim (menos precisa)") { startGeneration(ctx, "tactic", slot, force = true) }
     }

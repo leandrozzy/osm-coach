@@ -37,6 +37,11 @@ class Repo(private val ctx: Context) {
             if (o != null && now < o.updatedAt && FieldMerge.known(o.value)) continue
             if (k in CHECKED && o != null && old[k]?.source != "manual") noteConflict(slot, k, o, r.value, now)
             val n = FieldMerge.merge(k, o, r, now) ?: continue
+            // mesma leitura repetida: só renova a data de leitura (mantém a origem e não conta como mudança)
+            if (o != null && o.value == n.value && n.conf == o.conf) {
+                dao.putField(FieldEntity(slot, k, n.value, n.conf, n.updatedAt, old[k]?.source ?: source))
+                continue
+            }
             dao.putField(FieldEntity(slot, k, n.value, n.conf, n.updatedAt, source))
             if (k == K.RIVAL_FORMATION || k == K.MY_FORMATION) rememberFormation(n.value)
             changed++
