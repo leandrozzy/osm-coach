@@ -375,6 +375,10 @@ class Repo(private val ctx: Context) {
             dao.putPlan(PlanEntity(slot, "old_" + tag + "_season", it.json, it.at))
             dao.deletePlan(slot, "season")
         }
+        dao.plan(slot, "league")?.let {
+            dao.putPlan(PlanEntity(slot, "old_" + tag + "_league", it.json, it.at))
+            dao.deletePlan(slot, "league")
+        }
         for (k in listOf(K.ROUND, K.ROUND_DONE, K.MATCH_AT)) dao.deleteField(slot, k)
         if (clearClub) {
             dao.deleteFieldsOf(slot)
@@ -870,6 +874,11 @@ class Repo(private val ctx: Context) {
             // vale o maior teto já visto (o controle de preço começa no máximo)
             val old = dao.plan(slot, "ceiling")?.json?.let { runCatching { org.json.JSONObject(it).optDouble("r", 0.0) }.getOrNull() } ?: 0.0
             if (r > old) dao.putPlan(PlanEntity(slot, "ceiling", org.json.JSONObject().put("r", r).put("at", now).toString(), now))
+        }
+        // tabelas da liga inteira (Classificação / Valor do plantel): guarda para comparar o elenco e calibrar a tática
+        League.read(ocr)?.let { (kind, rows) ->
+            val old = dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+            dao.putPlan(PlanEntity(slot, "league", League.merge(old, kind, rows, now).toString(), now))
         }
         val deals = Sponsors.parse(ocr)
         if (deals.size >= 2) {

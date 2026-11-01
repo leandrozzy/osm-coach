@@ -862,8 +862,21 @@ private fun StrengthsAttention(d: SlotData) {
         Triple("Goleiro", n(K.MY_GOL), n(K.RIVAL_GOL)), Triple("Defesa", n(K.MY_DEF), n(K.RIVAL_DEF)),
         Triple("Meio-campo", n(K.MY_MID), n(K.RIVAL_MID)), Triple("Ataque", n(K.MY_ATK), n(K.RIVAL_ATK))
     ).filter { it.second != null && it.third != null }
-    val good = sectors.filter { it.second!! - it.third!! >= 3 }.sortedByDescending { it.second!! - it.third!! }.map { "${it.first}: ${it.second} × ${it.third}" }
+    val good = ArrayList<String>(sectors.filter { it.second!! - it.third!! >= 3 }.sortedByDescending { it.second!! - it.third!! }.map { "${it.first}: ${it.second} × ${it.third}" })
     val bad = ArrayList(sectors.filter { it.second!! - it.third!! <= -3 }.sortedBy { it.second!! - it.third!! }.map { "${it.first}: ${it.second} × ${it.third}" })
+    // campanha na liga (tabela de classificação): o que cada time marca e sofre por jogo
+    val st = League.table(d.league, "st")
+    val mr = League.rates(League.find(st, known(d.fields, K.TEAM) ?: known(d.fields, K.HUB_TITLE)))
+    val rr = League.rates(League.find(st, known(d.fields, K.RIVAL_TEAM)))
+    val avgG = League.leagueAvgGoals(st)
+    fun f1(x: Double) = "%.1f".format(x).replace('.', ',')
+    if (mr != null && rr != null && avgG != null) {
+        if (rr.gf >= avgG * 1.25) bad.add("Rival marca ${f1(rr.gf)} gols/jogo (média da liga ${f1(avgG)})")
+        else if (rr.gf <= avgG * 0.75) good.add("Rival marca pouco: ${f1(rr.gf)} gols/jogo (média ${f1(avgG)})")
+        if (rr.ga >= avgG * 1.25) good.add("Rival sofre ${f1(rr.ga)} gols/jogo: defesa frágil")
+        else if (rr.ga <= avgG * 0.75) bad.add("Rival sofre pouco: ${f1(rr.ga)} gols/jogo")
+        if (mr.ga >= avgG * 1.25) bad.add("Seu time sofre ${f1(mr.ga)} gols/jogo (média ${f1(avgG)})")
+    }
     if (known(d.fields, K.RIVAL_HUMAN) == "Sim") bad.add("Rival humano: ele pode trocar a tática; releia a análise perto do jogo")
     d.win?.let { if (it.win < 40) bad.add("Chance de vitória baixa (${it.win}%)") }
     if (sectors.isEmpty() && bad.isEmpty()) return
@@ -1350,6 +1363,8 @@ data class SlotData(
     val rivalChanged: List<RivalWatch.Change> = emptyList(),
     /** Resumo do fim da competição (posição, pontos, campeão, valor). */
     val season: JSONObject? = null,
+    /** Tabelas da liga inteira (Classificação e Valor do plantel) lidas do jogo. */
+    val league: JSONObject? = null,
     /** O que os gols reais dos 4 slots ensinaram ao modelo. */
     val learned: Learned.Model? = null,
     /** Táticas mais prováveis do rival humano (pelo histórico do apelido). */
@@ -1414,6 +1429,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
         progress = runCatching { repo.progress(slot) }.getOrNull(),
         rivalChanged = runCatching { rivalChangesOf(repo, slot) }.getOrDefault(emptyList()),
         season = dao.plan(slot, "season")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
+        league = dao.plan(slot, "league")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
         win = tplan?.takeIf { tacticCurrent(it, f) }?.let { Director.winProb(repo, slot, it) },
         evidence = repo.evidence(slot),
         conflicts = repo.conflicts(slot),

@@ -74,7 +74,7 @@ object Hints {
         val state = f[K.SLOT_STATE]?.value
         val matchTime = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull()
         val needs = needsFor(repo, slot, matchTime, (state == null || state == "ativo") && kv(f, K.TEAM) != null, now)
-        Playbook.tips(
+        val base = Playbook.tips(
             Playbook.Input(
                 events = events, activeEvents = active, upcomingEvents = upcoming,
                 prep = prep, prepAt = prepAt,
@@ -97,7 +97,50 @@ object Hints {
                 seats = work.seats, matchAt = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull(), now = now
             )
         )
+        base + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
     }.getOrDefault(emptyList())
+
+    /** Seu elenco contra o da liga (tabela "Valor do plantel") e o convite para ler as tabelas quando faltam. Só informação: não conta na bolha. */
+    fun leagueTips(lj: JSONObject?, f: Map<String, StoredField>, mySize: Int, now: Long): List<Playbook.Tip> {
+        val done = kv(f, K.ROUND_DONE)?.toIntOrNull() ?: 0
+        val stAt = lj?.optLong("stAt", 0L) ?: 0L
+        val vaAt = lj?.optLong("vaAt", 0L) ?: 0L
+        val stale = 7L * 24 * 3600000L
+        val out = ArrayList<Playbook.Tip>()
+        if (done >= 6 && (now - stAt > stale || now - vaAt > stale)) {
+            out.add(
+                Playbook.Tip(
+                    "📊", "Leia a tabela da liga: Classificação e Valor do plantel",
+                    "Menu ☰ → Classificação, abas Classificação e Valor do plantel (role até o fim). O app compara o seu elenco com os rivais e ajusta a tática pelos gols que cada time marca e sofre.", 35, 0
+                )
+            )
+        }
+        val vals = League.table(lj, "va")
+        val me = League.find(vals, kv(f, K.TEAM) ?: kv(f, K.HUB_TITLE))
+        val c = League.squad(vals, me) ?: return out
+        out.add(Playbook.Tip("🏆", "Valor do elenco: ${c.rank}º de ${c.of} na liga", "Seu elenco vale ${"%.0f".format(c.value)}M" + (c.topValue?.let { "; o líder tem ${"%.0f".format(it)}M" } ?: "") + ".", 25, 0))
+        val mp = c.medianPlayers
+        val myPlayers = c.players ?: mySize
+        if (mp != null && myPlayers < mp - 1.5) {
+            out.add(
+                Playbook.Tip(
+                    "👥", "Seu elenco é menor que o da liga ($myPlayers × mediana ${"%.0f".format(mp)})",
+                    "Elenco curto fica sem reposição em lesão e suspensão e sobe menos de valor. Contrate reservas jovens e baratas até perto de ${"%.0f".format(mp)} (sem gastar Boss Coins: só com caixa e mercado).", 62, 2
+                )
+            )
+        }
+        val ma = c.medianAvg
+        val myAvg = c.avg
+        if (ma != null && myAvg != null && myAvg < ma * 0.85) {
+            out.add(
+                Playbook.Tip(
+                    "📈", "Valor médio por jogador abaixo da liga (${"%.1f".format(myAvg).replace('.', ',')}M × mediana ${"%.1f".format(ma).replace('.', ',')}M)",
+                    "O valor sobe com treino e com jogador jovem de alto potencial. Mantenha os 5 treinadores sempre ocupados e venda cedo quem só sobra no elenco.", 58, 6
+                )
+            )
+        }
+        return out
+    }
 
     private val BY_SCREEN = mapOf(
         ScreenType.TRAINING to setOf("🏋", "🗓", "⏰"),

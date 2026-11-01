@@ -356,6 +356,7 @@ object Director {
         fun bonus(k: String) = f[k]?.takeIf { FieldMerge.fresh(k, it, System.currentTimeMillis()) }?.value
             ?.let { Regex("(\\d{1,3})").find(it)?.groupValues?.get(1)?.toIntOrNull() }
         val matches = repo.dao.matchesOf(slot)
+        val standings = League.table(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, "st")
         val played = matches.filter { it.result != null && it.round != null }.sortedByDescending { it.round }
         val rival = str(K.RIVAL_TEAM)?.let { Txt.key(it) }
         val h2h = if (rival != null && rival.length >= 3) {
@@ -378,6 +379,9 @@ object Director {
             headToHead = h2h,
             calib = Calib.offset(repo.dao.tacticLogs(slot).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }),
             learned = runCatching { Learned.fit(allLogs(repo)) }.getOrNull(),
+            myRates = League.rates(League.find(standings, str(K.TEAM) ?: str(K.HUB_TITLE))),
+            rivalRates = League.rates(League.find(standings, str(K.RIVAL_TEAM))),
+            leagueTeamGoals = League.leagueAvgGoals(standings),
             leagueGoals = runCatching { repo.dao.plan(slot, "lstats")?.json?.let { JSONObject(it).optDouble("avg", Double.NaN) }?.takeIf { !it.isNaN() } }.getOrNull(),
             meta = run {
                 val my = int(K.MY_STRENGTH)

@@ -380,7 +380,12 @@ object WinModel {
         /** Pesos corrigidos pelos gols reais dos seus jogos (Learned.fit); null = só o modelo de partida. */
         val learned: Learned.Model? = null,
         /** Gols por jogo (os dois times) na liga do slot, lidos da tela de Estatísticas: calibra o nível de gols. */
-        val leagueGoals: Double? = null
+        val leagueGoals: Double? = null,
+        /** Gols marcados/sofridos por jogo na campanha (tabela da liga): meu time e o rival. */
+        val myRates: League.Rates? = null,
+        val rivalRates: League.Rates? = null,
+        /** Média de gols marcados por time por jogo na liga (tabela de classificação). */
+        val leagueTeamGoals: Double? = null
     )
 
     /** Efeito de um fator: no log dos meus gols esperados, no log dos gols do rival e na imprevisibilidade. */
@@ -411,6 +416,16 @@ object WinModel {
         // forças (com o XI escolhido, quando há tática)
         val atkGap = atk - (0.8 * rDef + 0.2 * rGk)
         val defGap = rAtk - (0.8 * def + 0.2 * gk)
+        // campanha na liga: o que cada time realmente marca e sofre (peso pequeno: a força já pesa acima)
+        val lAvg = i.leagueTeamGoals?.takeIf { it in 0.7..3.0 } ?: levelGoals(i)
+        val mr = i.myRates
+        val rr = i.rivalRates
+        if (mr != null && rr != null && lAvg > 0.5) {
+            val w = minOf(1.0, minOf(mr.games, rr.games) / 24.0) * 0.30
+            val myExp = ((mr.gf + rr.ga) / 2.0).coerceAtLeast(0.2)
+            val oppExp = ((rr.gf + mr.ga) / 2.0).coerceAtLeast(0.2)
+            t.add(Term("Campanha na liga (gols marcados e sofridos)", (w * kotlin.math.ln(myExp / lAvg)).coerceIn(-0.25, 0.25), (w * kotlin.math.ln(oppExp / lAvg)).coerceIn(-0.25, 0.25)))
+        }
         t.add(Term("Meu ataque × defesa rival", atkGap / 28.0, 0.0))
         t.add(Term("Ataque rival × minha defesa", 0.0, defGap / 28.0))
         val midGap = mid - rMid
