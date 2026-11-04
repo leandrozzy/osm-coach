@@ -34,26 +34,25 @@ class EngineTest {
         assertEquals(30, r.diff)
     }
 
-    @Test fun strongRivalMeansSolidDefenseAndLowMentality() {
+    @Test fun strongRivalStillAttacksWithThreeUpFront() {
+        // histórico real (04/11): recuar (5-x-x, 4-5-1, Contra-ataque) perdeu mais do que a força explicava
         val r = TacticEngine.recommend(input(70, 90))!!
         val lines = Formations.lines(r.tactic.formation)
         assertTrue(lines.first() >= 4)
-        assertTrue(lines.last() <= 2)
-        assertTrue(r.tactic.mentality <= 42)
-        // modelo de referência do OSM para o azarão: atacantes ficam lá na frente para o contra-ataque
+        assertEquals(3, lines.last())
+        assertTrue(r.tactic.mentality in 45..65)
         assertEquals("Atacar apenas", r.tactic.advAttack)
-        assertEquals("Ajudar a defesa", r.tactic.advMid)
+        assertEquals("Manter posições", r.tactic.advMid)
     }
 
-    @Test fun underdogFollowsTheCommunityModel() {
+    @Test fun underdogPlaysFourThreeThreeWingsNotCounter() {
         val r = TacticEngine.recommend(input(70, 90).copy(rivalFormation = "4-3-3 A"))!!
-        // azarão: bloco compacto com 2 atacantes que ficam na frente (não o 5-4-1 que ficava sem gol)
-        assertEquals("5-3-2", Formations.base(r.tactic.formation))
-        assertEquals("Contra-ataque", r.tactic.playStyle)
+        assertEquals("4-3-3", Formations.base(r.tactic.formation))
+        assertEquals("Jogar pelas alas", r.tactic.playStyle)
         assertEquals("Atacar apenas", r.tactic.advAttack)
-        assertTrue(r.tactic.mentality in 32..45)
-        assertTrue(r.tactic.pressure <= 42)
-        assertTrue(r.tactic.tempo >= 60)
+        assertTrue(r.tactic.mentality in 45..65)
+        assertTrue(r.tactic.pressure in 45..62)
+        assertTrue(r.tactic.tempo >= 58)
         assertEquals("Não", r.tactic.offside)
         assertTrue(r.tactic.notes.any { it.startsWith("Base da comunidade") })
     }
@@ -190,8 +189,8 @@ class EngineTest {
         assertEquals(24, Formations.OSM.size)
     }
 
-    @Test fun underdogPlaysCounterAttack() {
-        assertEquals("Contra-ataque", TacticEngine.recommend(input(70, 90))!!.tactic.playStyle)
+    @Test fun underdogPlaysWings() {
+        assertEquals("Jogar pelas alas", TacticEngine.recommend(input(70, 90))!!.tactic.playStyle)
     }
 
     @Test fun learningStatsCountOnlyResolvedGames() {

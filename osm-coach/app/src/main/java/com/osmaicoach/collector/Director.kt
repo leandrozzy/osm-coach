@@ -939,8 +939,11 @@ object Director {
     }
 
     /** As 3 melhores das regras e, contra rival bem mais fraco, sempre as formações de 3 atacantes. */
-    private fun candidateFormations(res: TacticEngine.Result, inp: TacticEngine.Input): List<String> {
-        val out = (listOf(Formations.base(res.tactic.formation)) + res.ranking.take(3).map { it.first }).distinct().toMutableList()
+    private fun candidateFormations(res: TacticEngine.Result, inp: TacticEngine.Input, prior: HumanPrior.Prior? = null): List<String> {
+        val raw = (listOf(Formations.base(res.tactic.formation)) + res.ranking.take(3).map { it.first }).distinct()
+        // contra humano: fora o que os seus jogos mostram que perde (4-5-1, 4-2-3-1…) e o 4-3-3 sempre entra no teste
+        val out = raw.filter { !HumanPrior.avoidsFormation(prior, it) }.ifEmpty { raw }.toMutableList()
+        if (inp.rivalHuman == true && "4-3-3" in Formations.BASES && "4-3-3" !in out && !HumanPrior.avoidsFormation(prior, "4-3-3")) out.add("4-3-3")
         val diff = res.diff
         // contra-tática da comunidade para a formação do rival entra sempre no teste
         CounterBook.suggestion(inp.rivalFormation, diff ?: 0)?.let { Formations.base(it.first) }
@@ -991,11 +994,11 @@ object Director {
         val rowsBy = HashMap<String, List<List<PlayerEntity?>>>()
         data class Coarse(val f: String, val st: String, val dm: Int, val pts: Double)
         val coarse = ArrayList<Coarse>()
-        for (f in candidateFormations(res, inp)) {
+        for (f in candidateFormations(res, inp, prior)) {
             if (TacticEngine.strikers(f) < fl.minStrikers) continue
             val rows = TacticEngine.lineup(f, inp.players, inp.fitness)?.first ?: continue
             rowsBy[f] = rows
-            for (st in SIM_STYLES) for (dm in listOf(-12, 0, 12)) {
+            for (st in SIM_STYLES.filter { !HumanPrior.avoidsStyle(prior, it) }.ifEmpty { SIM_STYLES }) for (dm in listOf(-12, 0, 12)) {
                 val t = build(f, st, dm, tk0, off0, t0.marking, t0.advMid, t0.advAttack, 0)
                 val ep = score(t, rows, scen, hist, lost, prior) ?: continue
                 coarse.add(Coarse(f, st, dm, ep))
@@ -1026,7 +1029,7 @@ object Director {
             "Pense como um especialista do OSM: o que ganhou em situação parecida deve ser repetido; o que perdeu, evitado. " +
             "Não copie o rascunho por comodidade e não aplique a mesma receita para rivais diferentes: olhe a formação e o " +
             "estilo DESTE rival, a diferença exata de força e os setores (ataque × defesa dele, meio × meio, defesa × ataque dele). " +
-            "Contra rival HUMANO prefira a tática que não perde para as táticas que ele já usou. " +
+            "Contra rival HUMANO prefira a tática que não perde para as táticas que ele já usou. Se os dados trazem a lista EVITE, NÃO use essas formações/estilos. " +
             (if (trusted) "O OBJETIVO é VENCER. O app já aprendeu com os gols REAIS deste treinador (no HISTÓRICO: 'Aprendido nos seus N jogos'). " +
                 "Use esse aprendizado e o APRENDIZADO DOS 4 SLOTS como evidência principal: repita o que gerou gols e vitórias e evite o que travou " +
                 "o ataque ou levou gols, mesmo que contrarie o senso comum ou o rascunho. Não siga receitas fixas. " +
@@ -1111,14 +1114,7 @@ object Director {
         val allowed = Formations.BASES.filter { TacticEngine.lineup(it, inp.players, inp.fitness) != null }
         val allowedNames = allowed.flatMap { Formations.variants(it).ifEmpty { listOf(it) } }
         // contra humano: o que os jogos reais dele mostram por formação/estilo/mentalidade (a IA vê os mesmos números)
-        val priorLines = prior?.let { p ->
-            listOfNotNull(
-                "Seus jogos reais contra humanos (${p.bucket}, ${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo):",
-                p.form.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} pts/jogo em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "formação — $it" },
-                p.style.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "estilo — $it" },
-                p.ment.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "mentalidade — $it" }
-            ).joinToString("\n")
-        }
+        val priorLines = prior?.let { HumanPrior.promptText(it) }
         val learned = learnedText(inp, res.diff) + (priorLines?.let { "\n" + it } ?: "")
 
         val prompt = tacticRefinePrompt(context(repo, slot), draft, pct(draftProb), table, stats, learned, allowedNames, Osm.allowedTackles(inp.referee), base.learned?.trusted == true)
@@ -1282,6 +1278,7 @@ object Director {
 
     suspend fun marketPlan(repo: Repo, slot: Int): MarketEngine.Plan? {
         val f = repo.fieldMap(slot)
+        if (Hints.slotFree(f)) return null
         val mine = repo.playersOf(slot).filter { it.owner == "MY" }
         if (mine.none { it.strength != null }) return null
         // setor a reforçar: o que o treinador apontou nos últimos jogos; senão o titular mais fraco

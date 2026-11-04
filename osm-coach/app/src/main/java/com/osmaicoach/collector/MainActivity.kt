@@ -1557,6 +1557,7 @@ private suspend fun loadToday(ctx: Context): TodayData {
     val work = (1..4).mapNotNull { s ->
         runCatching {
             val f = repo.fieldMap(s)
+            if (Hints.slotFree(f)) return@runCatching null
             val team = known(f, K.TEAM) ?: known(f, K.HUB_TITLE) ?: "Slot $s"
             val screen = repo.dao.plan(s, "trainscreen")?.json?.let { JSONObject(it) }
             Work.of(s, team, screen, repo.timers(s), f).takeIf { it.hasData }

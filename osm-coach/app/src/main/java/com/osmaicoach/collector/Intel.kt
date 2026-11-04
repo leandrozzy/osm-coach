@@ -933,7 +933,10 @@ object Meta {
      * embutido; depois ajustado pelos resultados reais dos 4 slots em jogos parecidos (MetaLearner).
      */
     fun resolve(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?, logs: List<JSONObject>): Template? {
-        val base = fromRemote(edge, home, rivalFormation, remote) ?: template(edge, home, rivalFormation) ?: return null
+        val prior = HumanPrior.build(logs, edge)
+        val remoteT = fromRemote(edge, home, rivalFormation, remote)
+            ?.takeIf { !HumanPrior.avoidsFormation(prior, it.formation) && !HumanPrior.avoidsStyle(prior, it.style) }
+        val base = remoteT ?: template(edge, home, rivalFormation) ?: return null
         return MetaLearner.adapt(base, logs, edge, home, rivalFormation)
     }
 
@@ -963,14 +966,14 @@ object Meta {
         val rl = rf?.let { Formations.lines(it) }?.takeIf { it.isNotEmpty() }
         val away = home == false
         if (edge <= -5) {
-            // azarão: bloco compacto e saída rápida com DOIS atacantes que ficam na frente (5-3-2 em contra-ataque).
-            // O antigo 5-4-1 com estilo 18-25 e atacante "ajudando a defender" deixava o time sem ataque:
-            // 7 jogos seguidos sem gol contra humanos mais fortes (diagnóstico de 19/10).
+            // azarão: o histórico real (04/11, 67 jogos contra humanos) mostra que recuar (5-3-2/5-4-1/4-5-1 + Contra-ataque,
+            // estilo ~36-42) perdeu mais do que a diferença de força explica e quase não fez gol. 4-3-3 com "Jogar pelas
+            // alas", barras no meio da escala e avançados na frente foi o que mais pontuou nos 4 slots.
             val deep = edge <= -12
             return Template(
-                "rival mais forte", "5-3-2", "Contra-ataque",
-                (if (deep) 36 else 40) - (if (away) 2 else 0), (if (deep) 36 else 42) - (if (away) 3 else 0), if (deep) 70 else 68,
-                "Atacar apenas", if (deep) "Ajudar a defesa" else "Manter posições", "Defender atrás"
+                "rival mais forte", "4-3-3 A", "Jogar pelas alas",
+                (if (deep) 52 else 56) - (if (away) 2 else 0), (if (deep) 50 else 55) - (if (away) 3 else 0), if (deep) 64 else 62,
+                "Atacar apenas", "Manter posições", "Defender atrás"
             )
         }
         if (edge >= 5) {
@@ -1049,7 +1052,8 @@ object MetaLearner {
             val (pw, pp) = if (k == tKey) Pair(3.0, 1.9) else Pair(2.0, 1.2)
             return (g.second + pw * pp) / (g.first + pw)
         }
-        val bestKey = (groups.keys + tKey).maxByOrNull { score(it) } ?: tKey
+        // só troca o modelo por uma opção que já tem pelo menos 3 jogos de peso (1 ou 2 jogos não provam nada)
+        val bestKey = (groups.filter { it.value.first >= 3.0 }.keys + tKey).maxByOrNull { score(it) } ?: tKey
         val baseF = bestKey.substringBefore('|')
         val style = bestKey.substringAfter('|')
         val formation = if (baseF == Formations.base(t.formation)) t.formation else Formations.variant(baseF, style)

@@ -28,6 +28,9 @@ object Hints {
 
     private fun kv(f: Map<String, StoredField>, k: String): String? = f[k]?.value?.takeIf { FieldMerge.known(it) }
 
+    /** Slot livre no OSM (sem liga nem batalha): treinadores, mercado e dicas do clube antigo não valem mais. */
+    fun slotFree(f: Map<String, StoredField>): Boolean = f[K.SLOT_STATE]?.value == "vazio"
+
     /** Telas desatualizadas deste slot (com as regras do Fresh). */
     /** A competição deste slot terminou (todas as rodadas jogadas ou tela de fim de época lida): não há mais nada a pedir. */
     suspend fun competitionOver(repo: Repo, slot: Int, f: Map<String, StoredField> = emptyMap(), now: Long = System.currentTimeMillis()): Boolean {
@@ -55,7 +58,7 @@ object Hints {
     ): List<Playbook.Tip> = runCatching {
         val now = System.currentTimeMillis()
         val f = repo.fieldMap(slot)
-        if (competitionOver(repo, slot, f, now)) return@runCatching emptyList<Playbook.Tip>()
+        if (competitionOver(repo, slot, f, now) || slotFree(f)) return@runCatching emptyList<Playbook.Tip>()
         val xi = xi0 ?: runCatching {
             TacticEngine.recommend(Director.tacticInput(repo, slot))?.rows?.flatten()?.mapNotNull { it?.nameKey }?.toSet()
         }.getOrNull() ?: emptySet()
@@ -181,6 +184,7 @@ object Hints {
         val f = repo.fieldMap(slot)
         val title = kv(f, K.TEAM) ?: kv(f, K.HUB_TITLE) ?: "Slot $slot"
         val spend = Settings.get(ctx, "spend_bc", "0") == "1"
+        if (slotFree(f)) return listOf(Hint("➕", "Slot livre", "Sem liga ou batalha neste slot: nada a fazer até começar outra.", false))
         // fim da liga/batalha: a tela de fim de época basta; nada mais a pedir até começar outra competição
         if (competitionOver(repo, slot, f)) return listOf(Hint("🏁", "Competição encerrada", "Nada a fazer neste slot até a nova liga ou batalha começar.", false))
         val tips = slotTips(repo, slot, null, null, title, trainRates(repo), spend)

@@ -117,3 +117,12 @@ class TacticGateTest {
         org.junit.Assert.assertTrue(Fresh.needs(inp(reds = 1, timers = busy)).none { it.type == ScreenType.LAWYER })
     }
 }
+
+class SlotFreeTest {
+    @org.junit.Test fun slotLivreNaoTemTreinadorNemDicas() {
+        val f = mapOf(K.SLOT_STATE to StoredField("vazio", 0.9, 1L))
+        org.junit.Assert.assertTrue(Hints.slotFree(f))
+        org.junit.Assert.assertFalse(Hints.slotFree(mapOf(K.SLOT_STATE to StoredField("ativo", 0.9, 1L))))
+        org.junit.Assert.assertFalse(Hints.slotFree(emptyMap()))
+    }
+}
