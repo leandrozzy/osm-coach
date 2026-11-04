@@ -15,12 +15,40 @@ object HumanPrior {
     class Prior(
         val ref: Double, val n: Int, val bucket: String,
         val form: Map<String, G>, val style: Map<String, G>, val ment: Map<String, G>,
-        val avoidForm: Set<String> = emptySet(), val avoidStyle: Set<String> = emptySet()
-    )
+        val avoidForm: Set<String> = emptySet(), val avoidStyle: Set<String> = emptySet(),
+        /** Últimos resultados, do mais recente ao mais antigo (ex.: D D D V). */
+        val streak: String = "",
+        /** Lição da IA depois do último jogo (vale por poucos jogos): formação/estilo a evitar e a repetir. */
+        val lessonAvoid: List<Pair<String?, String?>> = emptyList(), val lessonPrefer: List<Pair<String?, String?>> = emptyList(),
+        val lessonText: String = ""
+    ) {
+        fun withLesson(l: Lesson?): Prior = if (l == null) this else Prior(ref, n, bucket, form, style, ment, avoidForm, avoidStyle, streak, l.avoid, l.prefer, l.text)
+    }
+
+    /** Lição guardada pelo app depois de um jogo (IA ou regra): vale por [LESSON_GAMES] jogos. */
+    class Lesson(val round: Int, val avoid: List<Pair<String?, String?>>, val prefer: List<Pair<String?, String?>>, val text: String)
+
+    const val LESSON_GAMES = 3
+
+    fun lessonFromJson(j: JSONObject?, currentRound: Int?): Lesson? {
+        if (j == null) return null
+        val r = j.optInt("round", -1)
+        if (r < 0 || (currentRound != null && currentRound - r > LESSON_GAMES)) return null
+        fun list(k: String): List<Pair<String?, String?>> {
+            val a = j.optJSONArray(k) ?: return emptyList()
+            return (0 until minOf(a.length(), 3)).mapNotNull { i ->
+                val o = a.optJSONObject(i) ?: return@mapNotNull null
+                val f = o.optString("formation").takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }?.let { Formations.base(it) }
+                val st = o.optString("style").takeIf { it.isNotBlank() }?.let { Osm.style(it) }
+                if (f == null && st == null) null else Pair(f, st)
+            }
+        }
+        return Lesson(r, list("avoid"), list("prefer"), j.optString("text").take(400))
+    }
 
     private const val SHRINK = 5.0
     private const val MIN_GAMES = 3
-    private const val AVOID_MIN_GAMES = 4
+    private const val AVOID_MIN_GAMES = 3
     private const val AVOID_ADJ = -0.30
     private const val WEIGHT = 1.0
     private const val CAP = 1.2
@@ -47,23 +75,36 @@ object HumanPrior {
         return Pair(my - b * mx, b)
     }
 
+    /** Peso pela idade: o jogo mais recente vale 1; a cada 8 jogos para trás o peso cai pela metade. */
+    private fun recency(i: Int) = Math.pow(0.5, i / 8.0)
+
     fun build(logs: List<JSONObject>, diff: Int?): Prior? {
+        // do mais recente ao mais antigo (genAt = quando a tática foi gerada; sem data, a ordem da lista)
         val all = logs.filter { it.optBoolean("human", false) && it.optString("result") in listOf("V", "E", "D") }
+            .sortedByDescending { it.optLong("genAt", 0L) }
         if (all.size < 6) return null
         val (a, b) = fit(all)
         val ref = all.sumOf { pts(it.optString("result")) } / all.size
+        val w = all.indices.associate { all[it] to recency(it) }
         fun groups(key: (JSONObject) -> String): Map<String, G> = all.groupBy(key).mapValues { (_, v) ->
             val raw = v.sumOf { pts(it.optString("result")) } / v.size
-            val res = v.sumOf { j -> pts(j.optString("result")) - (a + b * (diffOf(j) ?: 0)) } / v.size
-            G(v.size, raw, res * v.size / (v.size + SHRINK))
+            val ws = v.sumOf { w[it] ?: 1.0 }
+            val res = v.sumOf { j -> (w[j] ?: 1.0) * (pts(j.optString("result")) - (a + b * (diffOf(j) ?: 0))) } / (ws + SHRINK)
+            G(v.size, raw, res)
         }
         val form = groups { Formations.base(it.optString("formation")) }
         val style = groups { Osm.style(it.optString("playStyle")) ?: it.optString("playStyle") }
         val ment = groups { band(it.optInt("mentality", 50)) }
+        // freio de emergência: escolha usada 2+ vezes nos últimos 6 jogos que só perdeu sai já, sem esperar 4 jogos
+        val last = all.take(6)
+        fun hot(key: (JSONObject) -> String) = last.groupBy(key).filter { (_, v) -> v.size >= 2 && v.all { it.optString("result") == "D" } }.keys
+        val hotForm = hot { Formations.base(it.optString("formation")) }
+        val hotStyle = hot { Osm.style(it.optString("playStyle")) ?: it.optString("playStyle") }
         return Prior(
-            ref, all.size, "todas as faixas, ajustado pela diferença de força", form, style, ment,
-            avoidForm = form.filter { it.value.n >= AVOID_MIN_GAMES && it.value.adj <= AVOID_ADJ }.keys,
-            avoidStyle = style.filter { it.value.n >= AVOID_MIN_GAMES && it.value.adj <= AVOID_ADJ }.keys
+            ref, all.size, "todas as faixas, ajustado pela diferença de força e pelo momento", form, style, ment,
+            avoidForm = form.filter { it.value.n >= AVOID_MIN_GAMES && it.value.adj <= AVOID_ADJ }.keys + hotForm,
+            avoidStyle = style.filter { it.value.n >= AVOID_MIN_GAMES && it.value.adj <= AVOID_ADJ }.keys + hotStyle,
+            streak = all.take(6).joinToString(" ") { it.optString("result") }
         )
     }
 
@@ -72,11 +113,17 @@ object HumanPrior {
     /** Pontos esperados a somar (ou tirar) da nota da tática. */
     fun bonus(p: Prior, formation: String, style: String, mentality: Int): Double {
         val d = adj(p.form[Formations.base(formation)]) + adj(p.style[Osm.style(style) ?: style]) + 0.5 * adj(p.ment[band(mentality)])
-        return (WEIGHT * d).coerceIn(-CAP, CAP)
+        fun m(l: List<Pair<String?, String?>>) = l.count { (f, st) ->
+            (f == null || f == Formations.base(formation)) && (st == null || st == (Osm.style(style) ?: style))
+        }
+        val lesson = 0.4 * m(p.lessonPrefer).coerceAtMost(1) - 0.5 * m(p.lessonAvoid).coerceAtMost(1)
+        return (WEIGHT * d + lesson).coerceIn(-CAP, CAP)
     }
 
-    fun avoidsFormation(p: Prior?, formation: String) = p != null && Formations.base(formation) in p.avoidForm
-    fun avoidsStyle(p: Prior?, style: String) = p != null && (Osm.style(style) ?: style) in p.avoidStyle
+    fun avoidsFormation(p: Prior?, formation: String) = p != null && (Formations.base(formation) in p.avoidForm ||
+        p.lessonAvoid.any { (f, st) -> f == Formations.base(formation) && st == null })
+    fun avoidsStyle(p: Prior?, style: String) = p != null && ((Osm.style(style) ?: style) in p.avoidStyle ||
+        p.lessonAvoid.any { (f, st) -> f == null && st == (Osm.style(style) ?: style) })
 
     /** Frase curta com os números reais que pesaram na escolha. */
     fun note(p: Prior, formation: String, style: String, mentality: Int): String? {
@@ -97,6 +144,8 @@ object HumanPrior {
         return listOfNotNull(
             "Seus jogos reais contra humanos (${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo). Os números JÁ descontam a diferença de força:",
             line(p.form, "formação"), line(p.style, "estilo"),
+            if (p.streak.isNotBlank()) "Últimos resultados contra humanos (do mais recente): ${p.streak}. Em sequência de derrotas NÃO repita as táticas que perderam." else null,
+            if (p.lessonText.isNotBlank()) "Lição do último jogo: ${p.lessonText}" else null,
             if (p.avoidForm.isNotEmpty() || p.avoidStyle.isNotEmpty())
                 "EVITE (perderam bem mais do que a força explica): " + (p.avoidForm.map { "formação $it" } + p.avoidStyle.map { "estilo $it" }).joinToString(", ") else null
         ).joinToString("\n")

@@ -1018,6 +1018,8 @@ object MetaLearner {
     /** Jogos com resultado na mesma situação, com peso pela semelhança. */
     fun similar(logs: List<JSONObject>, edge: Int, home: Boolean?, rivalFormation: String?): List<Pair<JSONObject, Double>> {
         val rb = rivalFormation?.let { Formations.canonical(it) }?.let { Formations.base(it) }
+        // jogos recentes pesam mais (metade a cada 8 jogos para trás): o modelo acompanha o momento do time
+        val order = logs.filter { it.optString("result") in setOf("V", "E", "D") }.sortedByDescending { it.optLong("genAt", 0L) }
         return logs.mapNotNull { j ->
             val r = j.optString("result")
             if (j.isNull("result") || r !in setOf("V", "E", "D")) return@mapNotNull null
@@ -1026,6 +1028,7 @@ object MetaLearner {
             if (rel(e) != rel(edge)) return@mapNotNull null
             val lrb = j.optString("rivalFormationRead").takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }?.let { Formations.base(it) }
             var w = if (rb == null || lrb == null) 1.0 else if (rb == lrb) 2.0 else 0.6
+            if (j.has("genAt")) w *= Math.pow(0.5, order.indexOf(j).coerceAtLeast(0) / 8.0)
             val lh = if (j.has("home") && !j.isNull("home")) j.optBoolean("home") else null
             if (home != null && lh != null && home == lh) w *= 1.3
             Pair(j, w)

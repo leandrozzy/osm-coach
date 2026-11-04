@@ -350,8 +350,9 @@ class HumanPriorTest {
         org.json.JSONObject().put("formation", f).put("playStyle", st).put("mentality", m).put("result", res).put("human", true).put("myStrength", my).put("rivalStrength", rv)
 
     @org.junit.Test fun learnsWhatWinsAndLosesAgainstHumans() {
-        val logs = List(6) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) } +
-            List(6) { g("5-4-1 A", "Contra-ataque", 38, "D", 70, 78) } + List(3) { g("5-3-2", "Contra-ataque", 40, "E", 74, 78) }
+        // sem data, o primeiro da lista é o mais recente: as derrotas vêm por último no tempo (o freio de sequência também vale)
+        val logs = List(6) { g("5-4-1 A", "Contra-ataque", 38, "D", 70, 78) } + List(3) { g("5-3-2", "Contra-ataque", 40, "E", 74, 78) } +
+            List(6) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) }
         val p = HumanPrior.build(logs, null)!!
         val good = HumanPrior.bonus(p, "4-3-3 B", "Jogar pelas alas", 70)
         val bad = HumanPrior.bonus(p, "5-4-1 A", "Contra-ataque", 38)
@@ -362,6 +363,37 @@ class HumanPriorTest {
         org.junit.Assert.assertFalse(HumanPrior.avoidsFormation(p, "4-3-3 A"))
         org.junit.Assert.assertTrue(HumanPrior.promptText(p).contains("EVITE"))
         org.junit.Assert.assertNotNull(HumanPrior.note(p, "4-3-3 A", "Jogar pelas alas", 70))
+    }
+
+    @org.junit.Test fun streakOfLossesCutsTheChoiceImmediately() {
+        // 2 derrotas seguidas com o mesmo estilo nos últimos jogos: sai já, sem esperar 4 jogos
+        val older = List(6) { g("4-3-3 A", "Jogar pelas alas", 60, "V", 80, 76).put("genAt", 100L + it) }
+        val recent = listOf(
+            g("5-3-2", "Remate à vista", 40, "D", 72, 80).put("genAt", 1000L),
+            g("5-3-2", "Remate à vista", 40, "D", 72, 80).put("genAt", 1001L)
+        )
+        val p = HumanPrior.build(older + recent, null)!!
+        org.junit.Assert.assertTrue(p.streak.startsWith("D D"))
+        org.junit.Assert.assertTrue(HumanPrior.avoidsFormation(p, "5-3-2"))
+        org.junit.Assert.assertTrue(HumanPrior.avoidsStyle(p, "Remate à vista"))
+        org.junit.Assert.assertFalse(HumanPrior.avoidsFormation(p, "4-3-3 A"))
+    }
+
+    @org.junit.Test fun aiLessonAddsWeightAndExpires() {
+        val older = List(8) { g("4-3-3 A", "Jogar pelas alas", 60, "E", 75, 75).put("genAt", 100L + it) }
+        val base = HumanPrior.build(older, null)!!
+        val j = org.json.JSONObject().put("round", 5).put("text", "Recuar não funcionou")
+            .put("avoid", org.json.JSONArray().put(org.json.JSONObject().put("formation", "5-4-1").put("style", "")))
+            .put("prefer", org.json.JSONArray().put(org.json.JSONObject().put("formation", "4-3-3").put("style", "Jogar pelas alas")))
+        val l = HumanPrior.lessonFromJson(j, 6)
+        org.junit.Assert.assertNotNull(l)
+        val p = base.withLesson(l)
+        org.junit.Assert.assertTrue(HumanPrior.avoidsFormation(p, "5-4-1 A"))
+        org.junit.Assert.assertTrue(HumanPrior.bonus(p, "4-3-3 B", "Jogar pelas alas", 60) > HumanPrior.bonus(base, "4-3-3 B", "Jogar pelas alas", 60))
+        // passados mais de 3 jogos a lição vence; lição inventada (formação inexistente) não vale
+        org.junit.Assert.assertNull(HumanPrior.lessonFromJson(j, 10))
+        org.junit.Assert.assertNull(HumanPrior.lessonFromJson(org.json.JSONObject().put("round", 5)
+            .put("avoid", org.json.JSONArray().put(org.json.JSONObject().put("formation", "9-9-9"))), 6)?.takeIf { it.avoid.isNotEmpty() })
     }
 
     @org.junit.Test fun fewGamesGiveNoPrior() {

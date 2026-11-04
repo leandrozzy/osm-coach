@@ -180,6 +180,8 @@ fun startGeneration(ctx: Context, kind: String, slot: Int, force: Boolean = fals
                 "tactic" -> {
                     val gaps = if (force) emptyList() else Director.tacticGaps(Repo(app).fieldMap(slot), System.currentTimeMillis())
                     if (gaps.isNotEmpty()) Director.Outcome(false, null, "Antes de gerar, leia: " + gaps.joinToString("; ") { it.first } + ".") else {
+                    // aprende com o último jogo (IA): a lição entra na nota das táticas deste jogo (até 45 s)
+                    runCatching { Director.learnFromLastGames(app, Repo(app), slot) }
                     // Um toque: tática pela simulação e, se houver IA configurada, a IA revisa na sequência
                     // (Gemini, Groq… o que tiver cota); se a IA falhar, fica a da simulação.
                     val local = Director.generateTacticLocal(Repo(app), slot)

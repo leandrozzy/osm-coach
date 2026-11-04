@@ -302,9 +302,56 @@ object Director {
     suspend fun allLogs(repo: Repo): List<JSONObject> =
         (1..4).flatMap { s ->
             repo.dao.tacticLogs(s).mapNotNull { p ->
-                runCatching { JSONObject(p.json).also { if (p.kind.startsWith("tlog_X")) it.put("archived", true) } }.getOrNull()
+                runCatching { JSONObject(p.json).also { it.put("genAt", p.at); if (p.kind.startsWith("tlog_X")) it.put("archived", true) } }.getOrNull()
             }
         }
+
+    /** Conhecimento dos seus jogos contra humanos + a lição da IA do último jogo deste slot (vale por poucos jogos). */
+    suspend fun priorFor(repo: Repo, slot: Int, diff: Int?): HumanPrior.Prior? {
+        val base = HumanPrior.build(allLogs(repo), diff) ?: return null
+        val round = repo.fieldMap(slot)[K.ROUND]?.value?.toIntOrNull()
+        val lesson = repo.dao.plan(slot, "lesson")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        return base.withLesson(HumanPrior.lessonFromJson(lesson, round))
+    }
+
+    /**
+     * Depois de cada jogo com resultado novo, a IA faz a análise do que deu certo/errado (olhando a tática, as forças,
+     * posse/chutes e os últimos jogos) e devolve o que evitar e o que repetir. A lição vale por 3 jogos e entra na nota
+     * das táticas e no pedido à IA: o app muda sozinho, sem alterar código. Sem IA configurada, nada acontece.
+     */
+    suspend fun learnFromLastGames(ctx: Context, repo: Repo, slot: Int) {
+        resolveTacticLogs(repo, slot)
+        val logs = repo.dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }
+            .mapNotNull { p -> runCatching { JSONObject(p.json) }.getOrNull() }
+            .filter { it.optString("result") in listOf("V", "E", "D") }.sortedBy { it.optInt("round") }
+        val last = logs.lastOrNull() ?: return
+        val round = last.optInt("round", -1)
+        if (round < 0) return
+        val old = repo.dao.plan(slot, "lesson")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (old?.optInt("round", -1) == round) return
+        if (!AiClient.hasAnyKey(ctx)) return
+        val recent = logs.takeLast(5)
+        fun line(j: JSONObject) = "J${j.optInt("round")} ${j.optString("result")} ${j.opt("scoreMine")}-${j.opt("scoreOpp")} • minha ${j.opt("formation")} / ${j.opt("playStyle")} / estilo ${j.opt("mentality")} pressão ${j.opt("pressure")} ritmo ${j.opt("tempo")} / avançados ${j.opt("advAttack")} • força ${j.opt("myStrength")} x ${j.opt("rivalStrength")} • rival ${j.optString("rivalFormationRead")} ${j.optString("rivalStyleRead")}" +
+            (if (j.has("myPossession")) " • posse ${j.opt("myPossession")}% chutes ${j.opt("myShots")} x ${j.opt("oppShots")}" else "")
+        val prior = HumanPrior.build(allLogs(repo), null)
+        val prompt = "Você é o analista tático do OSM 26. Analise o ÚLTIMO jogo e os anteriores deste time e devolva uma LIÇÃO curta para a próxima tática. " +
+            "Use SÓ os dados abaixo; não invente. Prefira mudar o que perdeu mais de uma vez; não condene uma escolha por 1 derrota contra rival bem mais forte.\n" +
+            "Últimos jogos (mais recente por último):\n" + recent.joinToString("\n") { line(it) } + "\n" +
+            (prior?.let { HumanPrior.promptText(it) + "\n" } ?: "") +
+            "Formações válidas: ${Formations.BASES.joinToString()}. Estilos válidos: ${Osm.STYLES.joinToString()}.\n" +
+            "Responda SOMENTE um JSON: {\"cause\":\"causa provável em 1 frase\",\"avoid\":[{\"formation\":\"...\",\"style\":\"...\"}],\"prefer\":[{\"formation\":\"...\",\"style\":\"...\"}],\"text\":\"lição em até 2 frases\"}. " +
+            "No máximo 2 itens em avoid e 2 em prefer; deixe formation ou style vazio quando a lição valer só para um deles."
+        val reply = runCatching { AiClient.ask(ctx, prompt, null, 45000L) }.getOrNull() ?: return
+        val json = if (reply.ok) AiClient.parseJson(reply.text) else null
+        if (json == null) return
+        val lesson = JSONObject().put("round", round).put("at", System.currentTimeMillis())
+            .put("avoid", json.optJSONArray("avoid") ?: org.json.JSONArray()).put("prefer", json.optJSONArray("prefer") ?: org.json.JSONArray())
+            .put("text", (json.optString("text").ifBlank { json.optString("cause") }).take(400))
+        // só vale o que passa na validação (formação/estilo existentes); a IA nunca decide sozinha: é só um peso na nota
+        if (HumanPrior.lessonFromJson(lesson, round) == null) return
+        repo.dao.putPlan(PlanEntity(slot, "lesson", lesson.toString(), System.currentTimeMillis()))
+        repo.learn(slot, "licao", "Lição da IA depois da J$round: " + lesson.optString("text"))
+    }
 
     /** Jogos do slot para o treinador: táticas usadas + análises do jogo lidas. */
     suspend fun coachGames(repo: Repo, slot: Int): List<Coach.Game> = Coach.games(
@@ -733,7 +780,7 @@ object Director {
         val scen = scenarios(repo, slot, base)
         val hist = history(repo, slot)
         val lost = lostAgainst(repo, slot)
-        val prior = if (inp.rivalHuman == true) HumanPrior.build(allLogs(repo), rules.diff) else null
+        val prior = if (inp.rivalHuman == true) priorFor(repo, slot, rules.diff) else null
         val draftPts = score(rules.tactic, rules.rows, scen, hist, lost, prior)
         val cands = candidates(rules, inp, scen, hist, lost, prior)
         val top = cands.firstOrNull()
@@ -754,6 +801,8 @@ object Director {
                     "contra ${"%.2f".format(draftPts)} da regra."
             )
             prior?.let { HumanPrior.note(it, best.tactic.formation, best.tactic.playStyle, best.tactic.mentality) }?.let { why.add(it) }
+            prior?.lessonText?.takeIf { it.isNotBlank() }?.let { why.add("🧠 Lição do último jogo: $it") }
+            if (prior != null && prior.streak.startsWith("D D")) why.add("Sequência recente contra humanos: ${prior.streak}. As táticas que perderam foram cortadas.")
             if (scen.size > 1) why.add("Rival humano: testada contra ${scen.size - 1} táticas que ele pode usar (as dele já vistas ou as mais comuns entre humanos), não só a atual.")
             if (lost.isNotEmpty()) why.add("Evitei o que já perdeu para este rival: ${lost.keys.joinToString { it.replace("|", " • ") }}.")
             rules.copy(tactic = best.tactic.copy(notes = why + rules.tactic.notes), rows = best.rows)
@@ -930,7 +979,7 @@ object Director {
             if (ep < worst) worst = ep
         }
         if (wsum <= 0.0) return null
-        val penalty = 0.25 * (lost[Formations.base(t.formation) + "|" + (Osm.style(t.playStyle) ?: "")] ?: 0)
+        val penalty = 0.4 * minOf(3, lost[Formations.base(t.formation) + "|" + (Osm.style(t.playStyle) ?: "")] ?: 0)
         // Contra humano vale a tática que não quebra em nenhum cenário (ele troca a dele na última hora):
         // média e pior caso pesam juntos. Contra CPU só há o cenário lido.
         val mean = sum / wsum
@@ -1087,7 +1136,7 @@ object Director {
         AiStatus.set("Simulando táticas alternativas…")
         val scen = scenarios(repo, slot, base)
         val lost = lostAgainst(repo, slot)
-        val prior = if (inp.rivalHuman == true) HumanPrior.build(allLogs(repo), res.diff) else null
+        val prior = if (inp.rivalHuman == true) priorFor(repo, slot, res.diff) else null
         val cands = candidates(res, inp, scen, hist, lost, prior)
         val draftProb = prob(res.tactic, res.rows)
         val draftPts = score(res.tactic, res.rows, scen, hist, lost, prior) ?: draftProb?.points ?: 0.0
