@@ -1532,7 +1532,30 @@ class Repo(private val ctx: Context) {
             t.put("switchChecked", true)
         }
         j.optString("mom").takeIf { it.isNotBlank() && !Overlay.isChip(it) }?.let { t.put("mom", it) }
+        // nota média dos meus jogadores por setor (a tela de Resultado mostra a nota de cada um)
+        runCatching { sectorRatings(slot, j, mineHome) }.getOrNull()?.let { t.put("secRate", it) }
         dao.putPlan(PlanEntity(slot, p.kind, t.toString(), p.at))
+    }
+
+    /** {GOL, DEF, MEI, ATA: nota média, n: jogadores casados} dos meus jogadores no relatório; null sem notas ou sem elenco. */
+    private suspend fun sectorRatings(slot: Int, j: org.json.JSONObject, mineHome: Boolean?): org.json.JSONObject? {
+        val arr = j.optJSONArray(if (mineHome == true) "rh" else "ra") ?: return null
+        val mine = playersOf(slot).filter { it.owner == "MY" }
+        if (mine.isEmpty()) return null
+        val by = HashMap<String, MutableList<Int>>()
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONArray(i) ?: continue
+            val nm = Txt.key(a.optString(0))
+            val r = a.optInt(1)
+            if (nm.length < 3 || r !in 1..10) continue
+            val p = mine.firstOrNull { it.nameKey == nm } ?: mine.firstOrNull { (it.nameKey.length >= 4 && nm.length >= 4) && (it.nameKey.endsWith(nm) || nm.endsWith(it.nameKey)) } ?: continue
+            by.getOrPut(p.cat ?: continue) { ArrayList() }.add(r)
+        }
+        if (by.isEmpty()) return null
+        val o = org.json.JSONObject()
+        for ((k, v) in by) o.put(k, Math.round(v.average() * 10) / 10.0)
+        o.put("n", by.values.sumOf { it.size })
+        return o
     }
 
     /**

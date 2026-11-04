@@ -691,7 +691,9 @@ object Coach {
         val formation: String?, val style: String?, val poss: Int?, val shots: Int?, val oppShots: Int?, val fouls: Int?,
         val oppFormation: String?, val advice: String?,
         /** Força do meu time e do rival naquele jogo (círculos do pré-jogo). */
-        val myStr: Int? = null, val rivalStr: Int? = null
+        val myStr: Int? = null, val rivalStr: Int? = null,
+        /** Nota média (1-10) dos meus jogadores por setor no jogo, lida da tela de Resultado. */
+        val defRate: Double? = null, val midRate: Double? = null, val atkRate: Double? = null
     )
 
     data class Review(val game: Game, val wrong: List<String>, val right: List<String>)
@@ -742,7 +744,8 @@ object Coach {
                     log?.let { opt(it, "formation") }, log?.let { opt(it, "playStyle") },
                     num(side("posse de bola", true), true), num(side("remates", true)), num(side("remates", false)),
                     num(side("faltas", true)), side("formacao", false), opt(r, "advice"),
-                    log?.takeIf { it.has("myStrength") }?.optInt("myStrength")?.takeIf { it > 0 }, log?.takeIf { it.has("rivalStrength") }?.optInt("rivalStrength")?.takeIf { it > 0 }
+                    log?.takeIf { it.has("myStrength") }?.optInt("myStrength")?.takeIf { it > 0 }, log?.takeIf { it.has("rivalStrength") }?.optInt("rivalStrength")?.takeIf { it > 0 },
+                    secRate(log, "DEF"), secRate(log, "MEI"), secRate(log, "ATA")
                 )
             )
         }
@@ -758,12 +761,15 @@ object Coach {
                     if (l.has("myPossession")) num(l.optString("myPossession"), true) else null,
                     if (l.has("myShots")) l.optInt("myShots") else null, if (l.has("oppShots")) l.optInt("oppShots") else null,
                     if (l.has("myFouls")) l.optInt("myFouls") else null, opt(l, "oppFormation"), null,
-                    if (l.has("myStrength")) l.optInt("myStrength").takeIf { it > 0 } else null, if (l.has("rivalStrength")) l.optInt("rivalStrength").takeIf { it > 0 } else null
+                    if (l.has("myStrength")) l.optInt("myStrength").takeIf { it > 0 } else null, if (l.has("rivalStrength")) l.optInt("rivalStrength").takeIf { it > 0 } else null,
+                    secRate(l, "DEF"), secRate(l, "MEI"), secRate(l, "ATA")
                 )
             )
         }
         return out.sortedByDescending { it.round }
     }
+
+    private fun secRate(l: JSONObject?, k: String): Double? = l?.optJSONObject("secRate")?.takeIf { it.has(k) }?.optDouble(k)
 
     private fun mids(f: String?): Int? = f?.let { Formations.lines(it) }?.takeIf { it.isNotEmpty() }?.let { 10 - it.first() - it.last() }
 
@@ -788,6 +794,9 @@ object Coach {
         if ((os != null && os >= 10) || (g.ga ?: 0) >= 2) {
             wrong.add("Defesa exposta: " + listOfNotNull(os?.let { "$it remates" }, g.ga?.let { "$it gol(s)" }).joinToString(" e ") + " do rival.")
         } else if (g.ga == 0) right.add("Defesa segura (não sofreu gol).")
+        g.defRate?.takeIf { it <= 5.2 }?.let { wrong.add("Defesa com nota média ${"%.1f".format(it).replace('.', ',')}: errou muito (notas dos meus jogadores na tela de Resultado).") }
+        g.midRate?.takeIf { it <= 5.2 }?.let { wrong.add("Meio-campo com nota média ${"%.1f".format(it).replace('.', ',')}.") }
+        g.atkRate?.takeIf { it <= 5.2 }?.let { wrong.add("Ataque com nota média ${"%.1f".format(it).replace('.', ',')}.") }
         val f = g.fouls
         if (f != null && f >= 16) wrong.add("Muitas faltas ($f): risco de cartão e expulsão.")
         if (g.result == "V" && g.formation != null) right.add("${g.formation} • ${g.style ?: "?"} funcionou.")
@@ -812,6 +821,10 @@ object Coach {
             val p = g.poss
             if (bad && p != null && p < 42) mid += w
             if (bad && ((g.oppShots ?: 0) >= 10 || (g.ga ?: 0) >= 2)) def += w
+            // as notas dos jogadores confirmam onde o time falhou (ou desmentem: defesa com nota boa não pede reforço)
+            if (bad && (g.defRate ?: 9.0) <= 5.2) def += 0.5 * w
+            if (bad && (g.midRate ?: 9.0) <= 5.2) mid += 0.5 * w
+            if (bad && (g.atkRate ?: 9.0) <= 5.2 && (g.gf ?: 0) <= 1) atk += 0.5 * w
             if (bad && (g.gf == 0 || (g.shots != null && g.oppShots != null && g.shots * 10 < g.oppShots * 6))) atk += w
             if (i < 3 && (g.fouls ?: 0) >= 16) discipline = true
             val key = g.formation?.let { Formations.base(it) + "|" + (Osm.style(g.style) ?: "") }

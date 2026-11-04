@@ -803,22 +803,39 @@ object Parsers {
                 if (lv != null && rv != null) stats[lab] = Pair(lv, rv)
             }
         }
-        val zones = o.lines.filter { it.yc in 0.72f..0.88f && it.xc in 0.25f..0.75f && it.text.contains("%") }
-            .sortedBy { it.xc }.mapNotNull { Regex("(\\d{1,3})\\s*%").find(it.text)?.groupValues?.get(1)?.toIntOrNull() }
+        // Zonas de ação: ancoradas no título "Zonas de ação" (a posição na tela muda com a rolagem); sem título, a faixa antiga.
+        val zonesHeader = o.lines.firstOrNull { Txt.norm(it.text) == "zonas de acao" }
+        val zones = o.lines.filter {
+            it.xc in 0.25f..0.75f && it.text.contains("%") &&
+                (if (zonesHeader != null) it.yc > zonesHeader.yc && it.yc - zonesHeader.yc <= 0.45f else it.yc in 0.72f..0.88f)
+        }.sortedBy { it.xc }.mapNotNull { Regex("(\\d{1,3})\\s*%").find(it.text)?.groupValues?.get(1)?.toIntOrNull() }
         val momHeader = o.lines.firstOrNull { Txt.norm(it.text) == "homem do jogo" }
         val mom = if (momHeader == null) null else o.lines.filter {
             it.yc > momHeader.yc && it.yc - momHeader.yc <= 0.16f && Txt.letters(it.text) >= 3 && !Overlay.isChip(it.text)
         }.minByOrNull { it.yc }?.text?.trim()
 
-        // Eventos (minuto no centro; jogador e descrição do lado do time).
+        // Eventos (minuto no centro; jogador e descrição do lado do time). O OSM corta o texto ("Assistênci…", "Cu…"):
+        // gol = linha com "Assistência"; substituição = duas linhas com camisa (1ª entra, 2ª sai); o resto fica como lance.
         val events = ArrayList<String>()
         for (mn in o.lines) {
             val mm = RX_MINUTE.find(mn.text.trim()) ?: continue
             if (mn.xc !in 0.42f..0.58f) continue
-            val band = o.lines.filter { it !== mn && abs(it.yc - mn.yc) <= 0.07f && it.xc !in 0.42f..0.58f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
+            val band = o.lines.filter { it !== mn && abs(it.yc - mn.yc) <= 0.045f && it.xc !in 0.42f..0.58f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
             if (band.isEmpty()) continue
             val side = if (band[0].xc < 0.5f) "casa" else "visitante"
-            events.add("${mm.groupValues[1]}' ($side) " + band.joinToString(" — ") { it.text.trim().replace(RX_SHIRT, "") })
+            val l1 = band[0].text.trim()
+            val l2 = band.getOrNull(1)?.text?.trim()
+            val p1 = l1.replace(RX_SHIRT, "")
+            val desc = when {
+                l2 != null && Txt.norm(l2).startsWith("assist") -> {
+                    val a = l2.substringAfter(':', "").trim().trim('.', '…').trim()
+                    "gol de $p1" + (if (a.length >= 3) " (assistência: $a)" else " (com assistência)")
+                }
+                l2 != null && RX_SHIRT.containsMatchIn(l2) && RX_SHIRT.containsMatchIn(l1) -> "substituição: entra $p1, sai ${l2.replace(RX_SHIRT, "").trim('.', '…')}"
+                l2 == null -> "lance de $p1 (gol sem assistência ou cartão)"
+                else -> band.joinToString(" — ") { it.text.trim().replace(RX_SHIRT, "") }
+            }
+            events.add("${mm.groupValues[1]}' ($side) $desc")
         }
 
         // Notas dos jogadores: bolinhas à esquerda (time da casa) e à direita (visitante).
