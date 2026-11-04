@@ -396,6 +396,17 @@ class HumanPriorTest {
             .put("avoid", org.json.JSONArray().put(org.json.JSONObject().put("formation", "9-9-9"))), 6)?.takeIf { it.avoid.isNotEmpty() })
     }
 
+    @org.junit.Test fun learnsWhereTheSimulationIsWrong() {
+        // a simulação previu 1,5 pt para as duas escolhas; Contra-ataque rendeu 0 e Jogar pelas alas 3: o erro do modelo é o que corrige
+        fun gp(f: String, st: String, res: String, g: Int) = g(f, st, 50, res, 75, 75).put("predPts", 1.5).put("genAt", g.toLong())
+        val logs = (1..8).map { gp("5-3-2", "Contra-ataque", "D", it) } + (9..16).map { gp("4-3-3 A", "Jogar pelas alas", "V", it) }
+        val p = HumanPrior.build(logs, null)!!
+        val bad = HumanPrior.bonus(p, "5-3-2", "Contra-ataque", 50)
+        val good = HumanPrior.bonus(p, "4-3-3 A", "Jogar pelas alas", 50)
+        org.junit.Assert.assertTrue("bad=$bad good=$good", good > 0.3 && bad < -0.3)
+        org.junit.Assert.assertTrue(HumanPrior.avoidsStyle(p, "Contra-ataque"))
+    }
+
     @org.junit.Test fun fewGamesGiveNoPrior() {
         org.junit.Assert.assertNull(HumanPrior.build(List(4) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) }, null))
     }

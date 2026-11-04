@@ -86,10 +86,17 @@ object HumanPrior {
         val (a, b) = fit(all)
         val ref = all.sumOf { pts(it.optString("result")) } / all.size
         val w = all.indices.associate { all[it] to recency(it) }
+        // Erro do PRÓPRIO modelo: pontos reais menos os que a simulação previu para a tática usada (predPts). O erro médio
+        // geral (o simulador é otimista) sai; sobra onde ele erra MAIS por formação/estilo, que é o que corrige a escolha.
+        val withPred = all.filter { it.has("predPts") && !it.isNull("predPts") }
+        val globalErr = if (withPred.size >= 6) withPred.sumOf { pts(it.optString("result")) - it.optDouble("predPts") } / withPred.size else 0.0
+        fun residual(j: JSONObject): Double =
+            if (withPred.size >= 6 && j.has("predPts") && !j.isNull("predPts")) pts(j.optString("result")) - j.optDouble("predPts") - globalErr
+            else pts(j.optString("result")) - (a + b * (diffOf(j) ?: 0))
         fun groups(key: (JSONObject) -> String): Map<String, G> = all.groupBy(key).mapValues { (_, v) ->
             val raw = v.sumOf { pts(it.optString("result")) } / v.size
             val ws = v.sumOf { w[it] ?: 1.0 }
-            val res = v.sumOf { j -> (w[j] ?: 1.0) * (pts(j.optString("result")) - (a + b * (diffOf(j) ?: 0))) } / (ws + SHRINK)
+            val res = v.sumOf { j -> (w[j] ?: 1.0) * residual(j) } / (ws + SHRINK)
             G(v.size, raw, res)
         }
         val form = groups { Formations.base(it.optString("formation")) }
@@ -142,7 +149,7 @@ object HumanPrior {
             .joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} pts/jogo em ${it.value.n} (${"%+.2f".format(it.value.adj)} vs esperado pela força)" }
             .takeIf { it.isNotBlank() }?.let { "$title — $it" }
         return listOfNotNull(
-            "Seus jogos reais contra humanos (${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo). Os números JÁ descontam a diferença de força:",
+            "Seus jogos reais contra humanos (${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo). Os números JÁ descontam a diferença de força e o erro que a simulação costuma cometer:",
             line(p.form, "formação"), line(p.style, "estilo"),
             if (p.streak.isNotBlank()) "Últimos resultados contra humanos (do mais recente): ${p.streak}. Em sequência de derrotas NÃO repita as táticas que perderam." else null,
             if (p.lessonText.isNotBlank()) "Lição do último jogo: ${p.lessonText}" else null,
