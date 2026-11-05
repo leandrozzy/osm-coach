@@ -160,7 +160,7 @@ object Fresh {
         }
         val pr = age(ScreenType.PREP)
         // a preparação só importa perto do jogo (é a lista que você cumpre antes de começar)
-        if (gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H)) add(ScreenType.PREP, 1, "falta pouco para o jogo: veja o que falta na preparação")
+        if (gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H)) add(ScreenType.PREP, 1, "veja o que falta na preparação (menos de 3 h para o jogo): cada item feito sobe o bônus de preparação")
         if (i.timers.any { it.scout && it.at <= i.now }) add(ScreenType.SCOUT, 2, "o olheiro terminou a busca")
         val st = age(ScreenType.STATS)
         when {

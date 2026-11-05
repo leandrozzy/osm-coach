@@ -212,25 +212,46 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
         if (now - (autoTacticAt[slot] ?: 0L) < 25_000L) return
-        val sig = listOf(
+        val sigKeys = listOf(
             K.ROUND, K.RIVAL_TEAM, K.RIVAL_NICK, K.RIVAL_STRENGTH, K.MY_STRENGTH, K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE,
             K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET, K.REFEREE, K.HOME
-        ).joinToString("|") { f[it]?.value.orEmpty() }
+        )
+        val sig = sigKeys.joinToString("|") { f[it]?.value.orEmpty() }
         val old = repo.dao.plan(slot, "autogen")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val p = repo.dao.plan(slot, "tactic")
         val valid = p != null && runCatching { Director.tacticValid(JSONObject(p.json), p.at, f, now) }.getOrDefault(false)
-        val same = old?.optString("sig") == sig
+        // o que mudou desde a última geração (força varia ±1 sozinha: não conta); sem registro anterior = tudo novo
+        val oldParts = old?.optString("sig")?.takeIf { it.isNotBlank() }?.split("|")
+        val changed = if (oldParts == null) sigKeys else sigKeys.filterIndexed { i, k ->
+            val a = oldParts.getOrNull(i).orEmpty(); val b2 = f[k]?.value.orEmpty()
+            if (a == b2) false
+            else if ((k == K.RIVAL_STRENGTH || k == K.MY_STRENGTH) && a.toIntOrNull() != null && b2.toIntOrNull() != null) kotlin.math.abs(a.toInt() - b2.toInt()) > 1
+            else true
+        }
+        val same = oldParts != null && changed.isEmpty()
+        val rivalTacticKeys = setOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE, K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET)
+        // "o rival mudou a tática" só quando a ANÁLISE dele mudou; força, árbitro, bônus etc. são "dados do jogo"
+        val rivalChanged = valid && oldParts != null && changed.any { it in rivalTacticKeys }
+        val labels = mapOf(K.RIVAL_STRENGTH to "força do rival", K.MY_STRENGTH to "sua força", K.REFEREE to "árbitro", K.HOME to "casa/fora", K.RIVAL_NICK to "apelido do rival", K.RIVAL_TEAM to "adversário", K.ROUND to "rodada")
+        val dataChanged = changed.filter { it !in rivalTacticKeys }.mapNotNull { labels[it] }.distinct()
         // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
         if (same && valid) {
-            repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).put("chk", now).toString(), now))
-            note(slot, (delta ?: "✅ S$slot: tudo lido.") + " A tática gerada continua valendo.", now)
+            // só vira "conferido" quando a Análise foi lida AGORA (justRead); entrar no slot não confere o rival
+            val chk = if (justRead) now else old?.optLong("chk", 0L)?.takeIf { it > 0L }
+            repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { chk?.let { put("chk", it) } }.toString(), now))
+            note(slot, if (justRead) (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo."
+                else "S$slot: a tática deste jogo já foi gerada. Passe pela Análise do rival para eu conferir se ele mudou.", now)
             return
         }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
         repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
         autoTacticAt[slot] = now
-        val rivalChanged = valid && old != null && !same
-        CaptureService.instance?.notice("S$slot: " + (if (rivalChanged) "o rival mudou; gerando a tática de novo…" else "gerando a tática…"))
+        val why1 = when {
+            rivalChanged -> "o rival mudou a tática; gerando de novo…"
+            valid && dataChanged.isNotEmpty() -> "mudou ${dataChanged.joinToString(", ")}; gerando a tática de novo…"
+            else -> "gerando a tática…"
+        }
+        CaptureService.instance?.notice("S$slot: $why1")
         startGeneration(ctx, "tactic", slot)
         AppScope.scope.launch {
             var waited = 0
@@ -238,7 +259,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             val job = GenState.get("tactic", slot)
             val j = repo.dao.plan(slot, "tactic")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
             val msg = if (job?.ok == true && j != null) {
-                "✅ S$slot: tática pronta" + (if (rivalChanged) " (rival mudou)" else "") + ": ${j.optString("formation")} • ${j.optString("playStyle")}. Monte no OSM: toque em 📱 App ou abra a tela de Tática."
+                "✅ S$slot: tática pronta" + (if (rivalChanged) " (rival mudou)" else if (valid && dataChanged.isNotEmpty()) " (${dataChanged.joinToString(", ")} mudou)" else "") + ": ${j.optString("formation")} • ${j.optString("playStyle")}. Monte no OSM: toque em 📱 App ou abra a tela de Tática."
             } else "⚠ S$slot: não consegui gerar a tática sozinho" + (job?.error?.let { ": $it" } ?: "") + ". Gere no app."
             CaptureService.instance?.notice(msg)
             // o rival pode ter mudado enquanto gerava (Análise lida logo depois do Pré-jogo): confere de novo

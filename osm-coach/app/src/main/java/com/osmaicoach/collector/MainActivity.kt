@@ -1308,6 +1308,10 @@ data class SlotSummary(
     val readAna: Boolean = false,
     val readSquad: Boolean = false,
     val readMine: Boolean = false,
+    /** A tática que está no OSM foi conferida e bate com a gerada (plano `tacticdone`): nada a montar. */
+    val mounted: Boolean = false,
+    /** Idade da leitura mais antiga de cada passo [Pré-jogo, Análise, Rival]: a tela mostra "✓ Análise · 2 h" em vez de só ✓. */
+    val readAges: List<Long?> = emptyList(),
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
     val needsResult: Boolean = false,
@@ -1538,6 +1542,8 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 readAna = Director.groups(f, now)[1].ok,
                 readSquad = Director.groups(f, now)[2].ok,
                 readMine = Director.groups(f, now)[3].ok,
+                mounted = repo.dao.plan(slot, "tactic")?.at.let { ta -> ta != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() } == ta },
+                readAges = Director.groupAgesMs(f, now),
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
@@ -2042,7 +2048,7 @@ private fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
             todo.add(Todo(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
         if (s.rivalChanged.isNotEmpty()) todo.add(Todo(s.slot, "⚠", "O rival mudou a tática", "Gere a tática de novo antes do jogo", 6, 4))
-        if (s.tacticReady && !s.tacticStale && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
+        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
     }
     for (w in data.work) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }
@@ -2256,12 +2262,15 @@ private fun SlotRow(s: SlotSummary, onClick: () -> Unit) {
 @Composable
 private fun ReadChips(s: SlotSummary) {
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        for ((ok, label) in listOf(s.readPre to "Pré-jogo", s.readAna to "Análise", s.readSquad to "Rival", s.readMine to "Meu time")) {
+        for ((i, pair) in listOf(s.readPre to "Pré-jogo", s.readAna to "Análise", s.readSquad to "Rival", s.readMine to "Meu time").withIndex()) {
+            val (ok, label) = pair
             val col = if (ok) C.OK else C.WARN
+            val ageMs = s.readAges.getOrNull(i)
+            val age = if (ok && ageMs != null) " · " + (if (ageMs < 3_600_000L) "${maxOf(1L, ageMs / 60_000L)} min" else "${ageMs / 3_600_000L} h") else ""
             Row(
                 Modifier.weight(1f).clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.55f), RoundedCornerShape(50)).padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
-            ) { Text((if (ok) "✓ " else "○ ") + label, fontSize = 12.sp, color = col, fontWeight = FontWeight.SemiBold, maxLines = 1) }
+            ) { Text((if (ok) "✓ " else "○ ") + label + age, fontSize = 11.5.sp, color = col, fontWeight = FontWeight.SemiBold, maxLines = 1) }
         }
     }
 }
@@ -2276,8 +2285,9 @@ private fun TacticStatusLine(s: SlotSummary) {
     val (icon, text, col) = when {
         GenState.running("tactic", s.slot) || GenState.running("tactic_ai", s.slot) -> Triple("⚙", "Gerando a tática…", C.PRIMARY)
         s.rivalChanged.isNotEmpty() -> Triple("⚠", "O rival mudou: gere a tática de novo", C.WARN)
+        s.mounted && s.tacticReady -> Triple("✅", "Tática montada no OSM: confere com a gerada", C.OK)
         s.tacticStale -> Triple("🔎", "Releia o rival (passos abaixo) antes de confiar na tática", C.WARN)
-        s.tacticReady && s.autoChk != null && s.autoChk > (s.autoAt ?: 0L) -> Triple("✅", "Rival conferido ${ago(s.autoChk)}: não mudou, a tática continua valendo", C.OK)
+        s.tacticReady && s.autoChk != null && s.autoChk > (s.autoAt ?: 0L) -> Triple("✅", "Análise do rival conferida ${ago(s.autoChk)}: não mudou, a tática continua valendo", C.OK)
         s.tacticReady && s.autoAt != null -> Triple("✅", "Tática gerada ${ago(s.autoAt)}: monte no OSM antes do jogo", C.OK)
         s.tacticReady -> Triple("✅", "Tática pronta: monte no OSM antes do jogo", C.OK)
         far -> Triple("⏳", "Jogo longe: a tática é gerada nas últimas 8 h antes dele", C.MUTED)

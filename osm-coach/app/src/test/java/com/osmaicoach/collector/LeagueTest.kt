@@ -157,3 +157,18 @@ class ResultsSummaryTest {
         org.junit.Assert.assertNull(Results.of(emptyList()))
     }
 }
+
+class GroupAgesTest {
+    private fun sf(v: String, at: Long) = StoredField(v, 0.9, at)
+    @org.junit.Test fun idadeDeCadaPassoVemDaLeituraMaisAntiga() {
+        val now = 10L * 3_600_000L
+        val f = mapOf(
+            K.MY_STRENGTH to sf("80", now - 60_000L), K.RIVAL_STRENGTH to sf("75", now - 60_000L), K.REFEREE to sf("Normal", now - 2 * 3_600_000L),
+            K.RIVAL_FORMATION to sf("4-3-3", now - 600_000L), K.RIVAL_PLAN to sf("Alas", now - 600_000L)
+        )
+        val ages = Director.groupAgesMs(f, now)
+        org.junit.Assert.assertEquals(2 * 3_600_000L, ages[0])
+        org.junit.Assert.assertEquals(600_000L, ages[1])
+        org.junit.Assert.assertNull(ages[2])
+    }
+}

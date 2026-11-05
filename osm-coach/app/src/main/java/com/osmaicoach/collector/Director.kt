@@ -680,6 +680,20 @@ object Director {
         )
     }
 
+    /** Idade (ms) da leitura MAIS ANTIGA de cada grupo [Pré-jogo, Análise, Plantel do rival]; null se algum campo falta. */
+    fun groupAgesMs(f: Map<String, StoredField>, now: Long): List<Long?> {
+        val secret = SecretTraining.on(f)
+        fun age(keys: List<String>): Long? {
+            val ks = keys.filter { !(secret && it in SecretTraining.HIDDEN) }
+            val ages = ks.map { k -> f[k]?.takeIf { FieldMerge.known(it.value) }?.let { now - it.updatedAt } ?: return null }
+            return ages.maxOrNull()
+        }
+        return listOf(
+            age(listOf(K.MY_STRENGTH, K.RIVAL_STRENGTH, K.REFEREE)), age(listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN)),
+            age(listOf(K.RIVAL_GOL, K.RIVAL_DEF, K.RIVAL_MID, K.RIVAL_ATK, K.RIVAL_VALUE))
+        )
+    }
+
     /** O que falta ler antes de gerar a tática (tudo é obrigatório). Vazio = pode gerar. */
     fun tacticGaps(f: Map<String, StoredField>, now: Long): List<Pair<String, String>> =
         groups(f, now).filter { !it.ok }.map { (it.name + ": falta " + it.missing.joinToString(", ")) to it.where }
