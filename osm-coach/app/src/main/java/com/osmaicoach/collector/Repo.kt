@@ -765,8 +765,13 @@ class Repo(private val ctx: Context) {
         val x = ex.extra ?: return 0
         when (ex.type) {
             ScreenType.PREP -> {
-                val items = x.optJSONArray("items") ?: return 0
-                if (items.length() == 0) return 0
+                // aba "Lista de Afazeres": o que o jogo pede agora (guardado inteiro; item que sumiu da lista foi feito)
+                if (x.optBoolean("todoSeen")) {
+                    dao.putPlan(PlanEntity(slot, "todolist", JSONObject().put("keys", x.optJSONArray("todo") ?: JSONArray()).put("at", now).toString(), now))
+                    noteScreen(slot, ScreenType.PREP, now)
+                }
+                val items = x.optJSONArray("items") ?: return if (x.optBoolean("todoSeen")) 1 else 0
+                if (items.length() == 0) return if (x.optBoolean("todoSeen")) 1 else 0
                 val cur = planJson(slot, "prep")
                 for (i in 0 until items.length()) {
                     val o = items.optJSONObject(i) ?: continue

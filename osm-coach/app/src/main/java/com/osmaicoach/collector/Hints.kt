@@ -13,7 +13,7 @@ object Hints {
     data class Hint(val icon: String, val title: String, val detail: String, val action: Boolean = false)
 
     /** Dicas que são "ainda não fiz": treinador parado, faltam jogadores, preparação, patrocínio vencido. Sugestão de melhoria não conta. */
-    private val ACTION_ICONS = setOf("🏋", "🚨", "📝", "🤝", "🔄", "🏗", "🏟", "⏰", "⚖", "🩹")
+    private val ACTION_ICONS = setOf("🏋", "🚨", "📝", "🤝", "🔄", "🏗", "🏟", "⏰", "⚖", "🩹", "🧩", "💼")
 
     fun asHint(t: Playbook.Tip): Hint = Hint(t.icon, t.title, t.why, t.icon in ACTION_ICONS && !(t.icon == "🤝" && t.priority < 88))
 
@@ -105,8 +105,18 @@ object Hints {
                 seats = work.seats, matchAt = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull(), now = now
             )
         )
-        base + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
+        base + todoTips(repo.dao.plan(slot, "todolist")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, now) + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
     }.getOrDefault(emptyList())
+
+    /** O que a aba "Lista de Afazeres" do OSM pediu na última leitura (vale 24 h): 11 inicial incompleto e patrocinador à espera. */
+    fun todoTips(j: JSONObject?, now: Long): List<Playbook.Tip> {
+        if (j == null || now - j.optLong("at", 0L) > 24L * 3600000L) return emptyList()
+        val keys = j.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val out = ArrayList<Playbook.Tip>()
+        if ("onze" in keys) out.add(Playbook.Tip("🧩", "Onze inicial incompleto: escolha o 11", "O OSM avisa que faltam jogadores no 11 (lesão, venda ou suspensão). Menu ☰ → Equipa inicial: time sem 11 em campo joga enfraquecido.", 96, 4))
+        if ("patroc" in keys) out.add(Playbook.Tip("💼", "Patrocinador à espera: escolha um acordo", "Menu ☰ → Estádio → Bancada: contrato novo rende por jogo em casa (ex.: +97K) e não gasta Boss Coins.", 70, 0))
+        return out
+    }
 
     /** Seu elenco contra o da liga (tabela "Valor do plantel") e o convite para ler as tabelas quando faltam. Só informação: não conta na bolha. */
     fun leagueTips(lj: JSONObject?, f: Map<String, StoredField>, mySize: Int, now: Long): List<Playbook.Tip> {

@@ -75,7 +75,7 @@ Sem slot confiável nada é gravado. Texto de tela: sempre comparar com `Txt.nor
   `TacticValidator`); aprendizado com gols reais (`Learned`); calendário/próximo jogo; eventos do OSM só do calendário da
   comunidade (`source == "calendario"`); cronômetros de treino/estádio/olheiro/missões com alarmes; bolha por cima do
   jogo com dicas; "Telas para atualizar" com caminho de menu; Médico/Advogado (jogadores fora do 11; lê conversa, cartão e "em curso" + cronômetro; sugere mandar ao médico/advogado, grátis 8 h); Especialistas;
-  cartão amarelo (leitura); sponsors; diagnóstico exportável.
+  cartão amarelo (leitura); sponsors; aba Lista de Afazeres (leitura); diagnóstico exportável.
 - **Incompletas / não confirmadas:** avisos com o app fechado no ROG/ASUS: o teste local "Testar fechado" **falhou**
   no aparelho (o OEM apaga os alarmes ao fechar o app); a reserva `Push` (ntfy: o servidor agenda e entrega no horário e as mensagens aparecem no app ntfy ao abrir, mas o ntfy Play não acordava com o celular parado), o `CalendarSync` e o `KeepAliveService` foram criados, **não validados em aparelho**; leitura de Médico/Advogado **com jogadores na lista** (falta print real); aba "Lista de
   Afazeres" (Boss Coins grátis, Missões) não é lida.
@@ -83,6 +83,7 @@ Sem slot confiável nada é gravado. Texto de tela: sempre comparar com `Txt.nor
 - Aba Hoje: slots primeiro (cartão compacto com próximo jogo), depois `ResultsCard` ("Resultados das táticas": V/E/D reais, % vitórias, aproveitamento, gols, humano × CPU, casa × fora, sequência e melhores/piores formação • estilo; `Results` em Progress.kt) e `AccuracyCard` ("Acerto da previsão": mede V/E/D PREVISTO × real, não a tática), telas para atualizar, treinos/estádio e "Mais".
   Diretor: "Arranque" numerado quando a competição é nova (≤2 rodadas); comunidade fica no fim.
 - Pré-jogo (vídeo 05/11): `Parsers.pregame` lê a FORMA recente dos dois times (bolinhas V/E/D → `K.MY_FORM`/`K.RIVAL_FORM`, entra no `WinModel` como `rivalRecent`, termo pequeno) e o NÍVEL DA PREPARAÇÃO da barra (`K.PREP_LEVEL`, `PrepLevel`: CRÍTICO/FRACO/RAZOÁVEL pedem a lista de afazeres; BOM/BOA/EXCELENTE não pedem nada); o cartão do slot mostra bolinhas e "Preparação: X" (`FormDots`, `PrepChip`).
+- Lista de Afazeres (vídeo 05/11): `Screens.classify` (PREP, ≥2 títulos da lista) + `Screens.prep` (`todo`/`todoSeen`, `TODO_DEFS`) → plano `todolist` (24 h, `Repo.applyExtra`); `Hints.todoTips` dá dica 🧩 "Onze inicial incompleto" (Menu ☰ → Equipa inicial) e 💼 "Patrocinador à espera" (Estádio → Bancada), ambas pendências.
 - **Ausentes:** escolha do 11 por cartão amarelo; compra com
   preço-alvo (≤1,5× valor); batalhas/crews.
 
