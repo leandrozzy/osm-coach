@@ -11,6 +11,9 @@ object ResultCtx {
     var at: Long = 0L
 }
 
+/** Último momento em que cada aviso do registro foi gravado (compartilhado: o app cria vários Repo). */
+private val LEARN_SEEN = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
 class Repo(private val ctx: Context) {
     val dao: CoachDao = CoachDb.get(ctx).dao()
 
@@ -67,6 +70,11 @@ class Repo(private val ctx: Context) {
     }
 
     suspend fun learn(slot: Int, kind: String, text: String, now: Long = System.currentTimeMillis()) {
+        // o mesmo aviso (ex.: "elenco de dono desconhecido ignorado") a cada quadro lotava o registro: 1 vez a cada 30 min
+        val key = "$slot|$kind|${text.take(300)}"
+        val prev = LEARN_SEEN[key]
+        if (prev != null && now - prev < 30L * 60_000L) return
+        LEARN_SEEN[key] = now
         dao.insertLearning(LearningEntity(at = now, slotId = slot, kind = kind, text = text.take(300)))
     }
 

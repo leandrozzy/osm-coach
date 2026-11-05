@@ -222,16 +222,12 @@ class FramePipeline private constructor(private val ctx: Context) {
         val valid = p != null && runCatching { Director.tacticValid(JSONObject(p.json), p.at, f, now) }.getOrDefault(false)
         // o que mudou desde a última geração (força varia ±1 sozinha: não conta); sem registro anterior = tudo novo
         val oldParts = old?.optString("sig")?.takeIf { it.isNotBlank() }?.split("|")
-        val changed = if (oldParts == null) sigKeys else sigKeys.filterIndexed { i, k ->
-            val a = oldParts.getOrNull(i).orEmpty(); val b2 = f[k]?.value.orEmpty()
-            if (a == b2) false
-            else if ((k == K.RIVAL_STRENGTH || k == K.MY_STRENGTH) && a.toIntOrNull() != null && b2.toIntOrNull() != null) kotlin.math.abs(a.toInt() - b2.toInt()) > 1
-            else true
-        }
+        val changed = if (oldParts == null) sigKeys else sigKeys.filterIndexed { i, k -> SigCompare.differs(k, oldParts.getOrNull(i).orEmpty(), f[k]?.value.orEmpty()) }
         val same = oldParts != null && changed.isEmpty()
         val rivalTacticKeys = setOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE, K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET)
         // "o rival mudou a tática" só quando a ANÁLISE dele mudou; força, árbitro, bônus etc. são "dados do jogo"
-        val rivalChanged = valid && oldParts != null && changed.any { it in rivalTacticKeys }
+        // "o rival mudou a tática" só com a prova da Análise: duas leituras dela no MESMO jogo e diferentes (rivalDelta, "⚠ … MUDOU")
+        val rivalChanged = valid && delta?.startsWith("⚠") == true
         val labels = mapOf(K.RIVAL_STRENGTH to "força do rival", K.MY_STRENGTH to "sua força", K.REFEREE to "árbitro", K.HOME to "casa/fora", K.RIVAL_NICK to "apelido do rival", K.RIVAL_TEAM to "adversário", K.ROUND to "rodada")
         val dataChanged = changed.filter { it !in rivalTacticKeys }.mapNotNull { labels[it] }.distinct()
         // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
@@ -249,6 +245,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val why1 = when {
             rivalChanged -> "o rival mudou a tática; gerando de novo…"
             valid && dataChanged.isNotEmpty() -> "mudou ${dataChanged.joinToString(", ")}; gerando a tática de novo…"
+            valid -> "leituras do rival atualizadas; gerando a tática de novo…"
             else -> "gerando a tática…"
         }
         CaptureService.instance?.notice("S$slot: $why1")
@@ -779,5 +776,20 @@ class FramePipeline private constructor(private val ctx: Context) {
         onStep(list.size, list.size)
         for (slot in 1..4) runCatching { repo.syncRound(slot) }
         return ReplayResult(list.size, read, fields, bySlot)
+    }
+}
+
+/** Compara o valor guardado com o lido agora de cada campo da assinatura da tática (tolerante ao ruído do OCR). */
+object SigCompare {
+    fun differs(k: String, a: String, b: String): Boolean = when {
+        a == b -> false
+        // campo que sumiu ou ainda não foi lido não é "mudança" (o OCR do pré-jogo pisca entre leituras)
+        a.isBlank() || b.isBlank() -> false
+        (k == K.RIVAL_STRENGTH || k == K.MY_STRENGTH) && a.toIntOrNull() != null && b.toIntOrNull() != null -> kotlin.math.abs(a.toInt() - b.toInt()) > 1
+        // nome do time/apelido: o OCR troca letras ("VfB Stuttgart II" × "Vfb Stuttgart ll"); só é outro adversário se for bem diferente
+        k == K.RIVAL_TEAM || k == K.RIVAL_NICK -> Txt.sim(Txt.key(a), Txt.key(b)) < 0.8
+        k == K.RIVAL_FORMATION -> (Formations.canonical(a) ?: a) != (Formations.canonical(b) ?: b)
+        k == K.RIVAL_PLAN -> (Osm.style(a) ?: Txt.key(a)) != (Osm.style(b) ?: Txt.key(b))
+        else -> Txt.key(a) != Txt.key(b)
     }
 }

@@ -1299,6 +1299,8 @@ data class SlotData(
     val marketPlan: MarketEngine.Plan? = null,
     val marketNote: String? = null,
     val logs: List<PlanEntity> = emptyList(),
+    /** Todos os jogos do slot (inclui competições arquivadas): os cartões de resultado e o Placar contam o mesmo. */
+    val logsAll: List<PlanEntity> = emptyList(),
     val reports: List<PlanEntity> = emptyList(),
     val fitness: Map<String, Pair<Int, Int>> = emptyMap(),
     val rivalProfile: PlanEntity? = null,
@@ -1377,6 +1379,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
             } catch (e: Exception) { null }
         },
         logs = dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") },
+        logsAll = dao.tacticLogs(slot),
         reports = dao.matchReports(slot),
         fitness = repo.fitness(slot),
         rivalProfile = repo.rivalProfile(slot),
@@ -1944,7 +1947,9 @@ private fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }
         if (idle.isNotEmpty()) todo.add(Todo(w.slot, "🏋", "Treinador parado: " + idle.joinToString { Timers.roleLabel(it.role) }, "Treino parado é evolução perdida", 3, 6))
     }
-    for (n in data.needs.filter { it.urgency >= 1 }) {
+    // "Reler Pré-jogo e Análise do rival" já cobre essas duas telas: não repete como "Atualizar: Pré-jogo/Análise" no mesmo slot
+    val reread = todo.filter { it.title.startsWith("Reler Pré-jogo") }.map { it.slot }.toSet()
+    for (n in data.needs.filter { it.urgency >= 1 && !(it.slot in reread && (it.type == ScreenType.PREGAME || it.type == ScreenType.REPORT)) }) {
         todo.add(Todo(n.slot, "🔄", "Atualizar: " + (Fresh.NAME[n.type] ?: n.type.name), n.reason.substringBefore(":").replaceFirstChar { it.uppercase() }, 2, 0))
     }
     val sorted = todo.sortedWith(compareByDescending<Todo> { it.urgency }.thenBy { it.slot })
@@ -2687,7 +2692,8 @@ private fun DirectorTab(onOpen: (Int, Int) -> Unit) {
                             Text("S${u.s.slot} • ${u.s.title}" + (if (u.s.rival != null) " vs ${u.s.rival}" else ""), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             Text(countdown(u.s.nextAt!!) + " • previsão: " + u.forecast, fontSize = 12.5.sp, color = C.MUTED)
                         }
-                        Pill(if (u.s.tacticReady) "Tática ✔" else "Gerar →", u.s.tacticReady)
+                        val far = u.s.nextAt != null && u.s.nextAt - System.currentTimeMillis() > Director.TACTIC_WINDOW_MS
+                        Pill(if (u.s.tacticReady) "Tática ✔" else if (u.s.tacticStale || u.s.rivalGaps) "Reler rival" else if (far) "Nas últimas 8 h" else "Gerar →", u.s.tacticReady)
                     }
                 }
             }
@@ -4825,8 +4831,8 @@ private fun GameCard(g: Coach.Game, rv: Coach.Review?) {
 @Composable
 private fun SlotLearning(slot: Int, d: SlotData) {
     d.progress?.let { ScoreboardCard(it.score) }
-    Results.of(d.logs.mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() })?.let { ResultsCard(it, "S$slot") }
-    Accuracy.of(Accuracy.parse(slot, d.logs.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }))?.let { AccuracyCard(it, "S$slot") }
+    Results.of(d.logsAll.mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() })?.let { ResultsCard(it, "S$slot, todas as competições") }
+    Accuracy.of(Accuracy.parse(slot, d.logsAll.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }))?.let { AccuracyCard(it, "S$slot, todas as competições") }
     LearnedCard(d.learned)
     data class Row2(
         val kind: String, val round: Int, val formation: String, val style: String, val rival: String,

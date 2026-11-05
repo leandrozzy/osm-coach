@@ -58,8 +58,8 @@ object Fresh {
     /** Guia fixo: o que cada tela alimenta e de quanto em quanto tempo vale passar por ela. */
     val GUIDE = listOf(
         Triple(ScreenType.SQUAD, "Elenco, forças, condição, moral e cartões → 11 ideal, treino, vendas", "1x por semana (e antes do jogo se passou de 12 h) e depois de contratar ou vender"),
-        Triple(ScreenType.PREGAME, "Rival, forças, bônus e árbitro → a tática do jogo", "até 20 min antes de cada jogo"),
-        Triple(ScreenType.REPORT, "Formação e estilo do rival → contra-tática", "antes do jogo (rival humano muda)"),
+        Triple(ScreenType.PREGAME, "Rival, forças, bônus e árbitro → a tática do jogo", "obrigatório para gerar a tática: vale por 3 h (e relido perto do jogo)"),
+        Triple(ScreenType.REPORT, "Formação e estilo do rival → contra-tática", "obrigatório para gerar a tática: vale por 3 h (rival humano muda)"),
         Triple(ScreenType.DOCTOR, "Lesionados → saem do 11", "só se o plantel mostrar lesionado sem tratamento"),
         Triple(ScreenType.LAWYER, "Suspensos → saem do 11", "só se o plantel mostrar vermelho e o advogado não estiver cuidando"),
         Triple(ScreenType.TRAINING, "Quem treina e quando termina → avisos e quem treinar", "a cada sessão (o app avisa quando acaba)"),

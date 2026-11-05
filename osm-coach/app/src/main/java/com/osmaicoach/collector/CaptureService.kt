@@ -342,7 +342,7 @@ class CaptureService : AccessibilityService() {
                         updateBadge()
                         if (gone.isNotEmpty()) notice("✅ Feito: " + gone.first().title)
                         if (cardView?.visibility == View.VISIBLE && headView?.text?.startsWith("Tática") != true) {
-                            showCard(hints, "S$slot • " + Hints.screenLabel(st))
+                            showCard(hints, (if (slot > 0) "S$slot • " else "OSM • ") + Hints.screenLabel(st))
                         }
                     }
                 }
