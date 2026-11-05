@@ -126,3 +126,25 @@ class SlotFreeTest {
         org.junit.Assert.assertFalse(Hints.slotFree(emptyMap()))
     }
 }
+
+class ResultsSummaryTest {
+    private fun g(f: String, st: String, res: String, gf: Int, ga: Int, human: Boolean, home: Boolean, at: Long) = org.json.JSONObject()
+        .put("formation", f).put("playStyle", st).put("result", res).put("scoreMine", gf).put("scoreOpp", ga).put("human", human).put("home", home).put("genAt", at)
+    @org.junit.Test fun realResultsSplitHumanCpuAndRankTactics() {
+        val logs = listOf(
+            g("4-3-3 A", "Jogar pelas alas", "V", 3, 0, true, true, 1), g("4-3-3 A", "Jogar pelas alas", "V", 2, 1, true, false, 2),
+            g("4-3-3 B", "Jogar pelas alas", "E", 1, 1, true, true, 3), g("4-3-3 A", "Jogar pelas alas", "V", 4, 0, false, true, 4),
+            g("5-4-1 A", "Contra-ataque", "D", 0, 2, true, false, 5), g("5-4-1 B", "Contra-ataque", "D", 0, 1, true, true, 6),
+            g("5-4-1 A", "Contra-ataque", "D", 1, 3, false, false, 7)
+        )
+        val s = Results.of(logs)!!
+        org.junit.Assert.assertEquals(3, s.total.v); org.junit.Assert.assertEquals(1, s.total.e); org.junit.Assert.assertEquals(3, s.total.d)
+        org.junit.Assert.assertEquals(7, s.total.n)
+        org.junit.Assert.assertEquals(5, s.human!!.n); org.junit.Assert.assertEquals(1, s.cpu!!.v); org.junit.Assert.assertEquals(1, s.cpu!!.d)
+        org.junit.Assert.assertTrue(s.streak.startsWith("D D D"))
+        org.junit.Assert.assertTrue(s.best.first().label.startsWith("4-3-3"))
+        org.junit.Assert.assertTrue(s.worst.first().label.contains("Contra-ataque"))
+        org.junit.Assert.assertEquals(43, s.total.winPct)
+        org.junit.Assert.assertNull(Results.of(emptyList()))
+    }
+}

@@ -353,8 +353,8 @@ object Accuracy {
         if (n < 10) tips.add("Só $n jogo(s) conferidos: o percentual ainda oscila. Quanto mais resultados você passa pelo app, mais a IA aprende.")
         if (n >= 8 && avgFav - pct >= 8) tips.add("A IA tem sido confiante demais: aponta ~$avgFav% no favorito e acerta $pct%. As próximas previsões vão ser mais cautelosas (correção automática).")
         if (n >= 8 && pct - avgFav >= 8) tips.add("A IA tem sido cautelosa demais: aponta ~$avgFav% no favorito e acerta $pct%. Dá para confiar um pouco mais nas previsões altas.")
-        if (favV.second >= 5 && favV.first * 100 < favV.second * 50) tips.add("Quando prevê vitória acerta só ${favV.first} de ${favV.second}: contra rivais fortes, prefira a tática mais segura e trate empate como bom resultado.")
-        if (favD.second >= 5 && favD.first * 100 >= favD.second * 70) tips.add("Previsão de derrota acerta ${favD.first} de ${favD.second}: quando aparecer, vale segurar o jogo (defender e punir) em vez de atacar tudo.")
+        if (favV.second >= 5 && favV.first * 100 < favV.second * 50) tips.add("Quando prevê vitória acerta só ${favV.first} de ${favV.second}: o simulador foi otimista com você. As próximas escolhas já são corrigidas pelo erro dele nos seus jogos.")
+        if (favD.second >= 5 && favD.first * 100 >= favD.second * 70) tips.add("Previsão de derrota acerta ${favD.first} de ${favD.second}: são jogos contra rival mais forte. Veja em \"Resultados das táticas\" o que realmente pontuou nesses jogos.")
         if (n >= 8 && favE.second == 0 && draws * 100 >= n * 20) tips.add("Houve $draws empate(s) em $n jogos e a IA nunca aponta empate como mais provável: em jogo equilibrado, o empate é resultado frequente.")
         if (tips.isEmpty()) tips.add("Previsões e resultados estão alinhados. O app continua aprendendo com cada resultado que você passa.")
         val recent = all.sortedByDescending { it.round }.take(6)
@@ -371,5 +371,51 @@ object Accuracy {
             tips.add("Onde mais erra: ${worst.first} (${worst.second} de ${worst.third}). Nesses jogos a previsão merece menos confiança.")
         }
         return Summary(n, hits, brier, avgFav, avgReal, favV, favE, favD, draws, recent, tips, splits)
+    }
+}
+
+
+/**
+ * Resultado REAL das táticas (o que aconteceu em campo): vitórias, empates, derrotas, aproveitamento e gols, contra
+ * humano e contra CPU, em casa e fora, e quais combinações formação • estilo mais e menos pontuaram.
+ */
+object Results {
+    class Line(val label: String, val v: Int, val e: Int, val d: Int, val gf: Int, val ga: Int) {
+        val n: Int get() = v + e + d
+        val pts: Int get() = 3 * v + e
+        val ppg: Double get() = if (n == 0) 0.0 else pts.toDouble() / n
+        val winPct: Int get() = if (n == 0) 0 else Math.round(100f * v / n)
+        val aprov: Int get() = if (n == 0) 0 else Math.round(100f * pts / (3 * n))
+        fun text(): String = "${v}V ${e}E ${d}D • $winPct% vitórias • ${"%.1f".format(ppg).replace('.', ',')} pts/jogo • gols $gf×$ga"
+    }
+
+    class Summary(
+        val total: Line, val human: Line?, val cpu: Line?, val home: Line?, val away: Line?,
+        val streak: String, val best: List<Line>, val worst: List<Line>
+    )
+
+    private fun line(label: String, g: List<JSONObject>) = Line(
+        label, g.count { it.optString("result") == "V" }, g.count { it.optString("result") == "E" }, g.count { it.optString("result") == "D" },
+        g.sumOf { if (it.isNull("scoreMine")) 0 else it.optInt("scoreMine") }, g.sumOf { if (it.isNull("scoreOpp")) 0 else it.optInt("scoreOpp") }
+    )
+
+    /** Logs de tática com resultado (`genAt` = quando a tática foi gerada, usado para a sequência recente). */
+    fun of(logs: List<JSONObject>): Summary? {
+        val all = logs.filter { it.optString("result") in listOf("V", "E", "D") }
+        if (all.isEmpty()) return null
+        fun sub(label: String, f: (JSONObject) -> Boolean): Line? = all.filter(f).takeIf { it.isNotEmpty() }?.let { line(label, it) }
+        val total = line("Todos", all)
+        val byTactic = all.filter { it.optString("formation").isNotBlank() }.groupBy {
+            Formations.base(it.optString("formation")) + " • " + (Osm.style(it.optString("playStyle")) ?: it.optString("playStyle").ifBlank { "?" })
+        }.map { (k, v) -> line(k, v) }.filter { it.n >= 3 }
+        val best = byTactic.filter { it.ppg > total.ppg }.sortedWith(compareByDescending<Line> { it.ppg }.thenByDescending { it.n }).take(3)
+        val worst = byTactic.filter { it.ppg < total.ppg }.sortedWith(compareBy<Line> { it.ppg }.thenByDescending { it.n }).take(3)
+        val streak = all.sortedByDescending { it.optLong("genAt", 0L) }.take(8).joinToString(" ") { it.optString("result") }
+        return Summary(
+            total, sub("Contra humano") { it.optBoolean("human", false) && !it.isNull("human") },
+            sub("Contra CPU") { !it.isNull("human") && !it.optBoolean("human", true) },
+            sub("Em casa") { !it.isNull("home") && it.optBoolean("home", false) }, sub("Fora") { !it.isNull("home") && !it.optBoolean("home", true) },
+            streak, best, worst
+        )
     }
 }

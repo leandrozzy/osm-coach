@@ -1329,7 +1329,7 @@ data class SlotSummary(
     val rivalStr: Int? = null
 )
 
-data class TodayData(val active: Boolean = false, val slots: List<SlotSummary> = emptyList(), val work: List<SlotWork> = emptyList(), val needs: List<Fresh.Need> = emptyList(), val accuracy: Accuracy.Summary? = null)
+data class TodayData(val active: Boolean = false, val slots: List<SlotSummary> = emptyList(), val work: List<SlotWork> = emptyList(), val needs: List<Fresh.Need> = emptyList(), val accuracy: Accuracy.Summary? = null, val results: Results.Summary? = null)
 
 object TodayCache {
     @Volatile var last = TodayData()
@@ -1572,7 +1572,10 @@ private suspend fun loadToday(ctx: Context): TodayData {
     val acc = runCatching {
         Accuracy.of((1..4).flatMap { sl -> Accuracy.parse(sl, repo.dao.tacticLogs(sl).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }) })
     }.getOrNull()
-    return TodayData(Control.activeSession(ctx) != null, list, work, needs.sortedWith(compareByDescending<Fresh.Need> { it.urgency }.thenBy { it.slot }), acc).also { TodayCache.last = it }
+    val res = runCatching {
+        Results.of((1..4).flatMap { sl -> repo.dao.tacticLogs(sl).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() } })
+    }.getOrNull()
+    return TodayData(Control.activeSession(ctx) != null, list, work, needs.sortedWith(compareByDescending<Fresh.Need> { it.urgency }.thenBy { it.slot }), acc, res).also { TodayCache.last = it }
 }
 
 // ------------------------------------------------------------------ app
@@ -1858,11 +1861,39 @@ private fun AgendaCard(data: TodayData) {
     }
 }
 
-/** Quanto a previsão da IA acertou o resultado dos jogos já disputados, com dicas do que isso mostra. */
+/** O que as táticas renderam DE VERDADE: vitórias, empates, derrotas, aproveitamento, contra humano e CPU, e as melhores/piores combinações. */
+@Composable
+private fun ResultsCard(s: Results.Summary, scope: String = "") {
+    val t = s.total
+    val c = if (t.aprov >= 55) C.OK else if (t.aprov >= 35) C.GOLD else C.WARN
+    Fold("📊", "Resultados das táticas" + (if (scope.isNotBlank()) " ($scope)" else "") + ": ${t.winPct}% vitórias", "${t.v}V ${t.e}E ${t.d}D") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StatTile("🏆", "${t.winPct}%", "vitórias (${t.v} de ${t.n})", c, Modifier.weight(1f))
+            StatTile("📈", "${t.aprov}%", "aproveitamento dos pontos", c, Modifier.weight(1f))
+            StatTile("⚽", "${t.gf}×${t.ga}", "gols feitos × sofridos", C.PRIMARY, Modifier.weight(1f))
+        }
+        for (l in listOfNotNull(s.human, s.cpu, s.home, s.away)) {
+            val col = if (l.aprov >= 55) C.OK else if (l.aprov >= 35) C.GOLD else C.WARN
+            Text("${l.label}: ${l.text()}", fontSize = 13.sp, color = col, modifier = Modifier.padding(top = 6.dp))
+        }
+        if (s.streak.isNotBlank()) Text("Sequência recente (do mais novo): ${s.streak}", fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        if (s.best.isNotEmpty()) {
+            Text("Táticas que mais pontuaram", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = C.OK, modifier = Modifier.padding(top = 8.dp))
+            for (l in s.best) Text("✔ ${l.label}: ${l.text()}", fontSize = 12.5.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        if (s.worst.isNotEmpty()) {
+            Text("Táticas que menos pontuaram", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
+            for (l in s.worst) Text("✘ ${l.label}: ${l.text()}", fontSize = 12.5.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Text("O app usa esses resultados para decidir as próximas táticas (o que perde repetidamente sai das opções).", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/** Quanto a PREVISÃO do app (V/E/D) acertou o resultado dos jogos já disputados, com dicas do que isso mostra. */
 @Composable
 private fun AccuracyCard(s: Accuracy.Summary, scope: String = "") {
     val c = if (s.pct >= 60) C.OK else if (s.pct >= 45) C.GOLD else C.WARN
-    Fold("🎯", "Acerto da IA" + (if (scope.isNotBlank()) " ($scope)" else "") + ": ${s.pct}%", "${s.hits}/${s.games} jogos") {
+    Fold("🎯", "Acerto da previsão" + (if (scope.isNotBlank()) " ($scope)" else "") + ": ${s.pct}%", "${s.hits}/${s.games} jogos") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatTile("🎯", "${s.pct}%", "acertou o resultado", c, Modifier.weight(1f))
             StatTile("📈", (if (s.skill >= 0) "+" else "") + s.skill + "%", "melhor que o acaso", if (s.skill > 0) C.OK else C.WARN, Modifier.weight(1f))
@@ -2449,6 +2480,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
         val nowT = System.currentTimeMillis()
         for (s in data.slots.sortedBy { sl -> sl.nextAt?.takeIf { it > nowT && !sl.ended && sl.state == null } ?: Long.MAX_VALUE }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
+        data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }
         if (data.work.isNotEmpty()) {
             Fold("⏱", "Treinos e estádio", data.work.size.toString() + " slots") {
@@ -5056,6 +5088,7 @@ private fun GameCard(g: Coach.Game, rv: Coach.Review?) {
 @Composable
 private fun SlotLearning(slot: Int, d: SlotData) {
     d.progress?.let { ScoreboardCard(it.score) }
+    Results.of(d.logs.mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() })?.let { ResultsCard(it, "S$slot") }
     Accuracy.of(Accuracy.parse(slot, d.logs.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }))?.let { AccuracyCard(it, "S$slot") }
     LearnedCard(d.learned)
     data class Row2(
