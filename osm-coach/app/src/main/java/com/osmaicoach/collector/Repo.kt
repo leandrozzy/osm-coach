@@ -1485,6 +1485,25 @@ class Repo(private val ctx: Context) {
             changed++
         }
         j.put("events", evs)
+        // lesão (cruz vermelha) no MEU lado do jogo: soma o jogador à lista de lesionados (o Médico confirma/limpa depois)
+        if (j.has("mineHome")) {
+            val side = if (j.optBoolean("mineHome")) "(casa)" else "(visitante)"
+            val mineP = dao.playersOf(slot).filter { it.owner == "MY" }
+            val hurt = ArrayList<String>()
+            for (e in rep.events) if (e.contains(side) && e.contains(" lesão de ")) {
+                val nm = e.substringAfter(" lesão de ").substringBefore(" (").trim()
+                mineP.firstOrNull { nameMatches(nm, it) }?.let { if (it.nameKey !in hurt) hurt.add(it.nameKey) }
+            }
+            if (hurt.isNotEmpty()) {
+                val oldI = planJson(slot, "injured")
+                val cur = oldI.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                val merged = (cur + hurt.filter { it !in cur })
+                if (merged.size != cur.size) {
+                    dao.putPlan(PlanEntity(slot, "injured", JSONObject().put("names", JSONArray(merged)).put("at", now).toString(), now))
+                    learn(slot, "elenco", "Lesão no jogo: " + hurt.joinToString { n -> mineP.firstOrNull { it.nameKey == n }?.name ?: n } + ".", now)
+                }
+            }
+        }
         if (changed > 0 || old == null) {
             dao.putPlan(PlanEntity(slot, key, j.toString(), now))
             linkResult(slot, round, j, now)

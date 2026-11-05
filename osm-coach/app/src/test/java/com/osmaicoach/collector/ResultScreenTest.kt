@@ -44,3 +44,36 @@ class ResultScreenTest {
         assertTrue(Coach.review(g(7.0)).wrong.none { it.contains("nota média") })
     }
 }
+
+class EventIconTest {
+    private fun img(draw: (IntArray, Int, Int) -> Unit): PixelProbe.Img {
+        val w = 400; val h = 200
+        val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }
+        draw(px, w, h)
+        return PixelProbe.Img(w, h, px)
+    }
+    private fun rect(px: IntArray, w: Int, x0: Int, x1: Int, y0: Int, y1: Int, c: Int) { for (y in y0 until y1) for (x in x0 until x1) px[y * w + x] = c }
+    private val RED = 0xFFE01010.toInt()
+    private val YEL = 0xFFF5D020.toInt()
+    private val GRN = 0xFF20D020.toInt()
+
+    @org.junit.Test fun cruzCartaoETrocaSaoDistintos() {
+        val cruz = img { p, w, _ -> rect(p, w, 387, 391, 94, 106, RED); rect(p, w, 383, 395, 98, 102, RED) }
+        org.junit.Assert.assertEquals("lesao", PixelProbe.eventIcon(cruz, false, 0.5f))
+        val verm = img { p, w, _ -> rect(p, w, 384, 394, 94, 106, RED) }
+        org.junit.Assert.assertEquals("vermelho", PixelProbe.eventIcon(verm, false, 0.5f))
+        val amar = img { p, w, _ -> rect(p, w, 384, 394, 94, 106, YEL) }
+        org.junit.Assert.assertEquals("amarelo", PixelProbe.eventIcon(amar, false, 0.5f))
+        val troca = img { p, w, _ -> rect(p, w, 384, 389, 90, 100, GRN); rect(p, w, 389, 394, 100, 110, RED) }
+        org.junit.Assert.assertEquals("troca", PixelProbe.eventIcon(troca, false, 0.5f))
+        org.junit.Assert.assertNull(PixelProbe.eventIcon(img { _, _, _ -> }, false, 0.5f))
+    }
+
+    @org.junit.Test fun resultadoTipaLesao() {
+        val o = Fx.ocr(
+            Fx.line("10'", 0.50f, 0.30f, 0.03f), Fx.line("Erick Pulga", 0.92f, 0.27f, 0.08f), Fx.line("Rotura no músc…", 0.90f, 0.31f, 0.10f)
+        )
+        val ev = Parsers.matchResult(o).matchReport!!.events
+        org.junit.Assert.assertTrue(ev.toString(), ev.any { it.startsWith("10'") && it.contains("lesão de Erick Pulga") })
+    }
+}

@@ -751,7 +751,7 @@ object Parsers {
     private val RX_MINUTE = Regex("^(\\d{1,3})\\s*['’′]$")
     private val RX_SHIRT = Regex("^\\d{1,2}\\.\\s*")
 
-    fun matchResult(o: OcrResult): Extraction {
+    fun matchResult(o: OcrResult, img: PixelProbe.Img? = null): Extraction {
         var round: Int? = null
         for (ln in o.lines) {
             if (ln.yc < 0.2f && ln.xc in 0.4f..0.6f) {
@@ -837,13 +837,18 @@ object Parsers {
             val l1 = band[0].text.trim()
             val l2 = band.getOrNull(1)?.text?.trim()
             val p1 = l1.replace(RX_SHIRT, "")
+            val icon = img?.let { PixelProbe.eventIcon(it, band[0].xc < 0.5f, mn.yc) }
+            val injuryText = Txt.norm(l2 ?: "").let { it.startsWith("rotura") || it.startsWith("estiramento") || it.startsWith("lesao") || it.startsWith("entorse") || it.startsWith("fratura") || it.startsWith("contusao") }
             val desc = when {
+                icon == "lesao" || (icon == null && injuryText) -> "lesão de $p1" + (l2?.let { " (${it.trim('.', '…')})" } ?: "")
+                icon == "amarelo" -> "cartão amarelo de $p1"
+                icon == "vermelho" -> "cartão vermelho de $p1"
                 l2 != null && Txt.norm(l2).startsWith("assist") -> {
                     val a = l2.substringAfter(':', "").trim().trim('.', '…').trim()
                     "gol de $p1" + (if (a.length >= 3) " (assistência: $a)" else " (com assistência)")
                 }
                 l2 != null && RX_SHIRT.containsMatchIn(l2) && RX_SHIRT.containsMatchIn(l1) -> "substituição: entra $p1, sai ${l2.replace(RX_SHIRT, "").trim('.', '…')}"
-                l2 == null -> "lance de $p1 (gol sem assistência ou cartão)"
+                l2 == null -> if (icon == "bola" || icon == null) "lance de $p1 (gol sem assistência ou cartão)" else "lance de $p1"
                 else -> band.joinToString(" — ") { it.text.trim().replace(RX_SHIRT, "") }
             }
             events.add("${mm.groupValues[1]}' ($side) $desc")

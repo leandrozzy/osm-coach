@@ -62,6 +62,36 @@ object PixelProbe {
     /** Fração de pixels amarelo-ouro na caixa (cartão amarelo do plantel). */
     fun goldBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, GOLD)
 
+    /**
+     * Ícone de um evento da tela de Resultado (vídeo/prints de 05/11): cruz vermelha = lesão, retângulo amarelo/vermelho = cartão,
+     * setas verde+vermelha = substituição, bola = gol (sem cor viva). Distingue cruz de cartão pelo preenchimento da caixa
+     * que envolve o vermelho (cruz ≈ 0,56; cartão ≈ 0,8+). null = nada reconhecível.
+     */
+    fun eventIcon(img: Img, left: Boolean, yc: Float): String? {
+        val x0 = if (left) 0.004f else 0.955f
+        val x1 = x0 + 0.045f
+        val y0 = yc - 0.032f
+        val y1 = yc + 0.032f
+        val g = frac(img, x0, x1, y0, y1, GREEN)
+        val r = frac(img, x0, x1, y0, y1, RED)
+        val y = frac(img, x0, x1, y0, y1, GOLD)
+        if (g >= 0.03f && r >= 0.02f) return "troca"
+        if (y >= 0.10f && r < 0.03f) return "amarelo"
+        if (r < 0.08f) return null
+        // preenchimento da caixa do vermelho
+        val xa = (x0 * img.w).toInt(); val xb = (x1 * img.w).toInt().coerceAtMost(img.w)
+        val ya = (y0.coerceAtLeast(0f) * img.h).toInt(); val yb = (y1 * img.h).toInt().coerceAtMost(img.h)
+        var minX = Int.MAX_VALUE; var maxX = -1; var minY = Int.MAX_VALUE; var maxY = -1; var n = 0
+        val t = FloatArray(3)
+        for (yy in ya until yb) for (xx in xa until xb) {
+            hsv(img.px[yy * img.w + xx], t)
+            if (RED(t[0], t[1], t[2])) { n++; if (xx < minX) minX = xx; if (xx > maxX) maxX = xx; if (yy < minY) minY = yy; if (yy > maxY) maxY = yy }
+        }
+        if (n == 0) return null
+        val box = (maxX - minX + 1) * (maxY - minY + 1)
+        return if (n.toFloat() / box < 0.68f) "lesao" else "vermelho"
+    }
+
     /** Fração de pixels vermelhos na caixa (cartão vermelho do plantel). */
     fun redBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, RED)
 
