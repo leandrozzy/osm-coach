@@ -427,6 +427,7 @@ object Director {
             referee = refereeNow(f),
             myBonus = bonus(K.MY_BONUS), rivalBonus = bonus(K.RIVAL_LOGIN_BONUS),
             recent = played.filter { !Fixtures.isCup(it) }.mapNotNull { it.result }.take(5),
+            rivalRecent = f[K.RIVAL_FORM]?.takeIf { System.currentTimeMillis() - it.updatedAt <= 12L * 3_600_000L }?.value?.map { it.toString() }?.filter { it in listOf("V", "E", "D") } ?: emptyList(),
             headToHead = h2h,
             calib = Calib.offset(repo.dao.tacticLogs(slot).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }),
             learned = runCatching { Learned.fit(allLogs(repo)) }.getOrNull(),

@@ -195,6 +195,12 @@ object Parsers {
             if (rivalBonus != null) f[K.RIVAL_LOGIN_BONUS] = Reading("+$rivalBonus%", 0.85)
             val mineStr = if (mineLeft) left else right
             val rivalStr = if (mineLeft) right else left
+            // Forma recente: bolinhas V/E/D sob cada time (letras sozinhas, coloridas), no meio da tela
+            fun formOf(left: Boolean): String? = o.tokens.filter { (it.xc < 0.5f) == left && it.yc in 0.45f..0.58f && it.xc in 0.12f..0.88f }
+                .mapNotNull { t -> t.text.trim().uppercase().takeIf { it.length == 1 && it[0] in "VED" }?.let { Pair(t.xc, it) } }
+                .sortedBy { it.first }.map { it.second }.joinToString("").takeIf { it.length in 3..6 }
+            formOf(mineLeft)?.let { f[K.MY_FORM] = Reading(it, 0.8) }
+            formOf(!mineLeft)?.let { f[K.RIVAL_FORM] = Reading(it, 0.8) }
             if (mineStr != null) f[K.MY_STRENGTH] = Reading(mineStr.toString(), 0.85)
             if (rivalStr != null) f[K.RIVAL_STRENGTH] = Reading(rivalStr.toString(), 0.8)
             // Os círculos alternam força <-> bônus ao mesmo tempo. Se o meu mostra o bônus e o do rival continua
@@ -235,6 +241,11 @@ object Parsers {
                     if (pts != null) f[K.POINTS] = Reading(pts.text.trim(), 0.8)
                 }
             }
+        }
+        // Preparação para o jogo: a barra mostra o nível em texto (CRÍTICO, FRACO, BOM, BOA…)
+        o.lines.firstOrNull { Txt.norm(it.text).startsWith("preparacao para o jogo") && it.yc > 0.45f }?.let { lab ->
+            o.lines.filter { it.yc in (lab.yc + 0.02f)..(lab.yc + 0.16f) && it.xc in (lab.xc - 0.22f)..(lab.xc + 0.30f) }
+                .firstNotNullOfOrNull { PrepLevel.canon(it.text) }?.let { f[K.PREP_LEVEL] = Reading(it, 0.8) }
         }
         if (img != null) {
             // termômetro ancorado no texto "Árbitro" quando o OCR o acha (a posição muda um pouco entre telas)

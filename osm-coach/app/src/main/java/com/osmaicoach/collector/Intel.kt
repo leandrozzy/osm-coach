@@ -367,6 +367,8 @@ object WinModel {
         val rivalBonus: Int? = null,
         /** Últimos resultados (mais recente primeiro): "V", "E", "D". */
         val recent: List<String> = emptyList(),
+        /** Forma recente do rival lida no pré-jogo (bolinhas V/E/D), qualquer ordem. */
+        val rivalRecent: List<String> = emptyList(),
         /** Resultados anteriores contra este mesmo rival. */
         val headToHead: List<String> = emptyList(),
         /** Resultados já obtidos com esta formação/estilo. */
@@ -591,6 +593,11 @@ object WinModel {
         if (i.recent.isNotEmpty()) {
             val f = i.recent.take(5).map { score(it) }.average()
             t.add(Term("Forma recente " + i.recent.take(5).joinToString(""), 0.06 * f, -0.03 * f))
+        }
+        if (i.rivalRecent.isNotEmpty()) {
+            val rf = i.rivalRecent.take(5).map { score(it) }.average()
+            // rival embalado faz um pouco mais de gol e sofre um pouco menos (efeito pequeno: 5 jogos dizem pouco)
+            t.add(Term("Forma recente do rival " + i.rivalRecent.take(5).joinToString(""), -0.03 * rf, 0.05 * rf))
         }
         if (i.headToHead.isNotEmpty()) t.add(Term("Confronto anterior", 0.05 * i.headToHead.map { score(it) }.average(), 0.0))
         if (i.tacticRecord.size >= 2) {

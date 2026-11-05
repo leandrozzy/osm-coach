@@ -165,6 +165,10 @@ object K {
     const val MY_STAD_PITCH = "my.stadium.pitch"
     const val MY_STAD_TRAIN = "my.stadium.train"
     const val MY_BONUS = "my.bonus"
+    /** Forma recente (últimas partidas, ex. "VVDEV") lida no pré-jogo, dos dois times, e o nível da preparação (CRÍTICO…EXCELENTE). */
+    const val MY_FORM = "my.form"
+    const val RIVAL_FORM = "rival.form"
+    const val PREP_LEVEL = "my.prep"
     const val MY_STAD_STATUS = "my.stadium.status"
     const val SELLING = "market.selling"
     const val MY_STRENGTH = "my.strength"
@@ -679,4 +683,21 @@ object OwnApp {
         if ((t.contains("sessoes") || t.contains("agenda")) && t.contains("ajustes") && t.contains("diretor")) return true
         return MARKS.count { t.contains(Txt.norm(it)) } >= 1
     }
+}
+
+
+/** Nível da barra "Preparação para o jogo" do pré-jogo (CRÍTICO, FRACO… BOM/BOA, EXCELENTE): 0 = pior, 4 = melhor. */
+object PrepLevel {
+    private val RANK = mapOf(
+        "critico" to 0, "fraco" to 1, "fraca" to 1, "razoavel" to 2, "medio" to 2, "media" to 2, "regular" to 2,
+        "bom" to 3, "boa" to 3, "otimo" to 4, "otima" to 4, "excelente" to 4, "perfeito" to 4, "perfeita" to 4, "maximo" to 4
+    )
+
+    fun rank(raw: String?): Int? = raw?.let { RANK[Txt.norm(it).trim()] }
+
+    /** Texto como o jogo mostra (maiúsculas), só se for um nível conhecido. */
+    fun canon(raw: String?): String? = raw?.trim()?.takeIf { rank(it) != null }?.uppercase()
+
+    /** Falta fazer coisas na preparação (abaixo de "bom"): vale abrir a lista de afazeres. */
+    fun low(raw: String?): Boolean = rank(raw)?.let { it <= 2 } == true
 }

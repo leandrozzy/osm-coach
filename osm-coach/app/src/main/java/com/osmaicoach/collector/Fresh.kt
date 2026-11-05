@@ -23,7 +23,9 @@ object Fresh {
         val reds: Int = 0,
         val injured: Int = 0,
         /** O advogado disse "não posso apresentar recurso" nesta rodada. */
-        val noAppeal: Boolean = false
+        val noAppeal: Boolean = false,
+        /** Nível da barra "Preparação para o jogo" lida no pré-jogo (CRÍTICO, FRACO, BOM…); null = não lido. */
+        val prepLevel: String? = null
     )
 
     val NAME = mapOf(
@@ -159,8 +161,13 @@ object Fresh {
             sc > 7 * 24 * H -> add(ScreenType.SPECIALISTS, 0, "última leitura ${ago(sc)}")
         }
         val pr = age(ScreenType.PREP)
-        // a preparação só importa perto do jogo (é a lista que você cumpre antes de começar)
-        if (gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H)) add(ScreenType.PREP, 1, "veja o que falta na preparação (menos de 3 h para o jogo): cada item feito sobe o bônus de preparação")
+        // a barra do pré-jogo já diz o nível: BOM/BOA/EXCELENTE não pede nada; CRÍTICO/FRACO/RAZOÁVEL pede a lista de afazeres
+        val prepRank = PrepLevel.rank(i.prepLevel)
+        if (gameIn != null && gameIn in 0L..(6 * H) && PrepLevel.low(i.prepLevel))
+            add(ScreenType.PREP, if (prepRank == 0) 2 else 1, "preparação do jogo está ${i.prepLevel}: abra a lista de afazeres e conclua o que falta (cada item sobe o bônus)")
+        // sem leitura do nível: só cobra perto do jogo, como antes
+        else if (prepRank == null && gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H))
+            add(ScreenType.PREP, 1, "veja o que falta na preparação (menos de 3 h para o jogo): cada item feito sobe o bônus de preparação")
         if (i.timers.any { it.scout && it.at <= i.now }) add(ScreenType.SCOUT, 2, "o olheiro terminou a busca")
         val st = age(ScreenType.STATS)
         when {

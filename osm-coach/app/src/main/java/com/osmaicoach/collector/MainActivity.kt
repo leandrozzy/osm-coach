@@ -1256,6 +1256,10 @@ data class SlotSummary(
     val mounted: Boolean = false,
     /** Idade da leitura mais antiga de cada passo [Pré-jogo, Análise, Rival]: a tela mostra "✓ Análise · 2 h" em vez de só ✓. */
     val readAges: List<Long?> = emptyList(),
+    /** Forma recente (ex. "VVDEV") dos dois times e nível da preparação, lidos no pré-jogo (≤12 h). */
+    val myForm: String? = null,
+    val rivalForm: String? = null,
+    val prepLevel: String? = null,
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
     val needsResult: Boolean = false,
@@ -1491,6 +1495,9 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 readMine = Director.groups(f, now)[3].ok,
                 mounted = repo.dao.plan(slot, "tactic")?.at.let { ta -> ta != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() } == ta },
                 readAges = Director.groupAgesMs(f, now),
+                myForm = f[K.MY_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
+                rivalForm = f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
+                prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
                 win = tplan?.takeIf { tacticCurrent(it, f) && !Fixtures.seasonEnded(f, all, now) }?.let { Director.winProb(repo, slot, it) },
@@ -2090,6 +2097,14 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
             }
         }
         s.human?.let { Text(if (it == "Sim") "👤 rival humano" else "🖥 rival CPU", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center) }
+        // forma recente dos dois e preparação, como no pré-jogo do OSM
+        if (s.myForm != null || s.rivalForm != null || s.prepLevel != null) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(s.myForm) }
+                PrepChip(s.prepLevel)
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(s.rivalForm) }
+            }
+        }
         // três barras
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             val w = s.win
@@ -2108,6 +2123,31 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
     }
 }
 
+
+/** Bolinhas V/E/D como no pré-jogo do OSM: verde vitória, laranja empate, vermelho derrota. */
+@Composable
+private fun FormDots(form: String?) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (form.isNullOrBlank()) Text("—", fontSize = 12.sp, color = C.MUTED)
+        else for (c in form.take(5)) {
+            val col = when (c) { 'V' -> C.OK; 'E' -> C.GOLD; else -> C.BAD }
+            Box(Modifier.size(17.dp).clip(RoundedCornerShape(50)).background(col), contentAlignment = Alignment.Center) {
+                Text(c.toString(), fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF081A3C))
+            }
+        }
+    }
+}
+
+/** Preparação para o jogo (barra do pré-jogo do OSM): vermelho crítico, laranja fraco, amarelo razoável, verde bom. */
+@Composable
+private fun PrepChip(level: String?) {
+    val lv = PrepLevel.canon(level) ?: return
+    val col = when (PrepLevel.rank(lv)) { 0 -> C.BAD; 1 -> Color(0xFFFF8F1F); 2 -> C.GOLD; else -> C.OK }
+    Text(
+        "Preparação: $lv", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = col,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.6f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)
+    )
+}
 
 /** Três "passos" de leitura do rival, em pílulas: o que já foi lido (verde) e o que falta (amarelo). */
 @Composable
