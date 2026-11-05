@@ -281,7 +281,7 @@ object Director {
             rivalFormation = f[K.RIVAL_FORMATION]?.value?.takeIf { FieldMerge.known(it) } ?: repo.rivalProfileFormation(slot),
             myDef = f[K.MY_DEF]?.value?.toIntOrNull(),
             rivalAtk = f[K.RIVAL_ATK]?.value?.toIntOrNull(),
-            referee = f[K.REFEREE]?.value,
+            referee = refereeNow(f),
             home = boolOf(f[K.HOME]?.value, "Casa", "Fora"),
             history = history(repo, slot),
             myAtk = f[K.MY_ATK]?.value?.toIntOrNull(),
@@ -420,7 +420,7 @@ object Director {
             home = boolOf(str(K.HOME), "Casa", "Fora"),
             rivalHuman = if (SecretTraining.on(f)) true else boolOf(str(K.RIVAL_HUMAN), "Sim", "Não"),
             drawValue = if (mustWin(f)) BATTLE_DRAW else 1.0,
-            referee = str(K.REFEREE),
+            referee = refereeNow(f),
             myBonus = bonus(K.MY_BONUS), rivalBonus = bonus(K.RIVAL_LOGIN_BONUS),
             recent = played.filter { !Fixtures.isCup(it) }.mapNotNull { it.result }.take(5),
             headToHead = h2h,
@@ -641,6 +641,13 @@ object Director {
     /** Só pede a tática nas últimas horas antes do jogo: antes disso o rival humano ainda pode mudar tudo. */
     const val TACTIC_WINDOW_MS = 8L * 3600_000L
 
+    /**
+     * Árbitro DESTE jogo: só vale se foi lido há pouco (3 h). Um árbitro lido num jogo anterior (30 h de validade do campo)
+     * fazia o app recomendar desarme "Agressivo/Extremo" com o árbitro de agora desconhecido.
+     */
+    fun refereeNow(f: Map<String, StoredField>, now: Long = System.currentTimeMillis()): String? =
+        f[K.REFEREE]?.takeIf { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS }?.value
+
     /** Rival conferido: formação, estilo e força lidos há pouco (3 h). Sem isso a tática pode estar baseada em dado velho. */
     const val RIVAL_FRESH_MS = 3L * 3600_000L
     fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean = tacticGaps(f, now).isEmpty()
@@ -656,6 +663,7 @@ object Director {
         val pre = ArrayList<String>()
         if (!fresh(K.MY_STRENGTH)) pre.add("sua força")
         if (!secret && !fresh(K.RIVAL_STRENGTH)) pre.add("força do rival")
+        if (!fresh(K.REFEREE)) pre.add("árbitro (termômetro ao lado de \"Árbitro\")")
         val ana = ArrayList<String>()
         if (!secret && !fresh(K.RIVAL_FORMATION)) ana.add("formação")
         if (!secret && !fresh(K.RIVAL_PLAN)) ana.add("estilo de jogo")

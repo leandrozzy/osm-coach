@@ -795,6 +795,8 @@ class Repo(private val ctx: Context) {
                 if (names.isEmpty() && !x.optBoolean("empty")) return 0
                 val old = planJson(slot, kind)
                 val oldNames = old.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                // cartão de um jogador em tratamento: só soma (continua lesionado até acabar), sem apagar os outros da lista
+                if (x.optBoolean("card")) for (n in oldNames) if (n !in names) names.add(n)
                 dao.putPlan(PlanEntity(slot, kind, JSONObject().put("names", JSONArray(names)).put("at", now).toString(), now))
                 noteScreen(slot, ex.type, now)
                 if (names.sorted() != oldNames.sorted()) {

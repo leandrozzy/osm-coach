@@ -83,7 +83,8 @@ class RivalConfirmedTest {
     private fun full(at: Long = now) = mapOf(
         K.MY_STRENGTH to sf("80", at), K.RIVAL_STRENGTH to sf("75", at), K.RIVAL_FORMATION to sf("4-3-3", at), K.RIVAL_PLAN to sf("Ofensivo", at),
         K.RIVAL_GOL to sf("70", at), K.RIVAL_DEF to sf("71", at), K.RIVAL_MID to sf("72", at), K.RIVAL_ATK to sf("73", at), K.RIVAL_VALUE to sf("50,0M", at),
-        K.MY_GOL to sf("80", at), K.MY_DEF to sf("81", at), K.MY_MID to sf("82", at), K.MY_ATK to sf("83", at)
+        K.MY_GOL to sf("80", at), K.MY_DEF to sf("81", at), K.MY_MID to sf("82", at), K.MY_ATK to sf("83", at),
+        K.REFEREE to sf("Normal", at)
     )
     @org.junit.Test fun tudoLidoLiberaEPassadoDe3hTrava() {
         org.junit.Assert.assertTrue(Director.rivalConfirmed(full(), now))
@@ -98,6 +99,14 @@ class RivalConfirmedTest {
         org.junit.Assert.assertTrue(c, c.contains("✓ Pré-jogo") && c.contains("✓ Análise do rival") && c.contains("✗ Plantel do rival (falta: valor do elenco)"))
         org.junit.Assert.assertEquals(4, Director.tacticGaps(emptyMap(), now).size)
     }
+    @org.junit.Test fun arbitroAntigoNaoValeParaEsteJogo() {
+        org.junit.Assert.assertEquals("Normal", Director.refereeNow(full(), now))
+        // lido há 20 h (jogo anterior): não entra na tática (antes virava desarme Agressivo com o árbitro desconhecido)
+        org.junit.Assert.assertNull(Director.refereeNow(full(now - 20 * 3_600_000L), now))
+        org.junit.Assert.assertFalse(Director.rivalConfirmed(full() - K.REFEREE, now))
+        org.junit.Assert.assertTrue(Director.tacticGaps(full() - K.REFEREE, now).first().first.contains("árbitro"))
+    }
+
     @org.junit.Test fun treinoSecretoNaoExigeOQueOJogoEsconde() {
         val f = full() - K.RIVAL_STRENGTH - K.RIVAL_PLAN - K.RIVAL_FORMATION + (K.RIVAL_SECRET to sf("Sim", now))
         org.junit.Assert.assertTrue(Director.rivalConfirmed(f, now))

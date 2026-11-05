@@ -2830,7 +2830,8 @@ private suspend fun loadDirector(ctx: Context): List<DirSlot> {
         val alerts = ArrayList<String>()
         if (s.ended) alerts.add("🏁 S${s.slot}: competição encerrada. Quando a nova começar, abra o pré-jogo: o app arquiva a antiga e recomeça o calendário.")
         val nextIn = s.nextAt?.let { it - System.currentTimeMillis() }
-        if (!s.tacticReady && nextIn != null && nextIn in 0L..10800000L) alerts.add("⚠ S${s.slot}: jogo em ${countdown(s.nextAt ?: 0L)} e a tática ainda não foi gerada.")
+        if (s.tacticStale && nextIn != null && nextIn in 0L..10800000L) alerts.add("🔎 S${s.slot}: jogo em ${countdown(s.nextAt ?: 0L)}: a tática já foi gerada, mas falta reler o rival (Pré-jogo e Análise) para confirmar que ele não mudou.")
+        else if (!s.tacticReady && nextIn != null && nextIn in 0L..10800000L) alerts.add("⚠ S${s.slot}: jogo em ${countdown(s.nextAt ?: 0L)} e a tática ainda não foi gerada.")
         if (plan != null) {
             val free = 5 - plan.trainingActive
             if (free > 0 && plan.train.isNotEmpty()) alerts.add("🔵 S${s.slot}: $free treino(s) livre(s) — ${plan.train.joinToString(", ") { it.name }}.")
@@ -2856,6 +2857,7 @@ private suspend fun loadDirector(ctx: Context): List<DirSlot> {
         val freeSeat = seats.firstOrNull { it.state == "empty" || it.state == "done" }
         val next = when {
             s.needsResult -> "registrar o resultado do último jogo"
+            !s.ended && s.tacticStale && s.nextAt != null && s.nextAt - System.currentTimeMillis() <= Director.TACTIC_WINDOW_MS -> "reler o rival (Pré-jogo e Análise) para confirmar a tática"
             !s.ended && !s.tacticReady && s.nextAt != null && s.nextAt - System.currentTimeMillis() <= Director.TACTIC_WINDOW_MS -> "gerar a tática do próximo jogo"
             freeSeat != null -> (if (freeSeat.state == "done") "pegar o treino concluído e " else "") +
                 "ocupar o treinador " + (if (freeSeat.role == "UNI") "universal" else freeSeat.role) +

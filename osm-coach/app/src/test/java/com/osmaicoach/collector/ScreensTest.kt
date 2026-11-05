@@ -258,4 +258,19 @@ class ScreensTest {
         val old = seen + mapOf("CALENDAR" to now - 30 * h)
         assertTrue(Fresh.needs(Fresh.In(1, old, listOf(running), null, false, now, true, now - 30 * h)).any { it.type == ScreenType.CALENDAR })
     }
+
+    @Test fun doctorPlayerCardInTreatmentIsRecognisedAndTimed() {
+        // print real: cartão do jogador (14 ERIC MEZA, IDADE: 27) com "Tratamento em curso..." e 7h 57m 22s
+        val txt = Txt.norm("Tratamento em curso... 7h 57m 22s Não autorizado 40 14 ERIC MEZA IDADE: 27 AVA 32 MED 51 DEF 71 80% Estiramento do ligamento do joelho")
+        assertEquals(ScreenType.DOCTOR, Screens.classify(txt))
+        val o = Fx.ocr(
+            Fx.line("14 ERIC MEZA", 0.25f, 0.29f, 0.12f), Fx.line("IDADE: 27", 0.25f, 0.32f, 0.08f),
+            Fx.line("Tratamento em curso...", 0.75f, 0.30f, 0.14f), Fx.line("7h 57m 22s", 0.75f, 0.67f, 0.08f),
+            Fx.line("Não autorizado", 0.75f, 0.76f, 0.1f), Fx.line("Estiramento do ligamento do joelho", 0.25f, 0.84f, 0.2f)
+        )
+        val r = Screens.roster(o)
+        assertTrue(r.optBoolean("busy"))
+        assertTrue(r.optBoolean("card"))
+        assertEquals(7L * 3600 + 57 * 60 + 22, r.optLong("endsIn"))
+    }
 }

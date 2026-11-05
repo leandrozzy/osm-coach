@@ -20,7 +20,8 @@ object Screens {
         // o menu lateral lista os dois; a tela de cada um tem só o seu nome e o aviso de "ninguém"/a lista
         t.contains("medico") && !t.contains("advogado") &&
             (t.contains("lesion") || t.contains("lesao") || t.contains("nao tens") || t.contains("tratamento") || t.contains("tratar")) -> ScreenType.DOCTOR
-        t.contains("tratamento em curso") && t.contains("tratar imediatamente") -> ScreenType.DOCTOR
+        // tratamento em curso: a lista ("Tratar imediatamente") ou o cartão do jogador com o cronômetro ("Não autorizado" + gemas)
+        t.contains("tratamento em curso") && (t.contains("tratar imediatamente") || t.contains("nao autorizado") || t.contains("idade")) -> ScreenType.DOCTOR
         t.contains("advogado") && !t.contains("medico") &&
             (t.contains("suspens") || t.contains("expuls") || t.contains("castig") || t.contains("nao tens") || t.contains("recurso") || t.contains("recorr")) -> ScreenType.LAWYER
         Regex("acordo de patrocinio").findAll(t).count() >= 2 -> ScreenType.SPONSORS
@@ -83,7 +84,9 @@ object Screens {
         // o advogado avisa que não dá para recorrer (ex.: "não posso apresentar recurso!"): sem dica de mandar ao advogado
         val noAppeal = t.contains("nao posso apresentar recurso") || t.contains("nao ha recurso") || t.contains("nao e possivel recorrer") ||
             t.contains("nao podes recorrer") || t.contains("nao pode recorrer")
-        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
+        // cartão de UM jogador em tratamento (nome, idade, lesão, cronômetro): não é a lista toda
+        val card = t.contains("tratamento em curso") && t.contains("idade") && !t.contains("tratar imediatamente")
+        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("card", card).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
     }
 
     // ------------------------------------------------------------ especialistas
