@@ -502,6 +502,8 @@ class NotifyReceiver : BroadcastReceiver() {
 /** Reagenda os lembretes depois de reiniciar o celular ou atualizar o app. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // só reage às ações do sistema declaradas no manifesto (um intent forjado sem ação não reagenda nada)
+        if (intent.action !in setOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED)) return
         val pending = goAsync()
         val app = context.applicationContext
         AppScope.scope.launch(Dispatchers.IO) {

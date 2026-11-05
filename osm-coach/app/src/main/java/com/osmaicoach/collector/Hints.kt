@@ -205,7 +205,10 @@ object Hints {
         val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
         val gameSoon = matchAt != null && matchAt > now && matchAt - now <= Director.TACTIC_WINDOW_MS
         val ch = rivalChangesOf(repo, slot)
-        if (activeSlot && tacticOk.not() && gameSoon) pend.add(Hint("⚡", "Gere a tática deste jogo no app", "Toque em 📱 App → Slots → Tática → Gerar.", true))
+        // a mesma regra do cartão do slot: sem as leituras do rival (3 h) a tática não vale, nem gera; o texto diz o que falta
+        val gaps = if (activeSlot && gameSoon) Director.tacticGaps(f, now) else emptyList()
+        if (gaps.isNotEmpty()) pend.add(Hint("🔎", "Leia o rival antes da tática", Director.checklist(f, now) + " → " + gaps.first().second, true))
+        else if (activeSlot && tacticOk.not() && gameSoon) pend.add(Hint("⚡", "Gere a tática deste jogo no app", "Toque em 📱 App → Slots → Tática → Gerar.", true))
         if (activeSlot && ch.isNotEmpty()) pend.add(Hint("⚠", "O rival mudou: gere a tática de novo", RivalWatch.headline(ch), true))
 
         // tática gerada: montar no OSM é pendência até a tela de tática do jogo confirmar que está igual

@@ -330,6 +330,10 @@ object Director {
         val old = repo.dao.plan(slot, "lesson")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         if (old?.optInt("round", -1) == round) return
         if (!AiClient.hasAnyKey(ctx)) return
+        // uma tentativa por jogo a cada 30 min: se a IA falhar, cada geração automática não pode repetir a chamada (até 45 s)
+        val tried = repo.dao.plan(slot, "lessontry")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (tried?.optInt("round", -1) == round && System.currentTimeMillis() - tried.optLong("at") < 30L * 60_000L) return
+        repo.dao.putPlan(PlanEntity(slot, "lessontry", JSONObject().put("round", round).put("at", System.currentTimeMillis()).toString(), System.currentTimeMillis()))
         val recent = logs.takeLast(5)
         fun line(j: JSONObject) = "J${j.optInt("round")} ${j.optString("result")} ${j.opt("scoreMine")}-${j.opt("scoreOpp")} • minha ${j.opt("formation")} / ${j.opt("playStyle")} / estilo ${j.opt("mentality")} pressão ${j.opt("pressure")} ritmo ${j.opt("tempo")} / avançados ${j.opt("advAttack")} • força ${j.opt("myStrength")} x ${j.opt("rivalStrength")} • rival ${j.optString("rivalFormationRead")} ${j.optString("rivalStyleRead")}" +
             (if (j.has("myPossession")) " • posse ${j.opt("myPossession")}% chutes ${j.opt("myShots")} x ${j.opt("oppShots")}" else "")
