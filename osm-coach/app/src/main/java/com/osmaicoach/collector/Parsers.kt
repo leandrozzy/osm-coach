@@ -199,8 +199,11 @@ object Parsers {
             fun formOf(left: Boolean): String? = o.tokens.filter { (it.xc < 0.5f) == left && it.yc in 0.45f..0.58f && it.xc in 0.12f..0.88f }
                 .mapNotNull { t -> t.text.trim().uppercase().takeIf { it.length == 1 && it[0] in "VED" }?.let { Pair(t.xc, it) } }
                 .sortedBy { it.first }.map { it.second }.joinToString("").takeIf { it.length in 3..6 }
-            formOf(mineLeft)?.let { f[K.MY_FORM] = Reading(it, 0.8) }
-            formOf(!mineLeft)?.let { f[K.RIVAL_FORM] = Reading(it, 0.8) }
+            // pela cor das bolinhas (confiável); o OCR da letra solta só entra se a imagem não estiver disponível
+            val myF = img?.let { PixelProbe.formDots(it, mineLeft) } ?: formOf(mineLeft)
+            val rvF = img?.let { PixelProbe.formDots(it, !mineLeft) } ?: formOf(!mineLeft)
+            myF?.let { f[K.MY_FORM] = Reading(it, 0.85) }
+            rvF?.let { f[K.RIVAL_FORM] = Reading(it, 0.85) }
             if (mineStr != null) f[K.MY_STRENGTH] = Reading(mineStr.toString(), 0.85)
             if (rivalStr != null) f[K.RIVAL_STRENGTH] = Reading(rivalStr.toString(), 0.8)
             // Os círculos alternam força <-> bônus ao mesmo tempo. Se o meu mostra o bônus e o do rival continua

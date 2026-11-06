@@ -63,6 +63,58 @@ object PixelProbe {
     fun goldBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, GOLD)
 
     /**
+     * Forma recente (até 5 bolinhas V verde / E laranja / D vermelha sob o nome do time, no Pré-jogo; frame real de 05/11:
+     * bolinhas de ≈0,0167 de largura, passo ≈0,0195, centro em y≈0,51). Lê pela COR, não pelo OCR (letra solta num círculo
+     * colorido o OCR perde ou erra). Devolve a corrente mais longa de círculos lado a lado (≥3), da esquerda p/ direita.
+     */
+    fun formDots(img: Img, left: Boolean): String? {
+        val xa = ((if (left) 0.12f else 0.54f) * img.w).toInt()
+        val xb = ((if (left) 0.46f else 0.88f) * img.w).toInt().coerceAtMost(img.w)
+        val t = FloatArray(3)
+        val cols = CharArray(max(0, xb - xa))
+        for (x in xa until xb) {
+            var d = 0; var e = 0; var v = 0
+            for (k in 0 until 10) {
+                val y = ((0.485f + 0.05f * k / 9f) * img.h).toInt().coerceIn(0, img.h - 1)
+                hsv(img.px[y * img.w + x], t)
+                if (t[1] > 0.55f && t[2] > 0.40f) when {
+                    t[0] <= 12f || t[0] >= 344f -> d++
+                    t[0] in 20f..46f -> e++
+                    t[0] in 80f..165f -> v++
+                }
+            }
+            val best = max(d, max(e, v))
+            cols[x - xa] = if (best < 2) ' ' else if (best == d) 'D' else if (best == e) 'E' else 'V'
+        }
+        // corridas de mesma cor → círculos (largura ≈0,0167); descarta ruído de largura/forma diferente
+        class Run(val c: Char, val s: Int, val n: Int)
+        val runs = ArrayList<Run>()
+        var i = 0
+        while (i < cols.size) {
+            if (cols[i] == ' ') { i++; continue }
+            var j = i
+            while (j < cols.size && cols[j] == cols[i]) j++
+            runs.add(Run(cols[i], i + xa, j - i))
+            i = j
+        }
+        val minW = 0.011f * img.w
+        val maxW = 0.024f * img.w
+        val maxGap = 0.008f * img.w
+        var best = ""
+        var cur = StringBuilder()
+        var prevEnd = Int.MIN_VALUE
+        for (r in runs) {
+            val ok = r.n >= minW && r.n <= maxW
+            if (!ok) { if (cur.length > best.length) best = cur.toString(); cur = StringBuilder(); prevEnd = Int.MIN_VALUE; continue }
+            if (prevEnd != Int.MIN_VALUE && r.s - prevEnd > maxGap) { if (cur.length > best.length) best = cur.toString(); cur = StringBuilder() }
+            cur.append(r.c)
+            prevEnd = r.s + r.n
+        }
+        if (cur.length > best.length) best = cur.toString()
+        return best.takeIf { it.length in 3..5 }
+    }
+
+    /**
      * Ícone de um evento da tela de Resultado (vídeo/prints de 05/11): cruz vermelha = lesão, retângulo amarelo/vermelho = cartão,
      * setas verde+vermelha = substituição, bola = gol (sem cor viva). Distingue cruz de cartão pelo preenchimento da caixa
      * que envolve o vermelho (cruz ≈ 0,56; cartão ≈ 0,8+). null = nada reconhecível.

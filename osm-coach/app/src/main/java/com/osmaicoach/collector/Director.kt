@@ -142,6 +142,7 @@ object Director {
         val fields = JSONObject()
         for ((k, v) in f) if (FieldMerge.known(v.value)) fields.put(k, v.value)
         ctx.put("campos", fields)
+        SlotRules.load(repo, slot)?.let { ctx.put("regras_especiais_da_liga", SlotRules.promptText(it)) }
         if (mustWin(f)) {
             ctx.put("batalha", "SIM: só a VITÓRIA conta (empate quase não ajuda). Busque vencer: mais gente na frente e mentalidade mais ofensiva, sem se expor a ponto de perder.")
         }

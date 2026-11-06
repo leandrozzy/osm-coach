@@ -2891,6 +2891,60 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
     }
 }
 
+/** Regras especiais da liga deste slot (texto colado pelo usuário): o app respeita compra, treino, craque, elenco e prazos. */
+@Composable
+private fun RulesCard(slot: Int) {
+    val ctx = LocalContext.current
+    var saved by remember(slot, UiBus.version) { mutableStateOf<String?>(null) }
+    var loaded by remember(slot) { mutableStateOf(false) }
+    var editing by remember(slot) { mutableStateOf(false) }
+    var text by remember(slot) { mutableStateOf("") }
+    LaunchedEffect(slot, UiBus.version) {
+        val t = withContext(Dispatchers.IO) { SlotRules.load(Repo(ctx), slot)?.text }
+        saved = t
+        if (!editing) text = t.orEmpty()
+        loaded = true
+    }
+    if (!loaded) return
+    Panel {
+        Text("📜 Regras especiais da liga", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+        val r = saved?.let { SlotRules.parse(it) }
+        if (!editing) {
+            if (r == null) {
+                Text("Sem regras especiais: vale o padrão do app. Se esta liga tem regras (over máximo, treino, craque, elenco…), cole aqui.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            } else {
+                val s = SlotRules.summary(r)
+                Text(if (s.isEmpty()) "Texto salvo; a IA recebe tudo como regra obrigatória." else "Entendi: " + s.joinToString(" • "), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 4.dp))
+                Text("O restante do texto também vai para a IA da tática e do mercado.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+            }
+            GhostButton(if (r == null) "Colar regras" else "Editar regras", modifier = Modifier.padding(top = 8.dp)) { editing = true }
+        } else {
+            OutlinedTextField(
+                value = text, onValueChange = { text = it }, minLines = 5, maxLines = 12,
+                label = { Text("Cole as regras desta liga") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            )
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CtaButton("Salvar", modifier = Modifier.weight(1f)) {
+                    val t = text
+                    AppScope.scope.launch(Dispatchers.IO) {
+                        SlotRules.save(Repo(ctx), slot, t, System.currentTimeMillis())
+                        UiBus.version++
+                    }
+                    editing = false
+                }
+                GhostButton("Apagar", modifier = Modifier.weight(1f)) {
+                    text = ""
+                    AppScope.scope.launch(Dispatchers.IO) {
+                        SlotRules.save(Repo(ctx), slot, "", System.currentTimeMillis())
+                        UiBus.version++
+                    }
+                    editing = false
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SlotSummaryTab(slot: Int, d: SlotData) {
     var missingEdit by remember { mutableStateOf<Completeness.Item?>(null) }
@@ -2904,6 +2958,7 @@ private fun SlotSummaryTab(slot: Int, d: SlotData) {
         StrengthsAttention(d)
         Panel { WinCard(d.win) }
     }
+    RulesCard(slot)
     // números da temporada em blocos
     val goalPos = fv(d, K.MY_OBJECTIVE).toIntOrNull()
     val nowPos = fv(d, K.LEAGUE_POS).toIntOrNull()

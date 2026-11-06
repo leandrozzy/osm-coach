@@ -360,3 +360,20 @@ class EngineTest {
         assertTrue(Parsers.tacticCheck(ok, plan, "Rigoroso").isEmpty())
     }
 }
+
+class FormDotsTest {
+    private val W = 1080; private val H = 480
+    private fun img(draw: (IntArray) -> Unit): PixelProbe.Img { val px = IntArray(W * H) { 0xFF101830.toInt() }; draw(px); return PixelProbe.Img(W, H, px) }
+    private fun dot(px: IntArray, cx: Int, c: Int) { for (y in 233..257) for (x in cx - 9..cx + 8) if ((x - cx) * (x - cx) + (y - 245) * (y - 245) <= 81) px[y * W + x] = c }
+    private val D = 0xFFC01010.toInt(); private val V = 0xFF30A010.toInt(); private val E = 0xFFE08A10.toInt()
+    @org.junit.Test fun leCincoBolinhasPelaCor() {
+        val im = img { px ->
+            "DVDVD".forEachIndexed { i, ch -> dot(px, 207 + 21 * i, if (ch == 'D') D else V) }
+            "EVVVD".forEachIndexed { i, ch -> dot(px, 790 + 21 * i, when (ch) { 'D' -> D; 'E' -> E; else -> V }) }
+            for (y in 240..252) for (x in 442..470) px[y * W + x] = V
+        }
+        org.junit.Assert.assertEquals("DVDVD", PixelProbe.formDots(im, true))
+        org.junit.Assert.assertEquals("EVVVD", PixelProbe.formDots(im, false))
+        org.junit.Assert.assertNull(PixelProbe.formDots(img { }, true))
+    }
+}

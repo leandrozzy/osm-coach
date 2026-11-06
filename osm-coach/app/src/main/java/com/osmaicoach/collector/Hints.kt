@@ -100,12 +100,21 @@ object Hints {
                 lawyerBusy = timers.any { it.lawyer && it.at > now },
                 noAppeal = noAppeal,
                 doctorBusy = timers.any { it.doctor && it.at > now },
-                listings = repo.dao.listingsOf(slot),
+                listings = repo.dao.listingsOf(slot).let { l -> SlotRules.load(repo, slot)?.maxBuy?.let { cap -> l.filter { (it.strength ?: 0) <= cap } } ?: l },
+                rules = SlotRules.load(repo, slot),
                 round = kv(f, K.ROUND)?.toIntOrNull(), roundTotal = kv(f, K.ROUND_TOTAL)?.toIntOrNull(),
                 seats = work.seats, matchAt = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull(), now = now
             )
         )
-        base + todoTips(repo.dao.plan(slot, "todolist")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, now) + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
+        val rules = SlotRules.load(repo, slot)
+        val ruleTips = rules?.let { r ->
+            val lastRead = f.values.maxOfOrNull { it.updatedAt }
+            SlotRules.tips(r, repo.playersOf(slot), xi, kv(f, K.ROUND)?.toIntOrNull(), kv(f, K.ROUND_TOTAL)?.toIntOrNull(), lastRead, now)
+        }.orEmpty()
+        val late2 = kv(f, K.ROUND)?.toIntOrNull()?.let { r -> kv(f, K.ROUND_TOTAL)?.toIntOrNull()?.let { t -> r > t / 2 } } == true
+        // 2º turno sem transferências: some com as dicas de vender/listar (a liga proíbe)
+        val baseOk = if (rules?.noTransferSecondHalf == true && late2) base.filter { it.icon !in setOf("💰", "🔁", "📉") } else base
+        baseOk + ruleTips + todoTips(repo.dao.plan(slot, "todolist")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, now) + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
     }.getOrDefault(emptyList())
 
     /** O que a aba "Lista de Afazeres" do OSM pediu na última leitura (vale 24 h): 11 inicial incompleto e patrocinador à espera. */
