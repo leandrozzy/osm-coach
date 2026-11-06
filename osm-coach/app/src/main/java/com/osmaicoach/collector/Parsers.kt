@@ -29,6 +29,15 @@ object Parsers {
         return if (s.isNotEmpty() && s.length <= 3 && s.all { it.isDigit() }) s.toIntOrNull() else null
     }
 
+    /** Saldo de Boss Coins: número solto no topo do OSM, entre o dinheiro ("7,8M") e o botão FREE (dos logs: x 0.22–0.27, y 0.04). */
+    fun bossCoins(o: OcrResult): Int? {
+        val c = o.tokens.filter { it.yc < 0.075f && it.xc in 0.17f..0.31f }.mapNotNull { t ->
+            val s = t.text.trim().trim('(', ')', ' ')
+            if (s.length in 1..5 && s.all { it.isDigit() }) s.toIntOrNull() else null
+        }
+        return c.singleOrNull()
+    }
+
     private fun isNick(s: String): Boolean {
         val t = s.trim()
         return t.length in 3..24 && Txt.letters(t) >= 2 && !t.all { it.isDigit() || it == ' ' || it == '.' || it == ',' } &&

@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.List
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -1596,7 +1597,7 @@ private fun App() {
     LaunchedEffect(tab, openSlot, openTab) {
         ui.edit().putInt("tab", tab).putInt("slot", openSlot).putInt("slotTab", openTab).apply()
     }
-    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "⚙️" to "Ajustes")
+    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "💰" to "Coins", "⚙️" to "Ajustes")
     // Botão Voltar do Android: fecha o slot aberto, depois volta para Hoje (em vez de fechar o app).
     BackHandler(enabled = openSlot > 0) { openSlot = 0 }
     BackHandler(enabled = openSlot == 0 && tab != 0) { tab = 0 }
@@ -1620,7 +1621,7 @@ private fun App() {
                         selected = tab == i,
                         onClick = { tab = i; openSlot = 0 },
                         icon = {
-                            val vec = when (i) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.DateRange; 2 -> Icons.Outlined.List; 3 -> Icons.Outlined.Person; else -> Icons.Outlined.Settings }
+                            val vec = when (i) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.DateRange; 2 -> Icons.Outlined.List; 3 -> Icons.Outlined.Person; 4 -> Icons.Outlined.Star; else -> Icons.Outlined.Settings }
                             Icon(vec, contentDescription = name, modifier = Modifier.size(26.dp))
                         },
                         label = { Text(name, fontSize = 13.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal) },
@@ -1635,7 +1636,7 @@ private fun App() {
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (tab) {
-                0 -> TodayTab(onGoSettings = { tab = 4 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
+                0 -> TodayTab(onGoSettings = { tab = 5 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
                 1 -> AgendaTab()
                 2 -> if (openSlot > 0) {
                     key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
@@ -1643,6 +1644,7 @@ private fun App() {
                 3 -> if (openSlot > 0) {
                     key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
                 } else DirectorTab { slot, t -> openSlot = slot; openTab = t }
+                4 -> CoinsTab()
                 else -> SettingsTab()
             }
         }
@@ -2674,6 +2676,84 @@ private suspend fun loadDirector(ctx: Context): List<DirSlot> {
         )
     }
     return out
+}
+
+private data class CoinsData(
+    val balance: Pair<Int, Long>? = null, val web: Coins.Web? = null, val slots: List<Coins.SlotInfo> = emptyList(), val ready: Boolean = false
+)
+
+/** Aba Coins: saldo e reserva de 100, como ganhar rápido (seu jogo + web do dia) e onde usar para evoluir o time. */
+@Composable
+private fun CoinsTab() {
+    val ctx = LocalContext.current
+    val tick = rememberTick(30000L)
+    val d = rememberLoaded(CoinsData(), tick, UiBus.version) {
+        val repo = Repo(ctx)
+        val infos = (1..4).mapNotNull { s ->
+            val f = repo.fieldMap(s)
+            if (f[K.TEAM]?.value == null) return@mapNotNull null
+            val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
+            Coins.SlotInfo(s, f[K.TEAM]?.value.orEmpty(), if (my != null && rv != null) my - rv else null, SlotRules.load(repo, s)?.text)
+        }
+        CoinsData(Coins.balance(repo), Coins.web(repo), infos, true)
+    }
+    LaunchedEffect(Unit) { Coins.refreshIfStale(ctx) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val fmt = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
+        PageTitle("💰", "Coins", "ganhar e usar Boss Coins")
+        val bal = d.balance
+        Panel {
+            Text("Saldo de Boss Coins", fontSize = 13.sp, color = C.MUTED)
+            Text(bal?.first?.toString() ?: "—", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
+            Text(
+                if (bal == null) "Ainda não li o saldo: ele aparece no topo de qualquer tela do OSM com o app lendo."
+                else "lido ${ago(bal.second)} • reserva intocável: ${Coins.RESERVE} • pode gastar: ${maxOf(0, bal.first - Coins.RESERVE)}",
+                fontSize = 13.sp, color = C.MUTED
+            )
+        }
+        Title("⚡ Ganhar rápido (existe no seu jogo)")
+        for (w in Coins.GAME_WAYS) CoinsWay(w)
+        Title("🌐 Da web (atualizado todo dia)")
+        val web = d.web
+        Text(
+            if (web == null) "Ainda sem pesquisa. Precisa de uma chave de IA em Ajustes; a pesquisa roda 1× por dia sozinha."
+            else "Pesquisado em ${fmt.format(java.util.Date(web.at))}. Vem de sites e vídeos da comunidade: NÃO confirmado pelo app" + (if (web.how.isNotBlank()) " • ${web.how}" else ""),
+            fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 6.dp)
+        )
+        web?.ways?.forEach { CoinsWay(it) }
+        web?.tips?.takeIf { it.isNotEmpty() }?.let { tips ->
+            Panel {
+                Text("Como a comunidade usa os coins", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+                for (t in tips) Text("• $t", fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f), modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+        OutlinedButton(onClick = { scope.launch { msg = withContext(Dispatchers.IO) { Coins.refresh(ctx) }; UiBus.version++ } }, enabled = !Coins.running, modifier = Modifier.padding(top = 8.dp)) {
+            Text(if (Coins.running) "🔎 Pesquisando…" else "🌐 Atualizar agora")
+        }
+        msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)) }
+        Title("🛠 Como usar para melhorar o time")
+        Panel {
+            for (t in Coins.spendPlan(bal?.first, d.slots)) Text("• $t", fontSize = 13.5.sp, color = Color.White, modifier = Modifier.padding(bottom = 6.dp))
+        }
+        Title("⚠ Cuidado")
+        Panel { for (w in Coins.WARNINGS) Text("• $w", fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(bottom = 4.dp)) }
+        Text("Estas dicas de gasto só aparecem aqui: na bolha e nas outras abas o app continua sem sugerir nada que gaste Boss Coins (a não ser que você ligue em Ajustes).", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+@Composable
+private fun CoinsWay(w: Coins.Way) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(w.icon, fontSize = 20.sp)
+            Text(w.title, fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = Color.White, modifier = Modifier.padding(start = 8.dp).weight(1f))
+            Text("⚡".repeat(w.speed), fontSize = 12.sp)
+        }
+        Text(w.how, fontSize = 13.sp, color = Color.White.copy(alpha = 0.85f), modifier = Modifier.padding(top = 4.dp))
+        Text((if (w.verified) "✔ " else "? ") + w.source, fontSize = 11.5.sp, color = if (w.verified) C.OK else C.MUTED, modifier = Modifier.padding(top = 4.dp))
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

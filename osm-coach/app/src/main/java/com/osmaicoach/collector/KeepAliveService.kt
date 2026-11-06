@@ -52,6 +52,7 @@ class KeepAliveService : Service() {
         job = AppScope.scope.launch(Dispatchers.IO) {
             while (isActive) {
                 try { Notifier.reschedule(applicationContext) } catch (e: Exception) { Diag.lastError = "Avisos: " + (e.message ?: e.javaClass.simpleName) }
+                runCatching { Coins.refreshIfStale(applicationContext) }
                 delay(60_000L)
             }
         }

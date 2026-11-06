@@ -2,6 +2,7 @@ package com.osmaicoach.collector
 
 import org.junit.Assert.*
 import org.junit.Test
+import org.json.JSONObject
 
 class SlotRulesTest {
     private val TXT = """
@@ -70,5 +71,34 @@ class SlotRulesExtraTest {
         assertTrue(SlotRules.tips(r, emptyList(), emptySet(), 5, 22, null, 0L, x2).any { it.icon == "📝" && it.title.contains("B (2/5") })
         assertTrue(SlotRules.sameFlag("BWRBWRBWR", "BWRBWRBWW"))
         assertFalse(SlotRules.sameFlag("BWRBWRBWR", "GWGGWGGWG"))
+    }
+}
+
+class CoinsTest {
+    @Test fun leSaldoDoTopoDoOsm() {
+        // trechos reais dos logs de 06/11: "7,7M@0.18,0.04 | 136@0.27,0.04 | FREE@0.33,0.05"
+        val o = Fx.ocr(Fx.line("7,7M", 0.18f, 0.04f, 0.05f), Fx.line("136", 0.27f, 0.04f, 0.04f), Fx.line("FREE", 0.33f, 0.05f, 0.04f), Fx.line("23", 0.53f, 0.24f, 0.04f))
+        assertEquals(136, Parsers.bossCoins(o))
+        val o2 = Fx.ocr(Fx.line("78M", 0.13f, 0.04f, 0.05f), Fx.line("145", 0.22f, 0.04f, 0.04f))
+        assertEquals(145, Parsers.bossCoins(o2))
+        assertNull(Parsers.bossCoins(Fx.ocr(Fx.line("Jornada 20", 0.5f, 0.13f, 0.1f))))
+    }
+
+    @Test fun reservaDe100NuncaEGasta() {
+        assertTrue(Coins.spendPlan(100, emptyList()).single().contains("não se toca"))
+        assertTrue(Coins.spendPlan(80, emptyList()).single().contains("não se toca"))
+        val p = Coins.spendPlan(145, listOf(Coins.SlotInfo(4, "Otelul", -10, null), Coins.SlotInfo(1, "Fortuna", 6, null),
+            Coins.SlotInfo(3, "Uzm", -7, "Proibido comprar pacote de jogador.\nProibido treino secreto.")))
+        assertTrue(p.first().contains("45 BC"))
+        assertTrue(p.any { it.startsWith("1º lugar") && it.contains("S4") })
+        assertTrue(p.any { it.contains("S3") && it.contains("pacote de jogador") && it.contains("treino secreto") })
+        assertTrue(Coins.spendPlan(null, emptyList()).single().contains("saldo"))
+    }
+
+    @Test fun pesquisaIgnoraGeradoresEHacks() {
+        val j = JSONObject("""{"ways":[{"title":"Vídeos FREE","how":"Assista","speed":3,"source":"osmtactic.com"},{"title":"Gerador de Boss Coins","how":"cole seu login","speed":3,"source":"x"}],"tips":["Treine o setor fraco","use o bug de moedas infinitas"],"how":"ok"}""")
+        val c = Coins.clean(j)
+        assertEquals(1, c.getJSONArray("ways").length())
+        assertEquals(1, c.getJSONArray("tips").length())
     }
 }
