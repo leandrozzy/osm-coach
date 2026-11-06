@@ -461,7 +461,13 @@ object Director {
     suspend fun winProb(repo: Repo, slot: Int, plan: JSONObject? = null): WinModel.Prob? {
         val sp = plan?.let { simPlan(it) }
         val base = simInput(repo, slot)
-        return WinModel.predict(base.copy(plan = sp, tacticRecord = record(history(repo, slot), sp)))
+        val p = WinModel.predict(base.copy(plan = sp, tacticRecord = record(history(repo, slot), sp))) ?: return null
+        // contra humano: mistura com o que os seus jogos reais mostram para essa diferença de força
+        val my = base.myStrength; val rv = base.rivalStrength
+        if (base.rivalHuman == true && my != null && rv != null) {
+            Calibration.fit(allLogs(repo))?.let { return Calibration.blend(p, my - rv, it) }
+        }
+        return p
     }
 
     /** Preenche o resultado das táticas já usadas quando o jogo daquela rodada aparece no calendário. */

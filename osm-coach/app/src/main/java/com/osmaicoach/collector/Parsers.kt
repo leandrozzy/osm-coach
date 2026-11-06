@@ -24,7 +24,8 @@ object Parsers {
     private val RX_SELLING = Regex("vender jogadores\\s*(\\d)\\s*/\\s*(\\d)")
 
     private fun intTok(t: OcrToken): Int? {
-        val s = t.text.trim()
+        // o anel do círculo de força às vezes vira parênteses no OCR ("(104)", log de 06/11): não é parte do número
+        val s = t.text.trim().trim('(', ')', '[', ']', '{', '}', '|', ' ')
         return if (s.isNotEmpty() && s.length <= 3 && s.all { it.isDigit() }) s.toIntOrNull() else null
     }
 

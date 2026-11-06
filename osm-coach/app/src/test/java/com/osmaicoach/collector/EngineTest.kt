@@ -447,3 +447,27 @@ class TacticReadTest {
         org.junit.Assert.assertEquals("Jogar pelas alas", j.optString("playStyle"))
     }
 }
+
+class CalibrationTest {
+    private fun log(my: Int, rv: Int, res: String) = org.json.JSONObject().put("human", true).put("myStrength", my).put("rivalStrength", rv).put("result", res)
+    @org.junit.Test fun azaraoComPoucaChanceFavoritoComMuita() {
+        // padrão do diagnóstico de 06/11: favorito ganha, azarão perde
+        val logs = ArrayList<org.json.JSONObject>()
+        repeat(12) { logs.add(log(90, 80, if (it < 10) "V" else "E")) }
+        repeat(30) { logs.add(log(74, 84, if (it < 2) "V" else if (it < 8) "E" else "D")) }
+        val m = Calibration.fit(logs)!!
+        val under = m.predict(-10.0); val fav = m.predict(10.0)
+        org.junit.Assert.assertTrue("azarão ${under.first}", under.first < 0.2)
+        org.junit.Assert.assertTrue("favorito ${fav.first}", fav.first > 0.6)
+        org.junit.Assert.assertNull(Calibration.fit(logs.take(10)))
+    }
+
+    @org.junit.Test fun forcaComParentesesNoOcrEhLida() {
+        val o = Fx.ocr(
+            Fx.line("(104)", 0.34f, 0.26f, 0.05f), Fx.line("94", 0.66f, 0.26f, 0.05f), Fx.line("FC Ingolstadt", 0.23f, 0.37f, 0.1f),
+            Fx.line("Fortuna Düsseldorf", 0.77f, 0.37f, 0.1f), Fx.line("leandrozzy", 0.78f, 0.41f, 0.1f), Fx.line("Jornada 20", 0.5f, 0.13f, 0.1f)
+        )
+        val ex = Parsers.pregame(o, null, 0L)
+        org.junit.Assert.assertEquals("104", ex.fields[K.RIVAL_STRENGTH]?.value)
+    }
+}

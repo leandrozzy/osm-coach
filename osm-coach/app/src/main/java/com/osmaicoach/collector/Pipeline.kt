@@ -145,9 +145,9 @@ class FramePipeline private constructor(private val ctx: Context) {
     private val lastNote = HashMap<Int, Pair<String, Long>>()
 
     /** Aviso por cima do jogo; o mesmo texto não se repete em menos de 1 min por slot (avisos diferentes passam sempre). */
-    private fun note(slot: Int, text: String, now: Long) {
+    private fun note(slot: Int, text: String, now: Long, ttl: Long = 60_000L) {
         val l = lastNote[slot]
-        if (l != null && l.first == text && now - l.second < 60_000L) return
+        if (l != null && l.first == text && now - l.second < ttl) return
         lastNote[slot] = text to now
         CaptureService.instance?.notice(text)
     }
@@ -207,16 +207,17 @@ class FramePipeline private constructor(private val ctx: Context) {
         val txt: String? = when (type) {
             ScreenType.RESULT -> {
                 val r = ex.matchReport ?: return
-                if (r.scoreHome == null || r.scoreAway == null) "S$slot: Resultado: não li o placar. Role a tela do jogo inteira (placar, estatísticas, notas)."
+                // a tela de Resultado vem em várias rolagens: o aviso mostra o que JÁ está guardado deste jogo, não só o quadro atual
+                val rd = r.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull() ?: return
+                val j = repo.dao.plan(slot, "mr_R$rd")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
+                val st = j.optJSONObject("stats")?.length() ?: 0
+                val rt = (j.optJSONArray("rh")?.length() ?: 0) + (j.optJSONArray("ra")?.length() ?: 0)
+                val ev = j.optJSONArray("events")?.length() ?: 0
+                if (!j.has("sh")) null
                 else {
-                    val rd = r.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull()
-                    val lacks = buildList {
-                        if (r.stats.size < 6) add("estatísticas (role até Zonas de ação)")
-                        if (r.ratingsHome.isEmpty() && r.ratingsAway.isEmpty()) add("notas dos jogadores")
-                    }
-                    "✅ S$slot: Resultado${rd?.let { " da J$it" } ?: ""} lido: ${r.scoreHome}-${r.scoreAway}" +
-                        (if (r.events.isNotEmpty()) " • ${r.events.size} eventos" else "") + " • ${r.stats.size} estatísticas • notas ${(r.ratingsHome.size + r.ratingsAway.size)}." +
-                        (if (lacks.isEmpty()) " O aprendizado das táticas foi atualizado." else " Falta: " + lacks.joinToString(", ") + ".")
+                    val lacks = buildList { if (st < 7) add("estatísticas (role até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
+                    "✅ S$slot: Resultado da J$rd: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
+                        (if (lacks.isEmpty()) " Completo: o aprendizado das táticas foi atualizado." else " Falta ler: " + lacks.joinToString(", ") + ".")
                 }
             }
             ScreenType.CALENDAR -> {
@@ -249,7 +250,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return
         // "Mudou/manteve" só logo depois de LER a tela de Análise (últimos 90 s); em qualquer outra passada vale o checklist.
         val secret = SecretTraining.on(f)
-        val justRead = type == ScreenType.REPORT && listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN).any { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= 90_000L } == true }
+        // a Análise tem 2 telas (1ª: formação; 2ª: estilo, marcação…): só compara quando as DUAS foram lidas nesta passada (antes cada tela avisava sozinha: "mudou", "manteve", "mudou" em 6 s)
+        val justRead = type == ScreenType.REPORT && listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN).all { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= 150_000L } == true }
         val gaps = Director.tacticGaps(f, now)
         val check = Director.checklist(f, now)
         val delta = if (justRead) runCatching { rivalDelta(slot, f, now) }.getOrNull() else null
@@ -259,7 +261,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             val missing = Director.groups(f, now).filter { !it.ok }
             val read = when (type) { ScreenType.PREGAME -> "Pré-jogo"; ScreenType.REPORT -> "Análise do rival"; ScreenType.SQUAD -> "Plantel do rival"; else -> null }
             note(slot, (delta ?: ("S$slot:" + (read?.let { " $it lido." } ?: ""))) + " Falta ler: " +
-                missing.joinToString(" • ") { it.name.substringBefore(" (") + " (" + it.missing.joinToString(", ").take(60) + ")" } + ". Veja o caminho em Hoje → Para fazer.", now)
+                missing.joinToString(" • ") { it.name.substringBefore(" (") + " (" + it.missing.joinToString(", ").take(60) + ")" } + ". Veja o caminho em Hoje → Para fazer.", now, 5 * 60_000L)
             return
         }
         if (matchAt - now > Director.TACTIC_WINDOW_MS) {
