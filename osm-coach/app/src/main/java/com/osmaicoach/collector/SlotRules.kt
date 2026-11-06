@@ -24,7 +24,8 @@ object SlotRules {
         val natCount: Int? = null,
         val natGames: Int? = null,
         val evolveX: Int? = null,
-        val lastRelegated: Boolean = false
+        /** Quantos últimos colocados são rebaixados (0 = a regra não existe). */
+        val relegated: Int = 0
     ) {
         val any: Boolean get() = text.isNotBlank()
     }
@@ -44,8 +45,96 @@ object SlotRules {
             natCount = num(t, "obrigatorio ter (\\d{1,2}) jogadores da nacionalidade"),
             natGames = num(t, "nacionalidade.{0,80}?(\\d{1,2}) vezes"),
             evolveX = num(t, "evoluir no minimo (\\d{1,2}) ?x"),
-            lastRelegated = t.contains("ultimo treinador e rebaixado")
+            relegated = num(t, "ultimos? (\\d{1,2}) (?:treinadores|times|clubes|equipas?)? ?(?:sao |serao |e )?rebaixad")
+                ?: num(t, "(\\d{1,2}) ultimos (?:\\w+ )?(?:sao |serao )?rebaixad")
+                ?: if (Regex("ultimo (?:treinador|colocado|time|clube)? ?(?:e|sera) rebaixad").containsMatchIn(t)) 1 else 0
         )
+    }
+
+    /** Mesma bandeira (assinaturas 3×3 com até 2 células diferentes). */
+    fun sameFlag(a: String, b: String): Boolean = a.length == 9 && b.length == 9 && a.indices.count { a[it] != b[it] } <= 2
+
+    /** Dados lidos do slot que as regras usam. */
+    data class Extra(
+        /** Jogadores da nacionalidade da liga (nome, jogos); null = bandeira da liga ainda não escolhida. */
+        val natives: List<Pair<String, Int>>? = null,
+        val flagsKnown: Boolean = false,
+        val pos: Int? = null,
+        val teams: Int? = null,
+        /** Pontos de vantagem sobre o primeiro time rebaixado (negativo = dentro da zona). */
+        val gapPts: Int? = null,
+        val valueNow: Double? = null,
+        val valueBase: Double? = null
+    )
+
+    /** Grupos de bandeira do elenco: (assinatura, nomes) do maior para o menor. */
+    suspend fun flagGroups(repo: Repo, slot: Int): List<Pair<String, List<String>>> {
+        val nat = repo.dao.plan(slot, "nations")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyList()
+        val names = repo.playersOf(slot).filter { it.owner == "MY" }.associateBy { it.nameKey }
+        val by = LinkedHashMap<String, MutableList<String>>()
+        for (k in nat.keys()) { val n = names[k]?.name ?: continue; by.getOrPut(nat.optString(k)) { ArrayList() }.add(n) }
+        return by.entries.sortedByDescending { it.value.size }.map { it.key to it.value }
+    }
+
+    suspend fun leagueFlag(repo: Repo, slot: Int): String? =
+        repo.dao.plan(slot, "leagueflag")?.json?.let { runCatching { JSONObject(it).optString("sig") }.getOrNull() }?.takeIf { it.length == 9 }
+
+    suspend fun setLeagueFlag(repo: Repo, slot: Int, sig: String?, now: Long) =
+        repo.dao.putPlan(PlanEntity(slot, "leagueflag", if (sig == null) "{}" else JSONObject().put("sig", sig).toString(), now))
+
+    /** Jogos de cada jogador do MEU time, contados nos relatórios de resultado lidos (mínimo: o relatório pode não listar todos). */
+    suspend fun appearances(repo: Repo, slot: Int): Map<String, Int> {
+        val mine = repo.playersOf(slot).filter { it.owner == "MY" }
+        val out = HashMap<String, Int>()
+        for (pl in repo.dao.plansOf(slot)) {
+            if (!pl.kind.startsWith("mr_R")) continue
+            val j = runCatching { JSONObject(pl.json) }.getOrNull() ?: continue
+            if (!j.has("mineHome")) continue
+            val arr = j.optJSONArray(if (j.optBoolean("mineHome")) "rh" else "ra") ?: continue
+            val seen = HashSet<String>()
+            for (i in 0 until arr.length()) {
+                val nm = arr.optJSONArray(i)?.optString(0) ?: continue
+                val k = Txt.key(nm)
+                mine.firstOrNull { it.nameKey == k || Txt.sim(it.nameKey, k) >= 0.85 }?.let { seen.add(it.nameKey) }
+            }
+            for (k in seen) out[k] = (out[k] ?: 0) + 1
+        }
+        return out
+    }
+
+    /** Monta o que as regras precisam (nacionalidade, posição na tabela, valor do time). */
+    suspend fun gather(repo: Repo, slot: Int, r: Rules, f: Map<String, StoredField>, now: Long): Extra {
+        val mine = repo.playersOf(slot).filter { it.owner == "MY" }
+        var natives: List<Pair<String, Int>>? = null
+        val groups = flagGroups(repo, slot)
+        if (r.natCount != null) {
+            val lf = leagueFlag(repo, slot)
+            if (lf != null) {
+                val apps = appearances(repo, slot)
+                val nat = repo.dao.plan(slot, "nations")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+                natives = mine.filter { nat?.optString(it.nameKey)?.let { s -> s.isNotEmpty() && sameFlag(s, lf) } == true }
+                    .map { it.name to (apps[it.nameKey] ?: 0) }.sortedByDescending { it.second }
+            }
+        }
+        val pos = f[K.LEAGUE_POS]?.value?.toIntOrNull()
+        val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
+        val st = League.table(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, "st")
+        val teams = st.size.takeIf { it >= 6 } ?: total?.let { it / 2 + 1 }
+        var gap: Int? = null
+        if (r.relegated > 0 && pos != null && teams != null && st.isNotEmpty()) {
+            val me = st.firstOrNull { it.rank == pos }
+            val safe = st.firstOrNull { it.rank == teams - r.relegated }
+            val firstOut = st.firstOrNull { it.rank == teams - r.relegated + 1 }
+            if (me?.pts != null && safe?.pts != null && firstOut?.pts != null) gap = if (pos > teams - r.relegated) me.pts - safe.pts else me.pts - firstOut.pts
+        }
+        // valor do time: 1ª leitura vira a base da meta (guardada no slot)
+        val now1 = Money.parse(f[K.MY_VALUE]?.value)
+        var base = repo.dao.plan(slot, "valuebase")?.json?.let { runCatching { JSONObject(it).optDouble("v", 0.0) }.getOrNull() }?.takeIf { it > 0 }
+        if (base == null && now1 != null && r.evolveX != null) {
+            repo.dao.putPlan(PlanEntity(slot, "valuebase", JSONObject().put("v", now1).put("at", now).toString(), now))
+            base = now1
+        }
+        return Extra(natives, groups.isNotEmpty(), pos, teams, gap, now1, base)
     }
 
     suspend fun load(repo: Repo, slot: Int): Rules? {
@@ -69,15 +158,27 @@ object SlotRules {
         r.maxAwayDays?.let { add("Entrar na liga a cada ${it} dias") }
         if (r.natCount != null) add("${r.natCount} jogadores da nacionalidade da liga" + (r.natGames?.let { ", ${it} jogos cada" } ?: ""))
         r.evolveX?.let { add("Evoluir ${it}× o valor inicial") }
-        if (r.lastRelegated) add("Último treinador é rebaixado")
+        if (r.relegated > 0) add("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}")
     }
 
     /** Texto para o prompt da IA: obrigatório respeitar (compra, treino, craque, elenco, escalação). */
     fun promptText(r: Rules): String =
         "REGRAS ESPECIAIS DESTA LIGA (obrigatórias; valem mais que as dicas gerais; não sugira nada que as quebre):\n" + r.text.take(1800)
 
+    /** Linha extra para a IA: cota de nacionalidade a cumprir, risco de rebaixamento e meta de valor. */
+    fun promptExtra(r: Rules, x: Extra): String {
+        val sb = StringBuilder()
+        if (r.natCount != null && x.natives != null) {
+            val low = x.natives.filter { r.natGames != null && it.second < r.natGames }
+            sb.append("Cota de nacionalidade: ${x.natives.size}/${r.natCount} jogadores da liga. ")
+            if (low.isNotEmpty()) sb.append("Precisam de jogos (escale no 11 se possível): " + low.joinToString { "${it.first} (${it.second}/${r.natGames})" } + ". ")
+        }
+        if (r.relegated > 0 && x.pos != null && x.teams != null && x.pos >= x.teams - r.relegated - 1) sb.append("RISCO DE REBAIXAMENTO (${x.pos}º de ${x.teams}, caem ${r.relegated}): busque vitória. ")
+        return sb.toString().trim()
+    }
+
     /** Dicas por slot. `late` = 2º turno (rodada > metade). Pendências usam ícones de ação; informação usa 📜. */
-    fun tips(r: Rules, players: List<PlayerEntity>, xi: Set<String>, round: Int?, roundTotal: Int?, lastReadAt: Long?, now: Long): List<Playbook.Tip> {
+    fun tips(r: Rules, players: List<PlayerEntity>, xi: Set<String>, round: Int?, roundTotal: Int?, lastReadAt: Long?, now: Long, x: Extra = Extra()): List<Playbook.Tip> {
         val out = ArrayList<Playbook.Tip>()
         val mine = players.filter { it.owner == "MY" }
         fun nm(p: PlayerEntity) = "${p.name} (${p.strength})"
@@ -106,8 +207,37 @@ object SlotRules {
             val h = (now - lastReadAt) / 3_600_000L
             if (h >= (away - 1) * 24L) out.add(Tip("⏰", "Entre na liga hoje: ${h / 24} dia(s) sem entrar (limite $away)", "A liga pune ficar mais de $away dias sem entrar. Abra o jogo neste slot.", 98, 0))
         }
-        if (r.natCount != null) out.add(Tip("📜", "Regra: ${r.natCount} jogadores da nacionalidade da liga" + (r.natGames?.let { ", cada um com $it jogos" } ?: ""), "Escale esses jogadores o bastante para cumprir a cota (o app ainda não lê nacionalidade nem jogos por jogador: confira na tela do elenco).", 45, 4))
-        r.evolveX?.let { out.add(Tip("📜", "Meta da liga: valor do time ${it}× o inicial", "Treine jovens e valorize o elenco; confira o valor do plantel na tabela da liga.", 30, 0)) }
+        if (r.natCount != null) {
+            val need = r.natCount; val games = r.natGames
+            val nat = x.natives
+            if (nat == null) {
+                out.add(Tip("📜", "Regra: $need jogador(es) da nacionalidade da liga" + (games?.let { ", $it jogos cada" } ?: ""), if (x.flagsKnown) "Escolha no cartão \"Regras especiais\" qual bandeira é a da liga para eu contar." else "Abra o Plantel (rolando a lista) para eu ler a bandeira de cada jogador; depois escolha a da liga no cartão de regras.", 70, 0))
+            } else {
+                val ready = nat.count { games == null || it.second >= games }
+                val low = nat.filter { games != null && it.second < games }
+                if (nat.size < need) out.add(Tip("🚨", "Faltam ${need - nat.size} jogador(es) da nacionalidade da liga (tem ${nat.size}/$need)", "A regra exige $need" + (games?.let { ", cada um com $it jogos" } ?: "") + ". Compre (até over ${r.maxBuy ?: "permitido"}) ou use o Olheiro/mercado filtrando pela nacionalidade.", 94, 6))
+                else if (low.isNotEmpty()) out.add(Tip("📝", "Escale: " + low.take(4).joinToString { "${it.first} (${it.second}/$games jogos)" }, "A regra exige $need jogadores da nacionalidade com $games jogos cada ($ready de $need prontos). Ponha-os no 11 sempre que a tática permitir (os jogos contados vêm dos relatórios lidos: podem ser mais).", 88, 4))
+                else out.add(Tip("📜", "Cota da nacionalidade cumprida ($ready/$need com ${games ?: 0}+ jogos)", "Mantenha esses jogadores no elenco até o fim.", 25, 4))
+            }
+        }
+        val vb = x.valueBase; val vn = x.valueNow
+        if (r.evolveX != null && vb != null && vn != null) {
+            val goal = vb * r.evolveX
+            val frac = if (round != null && roundTotal != null && roundTotal > 0) round.toDouble() / roundTotal else null
+            val expected = frac?.let { vb + (goal - vb) * it }
+            val behind = expected != null && vn < expected * 0.92
+            out.add(Tip(if (behind) "📈" else "📜", "Meta de valor: ${Playbook.money(vn)} de ${Playbook.money(goal)} (${r.evolveX}× a base ${Playbook.money(vb)})" + (if (behind) " — atrasado" else ""),
+                if (behind) "Pelo ritmo da temporada já deveria estar perto de ${Playbook.money(expected!!)}. Treine jovens com mais potencial, não deixe treinador parado e valorize o elenco." else "No ritmo da meta. A base é o primeiro valor que o app leu neste slot.", if (behind) 80 else 30, 0))
+        } else if (r.evolveX != null) out.add(Tip("📜", "Meta da liga: valor do time ${r.evolveX}× o inicial", "Abra o Plantel (topo) para eu registrar o valor do elenco como base da meta.", 30, 0))
+        if (r.relegated > 0 && x.pos != null && x.teams != null) {
+            val zoneStart = x.teams - r.relegated + 1
+            val inZone = x.pos >= zoneStart
+            val close = !inZone && (x.pos >= zoneStart - 2 || (x.gapPts != null && x.gapPts <= 3))
+            val gapTxt = x.gapPts?.let { g -> if (inZone) " Você está ${-g} pt(s) atrás do último lugar seguro." else " Vantagem de $g pt(s) sobre a zona." } ?: ""
+            if (inZone) out.add(Tip("🚨", "ZONA DE REBAIXAMENTO: ${x.pos}º de ${x.teams} (rebaixam os últimos ${r.relegated})", "Cada ponto conta: priorize vitória, escale o melhor 11 e não deixe sessão de treino ou lesão te enfraquecer.$gapTxt", 99, 4))
+            else if (close) out.add(Tip("🚨", "Perto do rebaixamento: ${x.pos}º de ${x.teams} (caem os últimos ${r.relegated})", "Não relaxe: um tropeço te coloca na zona.$gapTxt", 90, 4))
+            else out.add(Tip("📜", "Fora da zona de rebaixamento (${x.pos}º de ${x.teams})", "A liga rebaixa os últimos ${r.relegated}.$gapTxt", 20, 4))
+        }
         return out.map { it }
     }
 

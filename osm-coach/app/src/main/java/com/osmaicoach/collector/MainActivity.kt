@@ -2891,6 +2891,47 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
     }
 }
 
+private fun flagColor(c: Char): Color = when (c) {
+    'K' -> Color(0xFF111111); 'W' -> Color(0xFFF5F5F5); 'X' -> Color(0xFF9A9A9A); 'R' -> Color(0xFFD62828); 'O' -> Color(0xFFF77F00)
+    'Y' -> Color(0xFFFFD60A); 'G' -> Color(0xFF2D9D4B); 'L' -> Color(0xFF4CC9F0); 'B' -> Color(0xFF1D4ED8); else -> Color(0xFF7B2CBF)
+}
+
+/** Escolha da bandeira da liga entre as bandeiras lidas no Plantel (o jogo só mostra a bandeira, não o nome). */
+@Composable
+private fun FlagPicker(slot: Int) {
+    val ctx = LocalContext.current
+    var groups by remember(slot) { mutableStateOf<List<Pair<String, List<String>>>>(emptyList()) }
+    var chosen by remember(slot) { mutableStateOf<String?>(null) }
+    LaunchedEffect(slot, UiBus.version) {
+        withContext(Dispatchers.IO) {
+            val repo = Repo(ctx)
+            groups = SlotRules.flagGroups(repo, slot)
+            chosen = SlotRules.leagueFlag(repo, slot)
+        }
+    }
+    Text("Bandeira da liga (toque na que é a da nacionalidade da liga):", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    if (groups.isEmpty()) {
+        Text("Abra o Plantel e role a lista para eu ler as bandeiras.", fontSize = 12.5.sp, color = C.MUTED)
+        return
+    }
+    for ((sig, names) in groups.take(8)) {
+        val sel = chosen != null && SlotRules.sameFlag(sig, chosen!!)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clickable {
+                val v = if (sel) null else sig
+                chosen = v
+                AppScope.scope.launch(Dispatchers.IO) { SlotRules.setLeagueFlag(Repo(ctx), slot, v, System.currentTimeMillis()); UiBus.version++ }
+            },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.width(33.dp)) {
+                for (r in 0 until 3) Row { for (c in 0 until 3) Box(Modifier.size(11.dp).background(flagColor(sig[r * 3 + c]))) }
+            }
+            Text((if (sel) "✓ " else "") + "${names.size}: " + names.take(4).joinToString(", ") + (if (names.size > 4) "…" else ""), fontSize = 13.sp, color = if (sel) C.OK else Color.White, modifier = Modifier.padding(start = 10.dp))
+        }
+    }
+}
+
 /** Regras especiais da liga deste slot (texto colado pelo usuário): o app respeita compra, treino, craque, elenco e prazos. */
 @Composable
 private fun RulesCard(slot: Int) {
@@ -2917,6 +2958,7 @@ private fun RulesCard(slot: Int) {
                 Text(if (s.isEmpty()) "Texto salvo; a IA recebe tudo como regra obrigatória." else "Entendi: " + s.joinToString(" • "), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 4.dp))
                 Text("O restante do texto também vai para a IA da tática e do mercado.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
             }
+            if (r?.natCount != null) FlagPicker(slot)
             GhostButton(if (r == null) "Colar regras" else "Editar regras", modifier = Modifier.padding(top = 8.dp)) { editing = true }
         } else {
             OutlinedTextField(

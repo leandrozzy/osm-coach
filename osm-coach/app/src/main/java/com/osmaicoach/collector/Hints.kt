@@ -109,7 +109,7 @@ object Hints {
         val rules = SlotRules.load(repo, slot)
         val ruleTips = rules?.let { r ->
             val lastRead = f.values.maxOfOrNull { it.updatedAt }
-            SlotRules.tips(r, repo.playersOf(slot), xi, kv(f, K.ROUND)?.toIntOrNull(), kv(f, K.ROUND_TOTAL)?.toIntOrNull(), lastRead, now)
+            SlotRules.tips(r, repo.playersOf(slot), xi, kv(f, K.ROUND)?.toIntOrNull(), kv(f, K.ROUND_TOTAL)?.toIntOrNull(), lastRead, now, SlotRules.gather(repo, slot, r, f, now))
         }.orEmpty()
         val late2 = kv(f, K.ROUND)?.toIntOrNull()?.let { r -> kv(f, K.ROUND_TOTAL)?.toIntOrNull()?.let { t -> r > t / 2 } } == true
         // 2º turno sem transferências: some com as dicas de vender/listar (a liga proíbe)

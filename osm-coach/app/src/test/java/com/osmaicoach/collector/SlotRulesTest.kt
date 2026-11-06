@@ -23,7 +23,7 @@ Superliga Uzbeque 🇺🇿
         assertEquals(79, r.maxBuy); assertEquals(88, r.maxTrain); assertEquals(93, r.maxStar)
         assertEquals(30, r.maxSquad); assertEquals(3, r.maxAwayDays)
         assertEquals(3, r.natCount); assertEquals(5, r.natGames); assertEquals(3, r.evolveX)
-        assertTrue(r.noTransferSecondHalf); assertTrue(r.lastRelegated)
+        assertTrue(r.noTransferSecondHalf); assertEquals(1, r.relegated)
         assertTrue(SlotRules.summary(r).size >= 8)
     }
 
@@ -41,5 +41,34 @@ Superliga Uzbeque 🇺🇿
         assertTrue(SlotRules.tips(SlotRules.parse("só jogar"), ps, emptySet(), 14, 22, null, 0L).isEmpty())
         val away = SlotRules.tips(r, listOf(p("A", 70)), emptySet(), 5, 22, 0L, 50L * 3_600_000L)
         assertTrue(away.any { it.icon == "⏰" })
+    }
+}
+
+class SlotRulesExtraTest {
+    @Test fun leRebaixamento() {
+        assertEquals(1, SlotRules.parse("🚨O último treinador é rebaixado.").relegated)
+        assertEquals(3, SlotRules.parse("Os 3 últimos treinadores são rebaixados").relegated)
+        assertEquals(2, SlotRules.parse("Os últimos 2 times serão rebaixados").relegated)
+        assertEquals(0, SlotRules.parse("Proibido treino secreto").relegated)
+    }
+
+    @Test fun zonaDeRebaixamentoEMetaDeValor() {
+        val r = SlotRules.parse("Os 2 últimos são rebaixados\nEvoluir no mínimo *3* X o valor inicial")
+        val z = SlotRules.tips(r, emptyList(), emptySet(), 10, 22, null, 0L, SlotRules.Extra(pos = 12, teams = 12, gapPts = -4, valueNow = 1.0, valueBase = 1.0))
+        assertTrue(z.any { it.title.startsWith("ZONA DE REBAIXAMENTO") && it.icon == "🚨" })
+        assertTrue(z.any { it.icon == "📈" && it.title.contains("atrasado") })
+        val ok = SlotRules.tips(r, emptyList(), emptySet(), 10, 22, null, 0L, SlotRules.Extra(pos = 4, teams = 12, gapPts = 9, valueNow = 2.0, valueBase = 1.0))
+        assertTrue(ok.none { it.icon == "🚨" })
+    }
+
+    @Test fun cotaDeNacionalidade() {
+        val r = SlotRules.parse("Obrigatório ter *3* jogadores da nacionalidade da liga, e cada jogador entrar em campo *5* vezes no mínimo.")
+        val x = SlotRules.Extra(natives = listOf("A Um" to 5, "B Dois" to 2), flagsKnown = true)
+        val t = SlotRules.tips(r, emptyList(), emptySet(), 5, 22, null, 0L, x)
+        assertTrue(t.any { it.icon == "🚨" && it.title.contains("Faltam 1") })
+        val x2 = SlotRules.Extra(natives = listOf("A" to 5, "B" to 2, "C" to 6), flagsKnown = true)
+        assertTrue(SlotRules.tips(r, emptyList(), emptySet(), 5, 22, null, 0L, x2).any { it.icon == "📝" && it.title.contains("B (2/5") })
+        assertTrue(SlotRules.sameFlag("BWRBWRBWR", "BWRBWRBWW"))
+        assertFalse(SlotRules.sameFlag("BWRBWRBWR", "GWGGWGGWG"))
     }
 }

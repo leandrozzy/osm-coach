@@ -551,6 +551,23 @@ class Repo(private val ctx: Context) {
             // jogador novo num elenco que já estava lido = contratação (a 1ª leitura do elenco não conta)
             if (old == null && existing.size >= 14 && source != "ai" && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
         }
+        // bandeiras (coluna Nac.): agrupa assinaturas parecidas numa só (representante) e guarda por jogador no plano "nations"
+        runCatching {
+            val withNat = ex.players.filter { it.nat != null }
+            if (withNat.size >= 3 && source != "ai") {
+                val reps = planJson(slot, "natreps").optJSONArray("reps")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.toMutableList() ?: mutableListOf()
+                val nat = planJson(slot, "nations")
+                for (p in withNat) {
+                    val s = p.nat!!
+                    val rep = reps.firstOrNull { SlotRules.sameFlag(it, s) } ?: s.also { reps.add(it) }
+                    val k = Txt.key(p.name)
+                    val key = seen.firstOrNull { it == k } ?: dao.playersOf(slot).firstOrNull { it.owner == "MY" && SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                    nat.put(key, rep)
+                }
+                dao.putPlan(PlanEntity(slot, "natreps", JSONObject().put("reps", JSONArray(reps)).toString(), now))
+                dao.putPlan(PlanEntity(slot, "nations", nat.toString(), now))
+            }
+        }
         if (ex.players.size >= 3) {
             runCatching { noteScreen(slot, ScreenType.SQUAD, now) }
             // cartão amarelo (coluna Estado): guarda por jogador; quem foi lido sem amarelo sai da lista

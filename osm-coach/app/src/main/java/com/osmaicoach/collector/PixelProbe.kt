@@ -111,7 +111,47 @@ object PixelProbe {
             prevEnd = r.s + r.n
         }
         if (cur.length > best.length) best = cur.toString()
-        return best.takeIf { it.length in 3..5 }
+        return best.takeIf { it.length in 1..5 }
+    }
+
+    /**
+     * Assinatura da bandeira (coluna "Nac." do Plantel/Mercado): 3×3 células, cada uma na cor dominante
+     * (K preto, W branco, X cinza, R vermelho, O laranja, Y amarelo, G verde, L azul-claro, B azul, P roxo).
+     * França = "BWRBWRBWR", Nigéria = "GWGGWGGWG". Null se não há bandeira (tudo escuro/cinza).
+     */
+    fun flagSig(img: Img, cx: Float, cy: Float, w: Float = 0.026f, h: Float = 0.040f): String? {
+        val x0 = ((cx - w / 2) * img.w).toInt().coerceAtLeast(0)
+        val x1 = ((cx + w / 2) * img.w).toInt().coerceAtMost(img.w)
+        val y0 = ((cy - h / 2) * img.h).toInt().coerceAtLeast(0)
+        val y1 = ((cy + h / 2) * img.h).toInt().coerceAtMost(img.h)
+        if (x1 - x0 < 9 || y1 - y0 < 9) return null
+        val t = FloatArray(3)
+        val sb = StringBuilder()
+        for (r in 0 until 3) for (c in 0 until 3) {
+            val xa = x0 + (x1 - x0) * c / 3; val xb = x0 + (x1 - x0) * (c + 1) / 3
+            val ya = y0 + (y1 - y0) * r / 3; val yb = y0 + (y1 - y0) * (r + 1) / 3
+            val cnt = IntArray(10)
+            for (y in ya until yb) for (x in xa until xb) {
+                hsv(img.px[y * img.w + x], t)
+                val k = when {
+                    t[2] < 0.28f -> 0
+                    t[1] < 0.22f -> if (t[2] > 0.72f) 1 else 2
+                    t[0] < 15f || t[0] >= 340f -> 3
+                    t[0] < 40f -> 4
+                    t[0] < 70f -> 5
+                    t[0] < 170f -> 6
+                    t[0] < 215f -> 7
+                    t[0] < 262f -> 8
+                    else -> 9
+                }
+                cnt[k]++
+            }
+            var b = 0
+            for (i in 1 until 10) if (cnt[i] > cnt[b]) b = i
+            sb.append("KWXROYGLBP"[b])
+        }
+        val s = sb.toString()
+        return if (s.all { it == 'K' } || s.all { it == 'X' } || s.count { it == 'K' || it == 'X' } >= 8) null else s
     }
 
     /**

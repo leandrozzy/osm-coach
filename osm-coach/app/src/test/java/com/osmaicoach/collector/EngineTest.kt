@@ -377,3 +377,17 @@ class FormDotsTest {
         org.junit.Assert.assertNull(PixelProbe.formDots(img { }, true))
     }
 }
+
+class FlagSigTest {
+    private val W = 1080; private val H = 480
+    @org.junit.Test fun bandeiraFranciaEBrancaSemBandeira() {
+        val px = IntArray(W * H) { 0xFFFFFFFF.toInt() }
+        // França (azul | branco | vermelho) em x 0.576..0.602, y centrado em 0.5
+        val x0 = (0.577f * W).toInt(); val x1 = (0.602f * W).toInt(); val y0 = (0.48f * H).toInt(); val y1 = (0.52f * H).toInt()
+        for (y in y0 until y1) for (x in x0 until x1) { val t = (x - x0) * 3 / (x1 - x0); px[y * W + x] = when (t) { 0 -> 0xFF1D3FBF.toInt(); 1 -> 0xFFFFFFFF.toInt(); else -> 0xFFD01010.toInt() } }
+        val img = PixelProbe.Img(W, H, px)
+        val s = PixelProbe.flagSig(img, 0.59f, 0.50f)
+        org.junit.Assert.assertEquals("BWRBWRBWR", s)
+        org.junit.Assert.assertNull(PixelProbe.flagSig(PixelProbe.Img(W, H, IntArray(W * H) { 0xFF101010.toInt() }), 0.59f, 0.50f))
+    }
+}

@@ -55,7 +55,9 @@ data class PlayerRead(
     /** Cartão amarelo na coluna "Estado" do plantel. */
     val yellow: Boolean? = null,
     /** Cartão vermelho na coluna "Estado" do plantel (jogador suspenso). */
-    val red: Boolean? = null
+    val red: Boolean? = null,
+    /** Assinatura da bandeira (coluna Nac.): ver `PixelProbe.flagSig`. */
+    val nat: String? = null
 )
 
 data class MatchRead(
