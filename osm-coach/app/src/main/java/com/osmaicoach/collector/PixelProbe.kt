@@ -69,6 +69,15 @@ object PixelProbe {
      * colorido o OCR perde ou erra). Devolve a corrente mais longa de círculos lado a lado (≥3), da esquerda p/ direita.
      */
     fun formDots(img: Img, left: Boolean): String? {
+        // 1ª passada: cores vivas de verdade (print 06/11: bolinhas com saturação ≥0,95; o gramado ao fundo ≈0,5);
+        // 2ª, mais frouxa, para quadro escurecido por janela por cima — só vale se achar mais bolinhas e sem juntar gramado.
+        val a = scanDots(img, left, 0.85f, 0.45f, 0.45f)
+        val b = scanDots(img, left, 0.68f, 0.40f, 0.2f)
+        val ok = listOf(a, b).filter { it.length in 1..5 }
+        return if (ok.size == 2 && b.length > a.length) b else ok.firstOrNull()
+    }
+
+    private fun scanDots(img: Img, left: Boolean, minSat: Float, minVal: Float, widthTol: Float): String {
         val xa = ((if (left) 0.12f else 0.54f) * img.w).toInt()
         val xb = ((if (left) 0.46f else 0.88f) * img.w).toInt().coerceAtMost(img.w)
         val t = FloatArray(3)
@@ -78,7 +87,7 @@ object PixelProbe {
             for (k in 0 until 10) {
                 val y = ((0.485f + 0.05f * k / 9f) * img.h).toInt().coerceIn(0, img.h - 1)
                 hsv(img.px[y * img.w + x], t)
-                if (t[1] > 0.55f && t[2] > 0.40f) when {
+                if (t[1] > minSat && t[2] > minVal) when {
                     t[0] <= 12f || t[0] >= 344f -> d++
                     t[0] in 20f..46f -> e++
                     t[0] in 80f..165f -> v++
@@ -109,14 +118,14 @@ object PixelProbe {
         for (r in runs) {
             // bolinhas vizinhas da mesma cor se fundem numa corrida larga (V V = 2 círculos): divide pelo passo
             val k = if (r.n > maxW) Math.round((r.n + 0.0035f * img.w) / pitch) else 1
-            val ok = if (r.n > maxW) k in 2..5 && abs(r.n - (k * pitch - 0.0035f * img.w)) <= 0.45f * pitch else r.n >= minW
+            val ok = if (r.n > maxW) k in 2..5 && abs(r.n - (k * pitch - 0.0035f * img.w)) <= widthTol * pitch else r.n >= minW
             if (!ok) { flush(); continue }
             if (prevEnd != Int.MIN_VALUE && r.s - prevEnd > maxGap) flush()
             repeat(k) { cur.append(r.c) }
             prevEnd = r.s + r.n
         }
         flush()
-        return best.takeIf { it.length in 1..5 }
+        return best
     }
 
     /**

@@ -425,3 +425,16 @@ class FormReadTest {
         org.junit.Assert.assertEquals("DDDDE", FormRead.mine(emptyList(), 7, "DDDDE"))
     }
 }
+
+class FormDotsGrassTest {
+    private val W = 1080; private val H = 480
+    @org.junit.Test fun gramadoColadoNaPrimeiraBolinhaNaoAtrapalha() {
+        // frame real 06/11 (S4): rival V D V V D com o gramado (verde dessaturado) encostando na 1ª bolinha
+        val px = IntArray(W * H) { 0xFF101830.toInt() }
+        for (y in 236..260) for (x in 560..778) px[y * W + x] = 0xFF4E994E.toInt()
+        fun dot(cx: Int, c: Int) { for (y in 235..255) for (x in cx - 9..cx + 8) if ((x - cx) * (x - cx) + (y - 245) * (y - 245) <= 90) px[y * W + x] = c }
+        val g = 0xFF3AC000.toInt(); val r = 0xFFDF0000.toInt()
+        "VDVVD".forEachIndexed { i, ch -> dot(789 + i * 21, if (ch == 'V') g else r) }
+        org.junit.Assert.assertEquals("VDVVD", PixelProbe.formDots(PixelProbe.Img(W, H, px), false))
+    }
+}

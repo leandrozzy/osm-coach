@@ -2258,8 +2258,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
 
         TodoCard(data, onOpenSlot)
         Title("Seus slots")
-        val nowT = System.currentTimeMillis()
-        for (s in data.slots.sortedBy { sl -> sl.nextAt?.takeIf { it > nowT && !sl.ended && sl.state == null } ?: Long.MAX_VALUE }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
+        for (s in data.slots.sortedBy { sl -> sl.slot }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
         data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }
@@ -2566,8 +2565,7 @@ private fun SlotsTab(onOpen: (Int, Int) -> Unit) {
     val data = rememberLoaded(TodayCache.last, tick, UiBus.version) { loadToday(ctx) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
         PageTitle("📚", "Slots", "${data.slots.count { it.known }} ativos")
-        val nowS = System.currentTimeMillis()
-        for (s in data.slots.sortedBy { sl -> sl.nextAt?.takeIf { it > nowS && !sl.ended && sl.state == null } ?: Long.MAX_VALUE }) SlotCardV2(s, { onOpen(s.slot, 0) }, { t -> onOpen(s.slot, t) })
+        for (s in data.slots.sortedBy { sl -> sl.slot }) SlotCardV2(s, { onOpen(s.slot, 0) }, { t -> onOpen(s.slot, t) })
     }
 }
 
