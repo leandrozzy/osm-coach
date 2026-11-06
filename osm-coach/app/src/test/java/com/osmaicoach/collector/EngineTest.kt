@@ -407,3 +407,21 @@ class FormDotsMergedTest {
         org.junit.Assert.assertEquals("VDVDV", PixelProbe.formDots(img, false))
     }
 }
+
+class FormReadTest {
+    private fun m(r: Int, res: String?) = MatchEntity(2, "L$r", "Jornada $r", r, null, null, null, null, null, res, null, null, 0L)
+    @org.junit.Test fun calendarioIncompletoUsaAsBolinhasDoJogo() {
+        // S2 (vídeo 06/11): rodada 19 jogada, calendário só até a 12 → vale o que o jogo mostra
+        val cal = (1..12).map { m(it, if (it % 2 == 0) "D" else "V") }
+        org.junit.Assert.assertEquals("EVVVD", FormRead.mine(cal, 19, "EVVVD"))
+        org.junit.Assert.assertEquals(7, FormRead.lag(cal, 19))
+        // calendário em dia: os 5 últimos
+        val full = (1..19).map { m(it, if (it <= 14) "V" else "D") }
+        org.junit.Assert.assertEquals("VDDDDD".takeLast(5), FormRead.mine(full, 19, "EVVVD"))
+        org.junit.Assert.assertEquals(0, FormRead.lag(full, 19))
+        // competição nova: 2 jogos, calendário em dia → 2 bolinhas
+        org.junit.Assert.assertEquals("VD", FormRead.mine(listOf(m(1, "V"), m(2, "D")), 2, "VD"))
+        // sem nada do calendário usa as bolinhas
+        org.junit.Assert.assertEquals("DDDDE", FormRead.mine(emptyList(), 7, "DDDDE"))
+    }
+}

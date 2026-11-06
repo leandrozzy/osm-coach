@@ -25,7 +25,9 @@ object Fresh {
         /** O advogado disse "não posso apresentar recurso" nesta rodada. */
         val noAppeal: Boolean = false,
         /** Nível da barra "Preparação para o jogo" lida no pré-jogo (CRÍTICO, FRACO, BOM…); null = não lido. */
-        val prepLevel: String? = null
+        val prepLevel: String? = null,
+        /** Rodadas jogadas que o Calendário lido ainda não mostra (leitura que não rolou até o fim). */
+        val calLag: Int = 0
     )
 
     val NAME = mapOf(
@@ -138,6 +140,7 @@ object Fresh {
         when {
             c == null && i.matchAt == null -> add(ScreenType.CALENDAR, 1, "ainda não sei quando é o próximo jogo")
             i.matchAt == null && c != null && c > 24 * H -> add(ScreenType.CALENDAR, 1, "não sei o próximo jogo (leitura ${ago(c)})")
+            c != null && i.calLag >= 2 -> add(ScreenType.CALENDAR, 1, "o calendário lido não chega às últimas rodadas (faltam ${i.calLag}): role até o fim para eu ter os resultados")
             c != null && c > 7 * 24 * H -> add(ScreenType.CALENDAR, 1, "leitura semanal (última ${ago(c)}): confere rodadas, rivais e horários")
         }
         val sp = age(ScreenType.SPONSORS)

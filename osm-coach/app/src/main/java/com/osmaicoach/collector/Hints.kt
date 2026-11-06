@@ -50,7 +50,8 @@ object Hints {
         val noAppeal = repo.dao.plan(slot, "noappeal")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
             ?.let { it.optInt("round", -2) == (repo.fieldMap(slot)[K.ROUND]?.value?.toIntOrNull() ?: -1) } == true
         return Fresh.needs(Fresh.In(slot, repo.seenMap(slot), repo.timers(slot), matchAt, sp.any { it.games <= 1 }, now, active, lastMatch, reds, inj.size, noAppeal,
-            repo.fieldMap(slot)[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 6L * 3_600_000L }?.value))
+            repo.fieldMap(slot)[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 6L * 3_600_000L }?.value,
+            FormRead.lag(repo.dao.matchesOf(slot), repo.fieldMap(slot)[K.ROUND_DONE]?.value?.toIntOrNull())))
     }
 
     suspend fun slotTips(
