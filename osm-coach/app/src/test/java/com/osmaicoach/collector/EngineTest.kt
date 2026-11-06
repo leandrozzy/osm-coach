@@ -391,3 +391,19 @@ class FlagSigTest {
         org.junit.Assert.assertNull(PixelProbe.flagSig(PixelProbe.Img(W, H, IntArray(W * H) { 0xFF101010.toInt() }), 0.59f, 0.50f))
     }
 }
+
+class FormDotsMergedTest {
+    private val W = 2000; private val H = 882
+    @org.junit.Test fun corridasLargasDeMesmaCorViramVariasBolinhas() {
+        // print real (S1, 06/11): rival V D V V D (2 verdes vizinhas) e meu V D V D V; dots de ≈0,018 de largura, passo 0,0195
+        val px = IntArray(W * H) { 0xFF101830.toInt() }
+        fun dot(cx: Int, c: Int) { val r = (0.009f * W).toInt(); val cy = (0.509f * H).toInt(); for (y in cy - r..cy + r) for (x in cx - r..cx + r) if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r) px[y * W + x] = c }
+        val g = 0xFF30B020.toInt(); val rd = 0xFFD01010.toInt()
+        val pitch = (0.0195f * W).toInt()
+        "VDVVD".forEachIndexed { i, ch -> dot((0.19f * W).toInt() + i * pitch, if (ch == 'V') g else rd) }
+        "VDVDV".forEachIndexed { i, ch -> dot((0.725f * W).toInt() + i * pitch, if (ch == 'V') g else rd) }
+        val img = PixelProbe.Img(W, H, px)
+        org.junit.Assert.assertEquals("VDVVD", PixelProbe.formDots(img, true))
+        org.junit.Assert.assertEquals("VDVDV", PixelProbe.formDots(img, false))
+    }
+}

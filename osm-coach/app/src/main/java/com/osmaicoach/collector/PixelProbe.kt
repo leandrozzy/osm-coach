@@ -1,5 +1,6 @@
 package com.osmaicoach.collector
 
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -99,18 +100,22 @@ object PixelProbe {
         }
         val minW = 0.011f * img.w
         val maxW = 0.024f * img.w
+        val pitch = 0.0195f * img.w
         val maxGap = 0.008f * img.w
         var best = ""
         var cur = StringBuilder()
         var prevEnd = Int.MIN_VALUE
+        fun flush() { if (cur.length > best.length) best = cur.toString(); cur = StringBuilder(); prevEnd = Int.MIN_VALUE }
         for (r in runs) {
-            val ok = r.n >= minW && r.n <= maxW
-            if (!ok) { if (cur.length > best.length) best = cur.toString(); cur = StringBuilder(); prevEnd = Int.MIN_VALUE; continue }
-            if (prevEnd != Int.MIN_VALUE && r.s - prevEnd > maxGap) { if (cur.length > best.length) best = cur.toString(); cur = StringBuilder() }
-            cur.append(r.c)
+            // bolinhas vizinhas da mesma cor se fundem numa corrida larga (V V = 2 círculos): divide pelo passo
+            val k = if (r.n > maxW) Math.round((r.n + 0.0035f * img.w) / pitch) else 1
+            val ok = if (r.n > maxW) k in 2..5 && abs(r.n - (k * pitch - 0.0035f * img.w)) <= 0.45f * pitch else r.n >= minW
+            if (!ok) { flush(); continue }
+            if (prevEnd != Int.MIN_VALUE && r.s - prevEnd > maxGap) flush()
+            repeat(k) { cur.append(r.c) }
             prevEnd = r.s + r.n
         }
-        if (cur.length > best.length) best = cur.toString()
+        flush()
         return best.takeIf { it.length in 1..5 }
     }
 

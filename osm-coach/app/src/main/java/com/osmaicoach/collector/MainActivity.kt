@@ -1495,7 +1495,9 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 readMine = Director.groups(f, now)[3].ok,
                 mounted = repo.dao.plan(slot, "tactic")?.at.let { ta -> ta != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() } == ta },
                 readAges = Director.groupAgesMs(f, now),
-                myForm = f[K.MY_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
+                // meu time: os últimos 5 jogos do Calendário do slot (menos se a competição é nova); sem calendário, as bolinhas lidas no Pré-jogo
+                myForm = all.filter { it.result in listOf("V", "E", "D") }.sortedBy { it.round ?: 0 }.takeLast(5).joinToString("") { it.result!! }.ifEmpty { null }
+                    ?: f[K.MY_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 rivalForm = f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
