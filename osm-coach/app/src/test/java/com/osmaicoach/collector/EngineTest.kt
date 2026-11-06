@@ -438,3 +438,12 @@ class FormDotsGrassTest {
         org.junit.Assert.assertEquals("VDVVD", PixelProbe.formDots(PixelProbe.Img(W, H, px), false))
     }
 }
+
+class TacticReadTest {
+    @org.junit.Test fun leOQueEstaMontadoNoOsm() {
+        val o = Fx.ocr(Fx.line("Formação: 4-3-3 A", 0.7f, 0.15f, 0.2f), Fx.line("Jogar pelas alas", 0.2f, 0.3f, 0.15f), Fx.line("Normal", 0.5f, 0.6f, 0.1f))
+        val j = Parsers.tacticRead(o)
+        org.junit.Assert.assertEquals("4-3-3 A", j.optString("formation"))
+        org.junit.Assert.assertEquals("Jogar pelas alas", j.optString("playStyle"))
+    }
+}

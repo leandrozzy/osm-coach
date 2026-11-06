@@ -119,6 +119,14 @@ class FramePipeline private constructor(private val ctx: Context) {
         val p = dao.plan(slot, "tactic")
         val j = p?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val f = repo.fieldMap(slot)
+        // o que o usuário realmente montou no OSM (pode diferir da gerada): é isso que o resultado do jogo vai ensinar
+        runCatching {
+            val mounted = Parsers.tacticRead(ocr)
+            if (mounted.length() > 0) {
+                val round = f[K.ROUND]?.value?.toIntOrNull()
+                dao.putPlan(PlanEntity(slot, "tacmounted", mounted.put("at", now).put("round", round ?: -1).toString(), now))
+            }
+        }
         val msg = if (p == null || j == null || !Director.tacticValid(j, p.at, f, now)) {
             "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
         } else {
@@ -168,7 +176,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val prev = if (sameGame) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
         val merged = cur.mapIndexed { i, v -> if (v.isNotBlank()) v else old?.get(i).orEmpty() }
         val diffs = ArrayList<String>()
-        if (old != null) for (i in keys.indices) if (cur[i].isNotBlank() && old[i].isNotBlank() && !cur[i].equals(old[i], ignoreCase = true)) diffs.add("${labels[i]} ${old[i]} → ${cur[i]}")
+        if (old != null) for (i in keys.indices) if (cur[i].isNotBlank() && old[i].isNotBlank() && !sameRivalValue(keys[i], cur[i], old[i])) diffs.add("${labels[i]} ${old[i]} → ${cur[i]}")
         if (prev == null || merged != prev || (inFirstPass.not() && oldJ?.optBoolean("fp", false) == true)) {
             val fresh = !sameGame
             repo.dao.putPlan(PlanEntity(slot, "rivalsnap", JSONObject().put("tag", tag).put("v", org.json.JSONArray(merged)).put("at", now)
@@ -180,6 +188,52 @@ class FramePipeline private constructor(private val ctx: Context) {
             old != null -> "✅ S$slot: o rival MANTEVE a tática ($head)."
             else -> "👀 S$slot: tática do rival lida ($head). Passe de novo perto do jogo para ver se ele muda."
         }
+    }
+
+    /** Mesmo valor apesar do ruído do OCR: formação/estilo canônicos, números ±4 (pressão/ritmo), texto por similaridade. */
+    private fun sameRivalValue(k: String, a: String, b: String): Boolean {
+        if (a.equals(b, ignoreCase = true)) return true
+        if (k == K.RIVAL_FORMATION || k == K.RIVAL_PLAN || k == K.RIVAL_MARKING || k == K.RIVAL_TACKLE) return !SigCompare.differs(k, a, b)
+        val na = a.filter { it.isDigit() }.toIntOrNull(); val nb = b.filter { it.isDigit() }.toIntOrNull()
+        if (na != null && nb != null && a.length <= 5 && b.length <= 5) return kotlin.math.abs(na - nb) <= 4
+        return Txt.sim(Txt.key(a), Txt.key(b)) >= 0.82
+    }
+
+    /** Uma linha curta por tela lida: o que foi lido e o que ainda falta (antes só Pré-jogo/Análise avisavam; Resultado e outras ficavam mudas). */
+    private val screenNoteAt = HashMap<Pair<Int, ScreenType>, Long>()
+    private suspend fun screenNote(slot: Int, type: ScreenType, ex: Extraction, now: Long) {
+        if (now - (screenNoteAt[slot to type] ?: 0L) < 12_000L) return
+        val f = repo.fieldMap(slot)
+        val txt: String? = when (type) {
+            ScreenType.RESULT -> {
+                val r = ex.matchReport ?: return
+                if (r.scoreHome == null || r.scoreAway == null) "S$slot: Resultado: não li o placar. Role a tela do jogo inteira (placar, estatísticas, notas)."
+                else {
+                    val rd = r.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull()
+                    val lacks = buildList {
+                        if (r.stats.size < 6) add("estatísticas (role até Zonas de ação)")
+                        if (r.ratingsHome.isEmpty() && r.ratingsAway.isEmpty()) add("notas dos jogadores")
+                    }
+                    "✅ S$slot: Resultado${rd?.let { " da J$it" } ?: ""} lido: ${r.scoreHome}-${r.scoreAway}" +
+                        (if (r.events.isNotEmpty()) " • ${r.events.size} eventos" else "") + " • ${r.stats.size} estatísticas • notas ${(r.ratingsHome.size + r.ratingsAway.size)}." +
+                        (if (lacks.isEmpty()) " O aprendizado das táticas foi atualizado." else " Falta: " + lacks.joinToString(", ") + ".")
+                }
+            }
+            ScreenType.CALENDAR -> {
+                if (ex.matches.size < 3) return
+                val all = repo.dao.matchesOf(slot)
+                val lag = FormRead.lag(all, f[K.ROUND_DONE]?.value?.toIntOrNull())
+                "✅ S$slot: Calendário lido: ${all.size} jogos, ${all.count { it.result != null }} com resultado." +
+                    (if (lag >= 2) " Faltam as últimas $lag rodadas: role até o fim." else " Em dia.")
+            }
+            ScreenType.SQUAD -> {
+                if (ex.players.size < 3 || ex.ownerTeam == null) return
+                "✅ S$slot: Plantel lido: ${ex.players.size} jogadores nesta tela" + (if (ex.fields.keys.any { it.startsWith("x.") }) " (com as forças por setor)" else " (role para ver o resto)") + "."
+            }
+            ScreenType.MARKET -> if (ex.listings.size >= 3) "✅ S$slot: Mercado lido: ${ex.listings.size} jogadores à venda." else null
+            else -> null
+        }
+        if (txt != null) { screenNoteAt[slot to type] = now; note(slot, txt, now) }
     }
 
     private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
@@ -202,7 +256,10 @@ class FramePipeline private constructor(private val ctx: Context) {
         delta?.let { why(slot, it.substringAfter(": ")) }
         if (gaps.isNotEmpty()) {
             why(slot, "faltam leituras: " + gaps.joinToString("; ") { it.first })
-            note(slot, (delta ?: "S$slot:") + " " + check + ". Tudo é obrigatório para gerar a tática.", now)
+            val missing = Director.groups(f, now).filter { !it.ok }
+            val read = when (type) { ScreenType.PREGAME -> "Pré-jogo"; ScreenType.REPORT -> "Análise do rival"; ScreenType.SQUAD -> "Plantel do rival"; else -> null }
+            note(slot, (delta ?: ("S$slot:" + (read?.let { " $it lido." } ?: ""))) + " Falta ler: " +
+                missing.joinToString(" • ") { it.name.substringBefore(" (") + " (" + it.missing.joinToString(", ").take(60) + ")" } + ". Veja o caminho em Hoje → Para fazer.", now)
             return
         }
         if (matchAt - now > Director.TACTIC_WINDOW_MS) {
@@ -588,6 +645,9 @@ class FramePipeline private constructor(private val ctx: Context) {
                 Txt.key(repo.fieldMap(asgSlot)[K.RIVAL_TEAM]?.value ?: "").let { rk -> rk.length >= 3 && Txt.sim(Txt.key(ex.ownerTeam), rk) >= 0.8 }
             if ((type == ScreenType.PREGAME || type == ScreenType.REPORT || rivalSquad) && asgSlot != null) {
                 try { autoTactic(asgSlot, now, type) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
+            }
+            if (asgSlot != null && type != ScreenType.PREGAME && type != ScreenType.REPORT && !rivalSquad) {
+                try { screenNote(asgSlot, type, ex, now) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }

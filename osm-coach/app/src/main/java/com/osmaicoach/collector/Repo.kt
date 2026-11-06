@@ -1572,6 +1572,30 @@ class Repo(private val ctx: Context) {
             val home = mineHome == mineSide
             return if (home) pr.first else pr.second
         }
+        // o que foi JOGADO de verdade: a tática montada no OSM (tela de Tática, mesma rodada) e a formação que o Resultado mostra.
+        // Sem isso, derrota com tática trocada à mão era atribuída à tática do app (e o aprendizado ficava errado).
+        runCatching {
+            if (!t.has("genFormation")) {
+                val gen = t.optString("formation")
+                val m = dao.plan(slot, "tacmounted")?.json?.let { org.json.JSONObject(it) }?.takeIf { it.optInt("round", -2) == round }
+                val resultForm = side("formacao", true)?.let { Formations.canonical(it) }
+                val usedForm = resultForm ?: m?.optString("formation")?.takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }
+                var deviated = usedForm != null && Formations.canonical(gen) != usedForm
+                if (m != null) {
+                    val ps = m.optString("playStyle").takeIf { it.isNotBlank() }
+                    if (ps != null && Osm.style(ps) != Osm.style(t.optString("playStyle"))) { t.put("genPlayStyle", t.optString("playStyle")); t.put("playStyle", ps); deviated = true }
+                    val tk = m.optString("tackle").takeIf { it.isNotBlank() }
+                    if (tk != null && Osm.tackle(tk) != Osm.tackle(t.optString("tackle"))) { t.put("genTackle", t.optString("tackle")); t.put("tackle", tk); deviated = true }
+                    val mk = m.optString("marking").takeIf { it.isNotBlank() }
+                    if (mk != null && Osm.marking(mk) != Osm.marking(t.optString("marking"))) { t.put("genMarking", t.optString("marking")); t.put("marking", mk); deviated = true }
+                }
+                if (usedForm != null && Formations.canonical(gen) != usedForm) { t.put("genFormation", gen); t.put("formation", usedForm) }
+                if (deviated) {
+                    t.put("deviated", true)
+                    learn(slot, "resultado", "Na J$round você jogou ${t.optString("formation")} • ${t.optString("playStyle")} (a do app era $gen): o aprendizado usa o que foi jogado.", now)
+                }
+            }
+        }
         side("posse de bola", true)?.let { v -> pct(v)?.let { t.put("myPossession", it) } }
         side("faltas", true)?.let { v -> pct(v)?.let { t.put("myFouls", it) } }
         side("remates", true)?.let { v -> pct(v)?.let { t.put("myShots", it) } }

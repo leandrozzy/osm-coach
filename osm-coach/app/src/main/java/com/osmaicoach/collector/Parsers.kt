@@ -564,6 +564,22 @@ object Parsers {
      * Confere a tela de tática do OSM (a que você está montando) com a tática gerada. Conservador: só reclama
      * de um item quando a tela mostra UM valor daquele tipo (lista aberta com todas as opções não conta).
      */
+    /** O que está MONTADO na tela de Tática do OSM agora (só o que aparece de forma inequívoca): formação, estilo, desarme, marcação. */
+    fun tacticRead(o: OcrResult): JSONObject {
+        val texts = o.lines.map { it.text.trim() }
+        fun only(options: List<String>): String? = options.filter { opt -> texts.any { Txt.norm(it) == Txt.norm(opt) } }.singleOrNull()
+        val forms = texts.mapNotNull { t -> RX_FORMATION.find(t)?.let { m ->
+            val v = m.groupValues[2].uppercase()
+            Formations.canonical(m.groupValues[1] + if (v.isNotEmpty()) " $v" else "")
+        } }.distinct()
+        val j = JSONObject()
+        forms.singleOrNull()?.let { j.put("formation", it) }
+        only(Osm.STYLES)?.let { j.put("playStyle", it) }
+        only(Osm.TACKLES)?.let { j.put("tackle", it) }
+        only(Osm.MARKING)?.let { j.put("marking", it) }
+        return j
+    }
+
     fun tacticCheck(o: OcrResult, plan: JSONObject, referee: String?): List<String> {
         val out = ArrayList<String>()
         val texts = o.lines.map { it.text.trim() }
