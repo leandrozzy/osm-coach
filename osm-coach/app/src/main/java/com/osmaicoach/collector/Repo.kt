@@ -377,7 +377,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -604,6 +604,10 @@ class Repo(private val ctx: Context) {
         val blocked = blockedPlayers(slot)
         val seen = ArrayList<String>()
         val arrived = ArrayList<String>()
+        // contratação só vale se o elenco já era conhecido de antes (>6 h): na 1ª leitura de um clube (rolando a lista) todo jogador "novo" parecia comprado
+        val squadBaseAt = planJson(slot, "squadbase").optLong("at", 0L)
+        if (squadBaseAt == 0L) dao.putPlan(PlanEntity(slot, "squadbase", JSONObject().put("at", now).toString(), now))
+        val squadBaseOld = squadBaseAt != 0L && now - squadBaseAt > 6 * 3600_000L
         val cm = LinkedHashMap<String, Pair<Int, Int>>()
         for (p in ex.players) {
             var key = Txt.key(p.name)
@@ -643,7 +647,7 @@ class Repo(private val ctx: Context) {
                 changed++
             }
             // jogador novo num elenco que já estava lido = contratação (a 1ª leitura do elenco não conta)
-            if (old == null && existing.size >= 14 && source != "ai" && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
+            if (old == null && existing.size >= 14 && squadBaseOld && source != "ai" && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
         }
         // bandeiras (coluna Nac.): agrupa assinaturas parecidas numa só (representante) e guarda por jogador no plano "nations"
         runCatching {
@@ -2009,7 +2013,7 @@ class Repo(private val ctx: Context) {
     suspend fun snapshotWeek(slot: Int, now: Long = System.currentTimeMillis()) {
         val f = fieldMap(slot)
         val mine = dao.playersOf(slot).filter { it.owner == "MY" }
-        val res = dao.tacticLogs(slot).mapNotNull { runCatching { org.json.JSONObject(it.json).optString("result") }.getOrNull() }
+        val res = dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { runCatching { org.json.JSONObject(it.json).optString("result") }.getOrNull() }
         val list = Weekly.parse(dao.plan(slot, "weekly")?.json)
         Weekly.upsert(
             list, Weekly.Week(
@@ -2027,7 +2031,8 @@ class Repo(private val ctx: Context) {
 
     /** Tudo o que a tela de Evolução mostra. */
     suspend fun progress(slot: Int, now: Long = System.currentTimeMillis()): ProgressData {
-        val logs = dao.tacticLogs(slot).mapNotNull { p -> runCatching { org.json.JSONObject(p.json).put("at", p.at) }.getOrNull() }
+        // só a competição atual (tlog_R*); as arquivadas ficam para o aprendizado
+        val logs = dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { p -> runCatching { org.json.JSONObject(p.json).put("at", p.at) }.getOrNull() }
         val mine = dao.playersOf(slot).filter { it.owner == "MY" }
         val weeks = Weekly.parse(dao.plan(slot, "weekly")?.json)
         return ProgressData(
