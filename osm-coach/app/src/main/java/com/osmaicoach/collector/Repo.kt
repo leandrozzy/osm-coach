@@ -576,11 +576,19 @@ class Repo(private val ctx: Context) {
             }
         }
         if (owner == "MY" && ot != null) mapped[K.TEAM] = Reading(ot, 0.8)
-        if (owner == "RIVAL") {
-            val st = ex.fields["x.strength"]?.value?.toIntOrNull() ?: f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
-            val v = mapped[K.RIVAL_VALUE]
-            if (v != null && st != null) {
-                Money.fixLostComma(v.value, st)?.let { mapped[K.RIVAL_VALUE] = Reading(it, 0.8) }
+        run {
+            // OCR perde a vírgula ("57,3M" vira "573M"): vale para o MEU elenco também (S2 mostrou 573M em vez de 57,3M)
+            val vk = if (owner == "MY") K.MY_VALUE else K.RIVAL_VALUE
+            val st = ex.fields["x.strength"]?.value?.toIntOrNull() ?: f[if (owner == "MY") K.MY_STRENGTH else K.RIVAL_STRENGTH]?.value?.toIntOrNull()
+            val v = mapped[vk]
+            if (v != null) {
+                var fixed = if (st != null) Money.fixLostComma(v.value, st) else null
+                if (fixed == null && owner == "MY") {
+                    // sem força: se o valor guardado é ~10× menor e só a vírgula explica, corrige
+                    val prev = Money.parse(f[vk]?.value); val now1 = Money.parse(v.value)
+                    if (prev != null && now1 != null && prev > 0 && now1 / prev in 7.0..13.0) fixed = Regex("^(\\d+)(\\d)M$").find(v.value.trim())?.let { it.groupValues[1] + "," + it.groupValues[2] + "M" }
+                }
+                fixed?.let { mapped[vk] = Reading(it, 0.8) }
             }
         }
         changed += putTracked(slot, mapped, source, "SQUAD", now)
