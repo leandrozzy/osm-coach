@@ -86,7 +86,8 @@ object Screens {
     fun roster(o: OcrResult): JSONObject {
         val t = Txt.norm(o.fullText)
         val empty = t.contains("nao tens qualquer jogador") || t.contains("nao tens nenhum jogador") || t.contains("nao tens jogadores") ||
-            t.contains("nenhum jogador")
+            t.contains("nenhum jogador") ||
+            t.contains("nao tem qualquer jogador") || t.contains("nao tem nenhum jogador") || t.contains("nao tem jogadores") || t.contains("sem jogadores suspensos")
         val lines = JSONArray()
         for (ln in o.lines.take(80)) {
             val s = ln.text.trim()

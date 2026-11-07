@@ -171,7 +171,7 @@ class CaptureService : AccessibilityService() {
         // Recentes já ao encerrar; depois uma foto da tela de Recentes acha onde está o cartão do OSM (a posição e a rotação
         // mudam com o launcher) e o arrasto sai dali. ~1 s no total.
         h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 100L)
-        h.postDelayed({
+        fun swipeRound(round: Int) {
             scope.launch {
                 var hit: OsmThumb.Hit? = null
                 var w = 0f; var hh = 0f
@@ -183,15 +183,17 @@ class CaptureService : AccessibilityService() {
                         shot.recycle()
                     }
                     if (hit != null) break
-                    delay(350L)
+                    delay(300L)
                 }
+                // 2ª rodada: se a miniatura já sumiu, o OSM fechou
+                if (round == 2 && hit == null) { Diag.log("Arrastar OSM: miniatura sumiu, OSM fechado"); withContext(Dispatchers.Main) { finish() }; return@launch }
                 withContext(Dispatchers.Main) {
                     try {
                         val p = android.graphics.Path()
                         if (hit != null) {
-                            Diag.log("Arrastar OSM: cartão achado em (${hit.cx.toInt()}, ${hit.cy.toInt()}) score ${"%.2f".format(hit.score)}")
-                            val sy = (hit.cy + hit.cardH * 0.2f).coerceIn(hh * 0.15f, hh * 0.8f)
-                            p.moveTo(hit.cx, sy); p.lineTo(hit.cx, hh * 0.03f)
+                            Diag.log("Arrastar OSM: cartão achado em (${hit.cx.toInt()}, ${hit.cy.toInt()}) score ${"%.2f".format(hit.score)} rodada $round")
+                            val sy = (hit.cy + hit.cardH * (if (round == 1) 0.2f else 0.1f)).coerceIn(hh * 0.15f, hh * 0.8f)
+                            p.moveTo(hit.cx, sy); p.lineTo(hit.cx, hh * 0.02f)
                         } else {
                             Diag.log("Arrastar OSM: não achei a miniatura do OSM nos Recentes (usando o centro)")
                             val dm = resources.displayMetrics
@@ -200,9 +202,12 @@ class CaptureService : AccessibilityService() {
                         }
                         val ok = dispatchGesture(
                             android.accessibilityservice.GestureDescription.Builder()
-                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, 170L)).build(),
+                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, if (round == 1) 170L else 110L)).build(),
                             object : GestureResultCallback() {
-                                override fun onCompleted(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto concluído"); h.postDelayed({ finish() }, 100L) }
+                                override fun onCompleted(g: android.accessibilityservice.GestureDescription?) {
+                                    Diag.log("Arrastar OSM: gesto concluído")
+                                    if (round == 1) h.postDelayed({ swipeRound(2) }, 300L) else h.postDelayed({ finish() }, 100L)
+                                }
                                 override fun onCancelled(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto CANCELADO pelo Android"); finish() }
                             }, null
                         )
@@ -214,8 +219,9 @@ class CaptureService : AccessibilityService() {
                     } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)); finish() }
                 }
             }
-        }, 650L)
-        h.postDelayed({ finish() }, 2600L)
+        }
+        h.postDelayed({ swipeRound(1) }, 650L)
+        h.postDelayed({ finish() }, 3600L)
     }
 
     fun notice(text: String) {

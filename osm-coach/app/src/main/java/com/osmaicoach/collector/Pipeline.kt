@@ -327,6 +327,13 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
             return
         }
+        // só a força (dos dois times) mudou e a tática ainda vale: a força oscila e não muda a decisão; não regera nem avisa (só atualiza a assinatura)
+        val onlyStrength = valid && oldParts != null && changed.isNotEmpty() && changed.all { it == K.RIVAL_STRENGTH || it == K.MY_STRENGTH }
+        if (onlyStrength) {
+            repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { old?.optLong("chk", 0L)?.takeIf { it > 0L }?.let { put("chk", it) } }.toString(), now))
+            if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
+            return
+        }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
         repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
         autoTacticAt[slot] = now
@@ -337,13 +344,17 @@ class FramePipeline private constructor(private val ctx: Context) {
             else -> "gerando a tática…"
         }
         CaptureService.instance?.notice("S$slot: $why1")
+        val before = repo.dao.plan(slot, "tactic")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         startGeneration(ctx, "tactic", slot)
         AppScope.scope.launch {
             var waited = 0
             while (GenState.running("tactic", slot) && waited < 150) { delay(1000L); waited++ }
             val job = GenState.get("tactic", slot)
             val j = repo.dao.plan(slot, "tactic")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-            val msg = if (job?.ok == true && j != null) {
+            val unchanged = valid && job?.ok == true && j != null && before != null && j.optString("formation") == before.optString("formation") &&
+                j.optString("playStyle") == before.optString("playStyle") && j.optString("tackle") == before.optString("tackle")
+            val msg = if (unchanged) "✅ S$slot: refeita e a tática continua a mesma: ${j!!.optString("formation")} • ${j.optString("playStyle")}."
+            else if (job?.ok == true && j != null) {
                 "✅ S$slot: tática pronta" + (if (rivalChanged) " (rival mudou)" else if (valid && dataChanged.isNotEmpty()) " (${dataChanged.joinToString(", ")} mudou)" else "") + ": ${j.optString("formation")} • ${j.optString("playStyle")}. Monte no OSM: toque em 📱 App ou abra a tela de Tática."
             } else "⚠ S$slot: não consegui gerar a tática sozinho" + (job?.error?.let { ": $it" } ?: "") + ". Gere no app."
             CaptureService.instance?.notice(msg)

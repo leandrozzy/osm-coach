@@ -377,7 +377,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -898,6 +898,8 @@ class Repo(private val ctx: Context) {
                     else if (!x.optBoolean("empty") && planJson(slot, "noappeal").length() > 0) dao.putPlan(PlanEntity(slot, "noappeal", "{}", now))
                 }
                 val kind = if (ex.type == ScreenType.DOCTOR) "injured" else "suspended"
+                // Advogado diz que não há ninguém: vermelhos antigos (nome que sumiu/OCR) não valem mais
+                if (ex.type == ScreenType.LAWYER && x.optBoolean("empty") && planJson(slot, "reds").length() > 0) dao.putPlan(PlanEntity(slot, "reds", "{}", now))
                 val mine = dao.playersOf(slot).filter { it.owner == "MY" }
                 val lines = x.optJSONArray("lines")
                 val names = ArrayList<String>()
@@ -1945,7 +1947,24 @@ class Repo(private val ctx: Context) {
      * Evolução do time: histórico de força/valor de quem foi lido (com a marca de treino), contratações no livro de
      * caixa (preço da lista de transferências quando o jogador foi visto lá) e o resumo da semana.
      */
+    /** Evolução (semanas, livro de caixa, histórico de treino) é do CLUBE: se o time do slot mudou, começa do zero (valores do clube antigo não se comparam). */
+    private suspend fun guardEvoTeam(slot: Int, now: Long) {
+        val team = fieldMap(slot)[K.TEAM]?.value?.takeIf { FieldMerge.known(it) } ?: return
+        val tag = dao.plan(slot, "evoteam")?.json
+        val weeks = Weekly.parse(dao.plan(slot, "weekly")?.json)
+        val cur = Money.parse(fieldMap(slot)[K.MY_VALUE]?.value)
+        // sem marca (versões antigas): só zera se o valor atual é incompatível com o histórico (outro clube)
+        val mixed = tag == null && cur != null && weeks.any { w -> w.value != null && w.value > 0 && (cur / w.value > 3.0 || w.value / cur > 3.0) }
+        val other = tag != null && Txt.sim(Txt.key(tag), Txt.key(team)) < 0.6
+        if (other || mixed) {
+            for (k in listOf("weekly", "ledger", "phist")) dao.deletePlan(slot, k)
+            learn(slot, "elenco", "Evolução reiniciada: o time do slot mudou para $team.", now)
+        }
+        if (tag == null || other) dao.putPlan(PlanEntity(slot, "evoteam", team, now))
+    }
+
     private suspend fun trackProgress(slot: Int, seen: List<String>, arrived: List<String>, now: Long) {
+        guardEvoTeam(slot, now)
         try {
             val mine = playersOf(slot).filter { it.owner == "MY" }
             val byKey = mine.associateBy { it.nameKey }

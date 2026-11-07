@@ -67,6 +67,11 @@ class ScreensTest {
         assertEquals(5 * 3600L + 40 * 60 + 23, r.getLong("endsIn"))
     }
 
+    @Test fun lawyerNobodySuspendedIsEmpty() {
+        val o = Fx.ocr(Fx.line("Advogado", 0.9f, 0.9f), Fx.line("Não tem qualquer jogador suspenso neste momento", 0.5f, 0.5f))
+        assertEquals(true, Screens.roster(o).getBoolean("empty"))
+    }
+
     @Test fun lawyerSaysNoAppealIsRead() {
         val o = Fx.ocr(Fx.line("Advogado", 0.9f, 0.9f), Fx.line("Lawrence Bailey", 0.9f, 0.95f), Fx.line("Sinto muito, não posso apresentar recurso!", 0.5f, 0.5f))
         assertEquals(true, Screens.roster(o).getBoolean("noAppeal"))
