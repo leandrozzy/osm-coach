@@ -258,6 +258,9 @@ object Weekly {
 
     /** Atualiza a semana atual (vale a leitura mais recente da semana). */
     fun upsert(list: MutableList<Week>, w: Week) {
+        // o valor do elenco não cai de um jeito brusco (compra/venda mexe pouco): queda >30% sobre o maior valor anterior = outro clube/competição ou leitura errada; recomeça daí
+        val prevMax = list.filter { it.id < w.id }.mapNotNull { it.value }.maxOrNull()
+        if (w.value != null && prevMax != null && w.value < prevMax * 0.7) list.removeAll { it.id < w.id }
         val i = list.indexOfFirst { it.id == w.id }
         if (i >= 0) list[i] = w.copy(
             value = w.value ?: list[i].value, cash = w.cash ?: list[i].cash, xi = w.xi ?: list[i].xi

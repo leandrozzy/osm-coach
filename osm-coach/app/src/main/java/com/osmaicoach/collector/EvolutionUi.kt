@@ -83,7 +83,7 @@ private fun ResultDot(r: String) {
 @Composable
 private fun WeekBars(weeks: List<Weekly.Week>) {
     val list = weeks.takeLast(6).filter { it.value != null }
-    if (list.size < 2) return
+    if (list.isEmpty()) return
     val vals = list.map { it.value!! }
     val mx = vals.max()
     val mn = vals.min() * 0.85
@@ -94,7 +94,7 @@ private fun WeekBars(weeks: List<Weekly.Week>) {
         Row(Modifier.fillMaxWidth().height(120.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
             list.forEachIndexed { i, w ->
                 val v = w.value!!
-                val f = if (mx - mn <= 0.0) 1f else ((v - mn) / (mx - mn)).toFloat().coerceIn(0.12f, 1f)
+                val f = if (mx <= 0.0) 1f else (v / mx).toFloat().coerceIn(0.08f, 1f)
                 val last = i == list.size - 1
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
                     Text(moneyText(v), fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = if (last) OsmColors.YELLOW else Color.White, maxLines = 1)

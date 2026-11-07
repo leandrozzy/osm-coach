@@ -210,7 +210,7 @@ class FramePipeline private constructor(private val ctx: Context) {
     }
 
     /** Tela que está sendo lida (várias rolagens): o resumo só sai quando você passa para outra tela. */
-    private class Pending(val slot: Int, val type: ScreenType, val round: Int?, val seen: MutableSet<String> = HashSet())
+    private class Pending(val slot: Int, val type: ScreenType, val round: Int?, val seen: MutableSet<String> = HashSet()) { var offAt = 0L }
     private var pending: Pending? = null
 
     /** Marca a tela como "em leitura" (o resumo é montado em `flushPending`, com tudo o que já foi guardado dela). */
@@ -253,23 +253,12 @@ class FramePipeline private constructor(private val ctx: Context) {
             ScreenType.CALENDAR -> {
                 val all = repo.dao.matchesOf(slot)
                 val lag = FormRead.lag(all, f[K.ROUND_DONE]?.value?.toIntOrNull())
-                val tot = all.size
-                if (pd.seen.size < minOf(tot, 12) ) "S$slot: Calendário: vi só ${pd.seen.size} rodadas nesta passada (guardadas: $tot). Role para ver o resto."
-                else "✅ S$slot: Calendário lido: $tot jogos, ${all.count { it.result != null }} com resultado." +
-                    (if (lag >= 2) " Faltam as últimas $lag rodadas: role até o fim." else " Em dia.")
+                "S$slot: Calendário: li ${pd.seen.size} rodadas nesta passada • ${all.count { it.result != null }} com resultado." +
+                    (if (lag >= 2) " Faltam as últimas $lag rodadas: role até o fim." else "")
             }
-            ScreenType.SQUAD -> {
-                val mine = repo.playersOf(slot).filter { it.owner == "MY" }
-                val n = pd.seen.size
-                // só afirma "lido" quando esta passada viu o elenco todo (≥18 e tudo o que está guardado); senão diz quanto viu
-                if (n >= 18 && n >= mine.size - 1) "✅ S$slot: Plantel lido: $n jogadores."
-                else "S$slot: Plantel: vi $n jogadores nesta passada" + (if (mine.size > n) " (há ${mine.size} guardados)" else "") + ". Role a lista até o fim para ler todos."
-            }
-            ScreenType.MARKET -> {
-                val n = pd.seen.size
-                val tot = repo.dao.listingsOf(slot).size
-                if (n >= tot && n >= 10) "✅ S$slot: Mercado lido: $n jogadores à venda." else "S$slot: Mercado: vi $n jogadores nesta passada (guardados: $tot). Role até o fim para ler todos."
-            }
+            // elenco e mercado são voláteis (compra/venda): nunca se compara com o que estava guardado; só diz o que foi visto agora
+            ScreenType.SQUAD -> "S$slot: Plantel: li ${pd.seen.size} jogadores nesta passada."
+            ScreenType.MARKET -> "S$slot: Mercado: li ${pd.seen.size} jogadores à venda nesta passada."
             ScreenType.TACTIC -> tacticSummary(slot, now)
             else -> null
         }
@@ -608,7 +597,14 @@ class FramePipeline private constructor(private val ctx: Context) {
                 return
             }
             // passou para outra tela: fecha o resumo da anterior (Resultado, Calendário, Plantel, Mercado, Tática)
-            if (pending != null && pending?.type != type) runCatching { flushPending() }
+            // (só depois de 6 s fora dela e numa tela claramente outra: telas intermediárias da rolagem não fecham a leitura)
+            pending?.let { pd ->
+                if (pd.type == type) pd.offAt = 0L
+                else if (type != ScreenType.OTHER_OSM) {
+                    if (pd.offAt == 0L) pd.offAt = now
+                    if (now - pd.offAt >= 6_000L) runCatching { flushPending() }
+                }
+            }
             Diag.valid.incrementAndGet()
             lastOsmAcceptedAt = now
 

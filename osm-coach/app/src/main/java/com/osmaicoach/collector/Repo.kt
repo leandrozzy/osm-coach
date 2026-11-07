@@ -413,6 +413,8 @@ class Repo(private val ctx: Context) {
     private suspend fun archiveSeason(slot: Int, now: Long, clearClub: Boolean) {
         val tag = "X" + (now / 1000)
         dao.deleteMatches(slot)
+        // competição nova = linha de base nova: semanas (valor do elenco) e livro de caixa do que acabou não valem
+        dao.deletePlan(slot, "weekly"); dao.deletePlan(slot, "ledger")
         for (p in dao.matchReports(slot)) {
             dao.putPlan(PlanEntity(slot, "old_" + tag + "_" + p.kind, p.json, p.at))
             dao.deletePlan(slot, p.kind)
@@ -637,7 +639,7 @@ class Repo(private val ctx: Context) {
                 posCode = if (aiOnly) old?.posCode ?: p.posCode else p.posCode ?: old?.posCode,
                 cat = if (aiOnly) old?.cat ?: p.cat else p.cat ?: old?.cat,
                 strength = if (aiOnly) old?.strength ?: p.strength else p.strength ?: old?.strength,
-                valueText = p.valueText ?: old?.valueText,
+                valueText = sanePlayerValue(old?.valueText, p.valueText),
                 training = p.training ?: old?.training,
                 forSale = p.forSale ?: old?.forSale,
                 updatedAt = now
@@ -1973,6 +1975,17 @@ class Repo(private val ctx: Context) {
             learn(slot, "elenco", "Evolução reiniciada: o time do slot mudou para $team.", now)
         }
         if (tag == null || other) dao.putPlan(PlanEntity(slot, "evoteam", team, now))
+    }
+
+    /** Valor de jogador que muda ~10× de uma leitura para outra é vírgula perdida/ganha pelo OCR ("7,6M" ↔ "76M"): mantém o anterior. */
+    private fun sanePlayerValue(old: String?, new: String?): String? {
+        if (new == null) return old
+        val o = Money.parse(old); val n = Money.parse(new)
+        if (o != null && n != null && o > 0 && n > 0) {
+            val r = n / o
+            if (r in 8.0..12.5 || r in 0.08..0.125) return old
+        }
+        return new
     }
 
     private suspend fun trackProgress(slot: Int, seen: List<String>, arrived: List<String>, now: Long) {
