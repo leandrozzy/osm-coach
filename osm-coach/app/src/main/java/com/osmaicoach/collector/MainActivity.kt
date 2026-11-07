@@ -2443,6 +2443,12 @@ private fun SavedScreens(tick: Int) {
     }
 }
 
+/** Duração curta "12 min" / "3 h 5 min" (evento atrasado). */
+private fun durShort(ms: Long): String {
+    val min = ms / 60000L
+    return if (min < 60) "${min} min" else "${min / 60} h ${min % 60} min"
+}
+
 /** Linha do tempo de tudo o que tem hora: jogos, fim de treino e obra do estádio, de todos os slots, por dia. */
 @Composable
 private fun AgendaTab() {
@@ -2450,44 +2456,48 @@ private fun AgendaTab() {
     val tick = rememberTick(1000L)
     val data = rememberLoaded(TodayCache.last, tick / 5, UiBus.version) { loadToday(ctx) }
     val now = System.currentTimeMillis()
-    class Ev(val at: Long, val icon: String, val title: String, val sub: String, val slot: Int, val col: Color)
+    class Ev(val at: Long, val icon: String, val title: String, val sub: String, val slot: Int, val col: Color, val todo: String, val path: String)
     val evs = ArrayList<Ev>()
+    val H = 3600000L
     for (s in data.slots) {
         val at = s.nextAt ?: continue
-        if (!s.ended && s.state == null && at > now - 3600000L) evs.add(Ev(at, "⚽", "Jogo" + (s.rival?.let { " vs $it" } ?: ""), s.title + (s.human?.let { if (it == "Sim") " • rival humano" else " • rival CPU" } ?: ""), s.slot, C.PRIMARY))
+        // jogo: fica até 6 h depois do horário (para ler o Resultado); some sozinho quando o resultado entra e a próxima rodada assume
+        if (!s.ended && s.state == null && at > now - 6 * H) evs.add(Ev(at, "⚽", "Jogo" + (s.rival?.let { " vs $it" } ?: ""), s.title + (s.human?.let { if (it == "Sim") " • rival humano" else " • rival CPU" } ?: ""), s.slot, C.PRIMARY,
+            "O jogo já começou: abra o Resultado para o app aprender com ele.", "S${s.slot}: Central → card do slot → Resultado do jogo (role a tela inteira)"))
     }
     for (w in data.work) {
-        for (seat in w.seats) seat.endAt?.takeIf { it > now - 3600000L }?.let {
-            evs.add(Ev(it, "🏋", "Treino ${Timers.roleLabel(seat.role)} termina", seat.name ?: "treinador ocupado", w.slot, C.OK))
+        // treino/obra: ficam até 36 h depois do fim, ou até você passar pela tela e o app registrar a troca (o horário muda)
+        for (seat in w.seats) seat.endAt?.takeIf { it > now - 36 * H }?.let {
+            evs.add(Ev(it, "🏋", "Treino ${Timers.roleLabel(seat.role)} termina", seat.name ?: "treinador ocupado", w.slot, C.OK,
+                "Terminou: colete o treino e ponha o próximo jogador (treinador parado é evolução perdida).", "S${w.slot}: Menu ☰ → Treino (${Timers.roleLabel(seat.role)})"))
         }
-        for (c in w.cards) c.endAt?.takeIf { it > now - 3600000L }?.let { evs.add(Ev(it, "🏟", "Obra do estádio termina: ${c.label}", "nível ${c.level ?: "?"}", w.slot, C.GOLD)) }
+        for (c in w.cards) c.endAt?.takeIf { it > now - 36 * H }?.let {
+            evs.add(Ev(it, "🏟", "Obra do estádio termina: ${c.label}", "nível ${c.level ?: "?"}", w.slot, C.GOLD,
+                "A obra terminou: colete e comece a próxima melhoria.", "S${w.slot}: Menu ☰ → Estádio (${c.label})"))
+        }
     }
     val sorted = evs.sortedBy { it.at }
+    val overdue = sorted.filter { it.at < now }
+    val upcoming = sorted.filter { it.at >= now }
     val dayFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
     val hourFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
     fun dayKey(ms: Long) = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date(ms))
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        PageTitle("📅", "Agenda", "${sorted.size} eventos")
-        Text("Tudo o que tem hora nos seus 4 slots, em ordem. Toque para abrir o slot.", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
-        if (sorted.isEmpty()) {
-            EmptyState("📅", "Nada agendado ainda", "Passe pelo Calendário, pelo Treinamento e pelo Estádio no OSM com a captura ligada: jogos, fim de treino e de obra aparecem aqui.")
-        }
-        var lastDay = ""
-        for (e in sorted) {
-            val dk = dayKey(e.at)
-            if (dk != lastDay) {
-                lastDay = dk
-                val today = dayKey(now); val tomorrow = dayKey(now + 86400000L)
-                val label = when (dk) { today -> "Hoje"; tomorrow -> "Amanhã"; else -> dayFmt.format(Date(e.at)).replaceFirstChar { it.uppercase() } }
-                Title(label)
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().clickable { }.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+    fun open(e: Ev) {
+        // abre o OSM e mostra o caminho por cima do jogo (o app não toca nos botões do OSM por você)
+        CaptureService.instance?.notice("⏰ " + e.path)
+        if (!openOsm(ctx)) android.widget.Toast.makeText(ctx, "Instale/abra o OSM. " + e.path, android.widget.Toast.LENGTH_LONG).show()
+        else android.widget.Toast.makeText(ctx, e.path, android.widget.Toast.LENGTH_LONG).show()
+    }
+    @Composable
+    fun EventRow(e: Ev, late: Boolean) {
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().then(if (late) Modifier.border(1.5.dp, C.WARN, RoundedCornerShape(18.dp)) else Modifier)
+                .clickable { open(e) }.padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.width(60.dp)) {
-                    Text(hourFmt.format(Date(e.at)), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = e.col)
-                    Text(if (e.at < now) "já passou" else countdownShort(e.at), fontSize = 12.sp, color = C.MUTED, maxLines = 1)
+                    Text(hourFmt.format(Date(e.at)), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = if (late) C.WARN else e.col)
+                    Text(if (late) "há ${durShort(now - e.at)}" else countdownShort(e.at), fontSize = 12.sp, color = if (late) C.WARN else C.MUTED, maxLines = 1)
                 }
                 Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(e.col.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) { Text(e.icon, fontSize = 19.sp) }
                 Spacer(Modifier.width(12.dp))
@@ -2497,6 +2507,32 @@ private fun AgendaTab() {
                 }
                 Text("S${e.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
             }
+            if (late) {
+                Text("👉 ${e.todo}", fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
+                Text("Toque para abrir o OSM • ${e.path.substringAfter(": ")}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
+        PageTitle("📅", "Agenda", "${sorted.size} eventos")
+        Text("Tudo o que tem hora nos seus 4 slots. Toque num evento para abrir o OSM com o caminho. O que passou do horário fica no topo até você fazer (some sozinho quando o app lê a tela).", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        if (sorted.isEmpty()) {
+            EmptyState("📅", "Nada agendado ainda", "Passe pelo Calendário, pelo Treinamento e pelo Estádio no OSM com a captura ligada: jogos, fim de treino e de obra aparecem aqui.")
+        }
+        if (overdue.isNotEmpty()) {
+            Title("⏰ Passou do horário — faça agora (${overdue.size})")
+            for (e in overdue) EventRow(e, true)
+        }
+        var lastDay = ""
+        for (e in upcoming) {
+            val dk = dayKey(e.at)
+            if (dk != lastDay) {
+                lastDay = dk
+                val today = dayKey(now); val tomorrow = dayKey(now + 86400000L)
+                val label = when (dk) { today -> "Hoje"; tomorrow -> "Amanhã"; else -> dayFmt.format(Date(e.at)).replaceFirstChar { it.uppercase() } }
+                Title(label)
+            }
+            EventRow(e, false)
         }
     }
 }
