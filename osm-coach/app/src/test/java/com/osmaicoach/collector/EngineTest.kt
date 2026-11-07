@@ -415,10 +415,13 @@ class FormReadTest {
         val cal = (1..12).map { m(it, if (it % 2 == 0) "D" else "V") }
         org.junit.Assert.assertEquals("EVVVD", FormRead.mine(cal, 19, "EVVVD"))
         org.junit.Assert.assertEquals(7, FormRead.lag(cal, 19))
-        // calendário em dia: os 5 últimos
+        // calendário em dia e com mais jogos que as bolinhas (leitura parcial: 3 bolinhas) → calendário
         val full = (1..19).map { m(it, if (it <= 14) "V" else "D") }
-        org.junit.Assert.assertEquals("VDDDDD".takeLast(5), FormRead.mine(full, 19, "EVVVD"))
+        org.junit.Assert.assertEquals("DDDDD", FormRead.mine(full, 19, "DDD"))
         org.junit.Assert.assertEquals(0, FormRead.lag(full, 19))
+        // bolinhas lidas no Pré-jogo da rodada 20 (E V V V D) + resultado novo da rodada 20 (V) → V V V D V
+        val after = (1..19).map { m(it, null) } + m(20, "V")
+        org.junit.Assert.assertEquals("VVVDV", FormRead.mine(after, 20, "EVVVD", 20))
         // competição nova: 2 jogos, calendário em dia → 2 bolinhas
         org.junit.Assert.assertEquals("VD", FormRead.mine(listOf(m(1, "V"), m(2, "D")), 2, "VD"))
         // sem nada do calendário usa as bolinhas
@@ -469,5 +472,16 @@ class CalibrationTest {
         )
         val ex = Parsers.pregame(o, null, 0L)
         org.junit.Assert.assertEquals("104", ex.fields[K.RIVAL_STRENGTH]?.value)
+    }
+}
+
+class FormKeepTest {
+    private fun m(r: Int, res: String?) = MatchEntity(2, "L$r", "Jornada $r", r, null, null, null, null, null, res, null, null, 0L)
+    @org.junit.Test fun soResultadosDepoisDaLeituraEntram() {
+        // bolinhas VVDV lidas no Pré-jogo da rodada 20; J18/J19 já estavam nelas; só J20 (E) é novo
+        val ms = listOf(m(18, "V"), m(19, "D"), m(20, "E"))
+        org.junit.Assert.assertEquals("VVDVE", FormRead.mine(ms, 20, "VVDV", 20))
+        // sem resultado novo, só as bolinhas
+        org.junit.Assert.assertEquals("VVDV", FormRead.mine(listOf(m(18, "V"), m(19, "D")), 19, "VVDV", 20))
     }
 }

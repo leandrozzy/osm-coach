@@ -1467,6 +1467,7 @@ private suspend fun loadToday(ctx: Context): TodayData {
             all, scoredRounds(repo.dao.matchReports(slot)), now, clk?.round ?: f[K.ROUND]?.value?.toIntOrNull(), clk?.at
         )
         val gameMissing = Completeness.gameMissing(f)
+        val fr = repo.dao.plan(slot, "formread")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val tplan = repo.dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
         val market = repo.dao.snapshots("TRANSFER", slot).isNotEmpty()
         val c = Completeness.compute(f, players, matches, market, f[K.ROUND_TOTAL]?.value?.toIntOrNull())
@@ -1497,8 +1498,10 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 mounted = repo.dao.plan(slot, "tactic")?.at.let { ta -> ta != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() } == ta },
                 readAges = Director.groupAgesMs(f, now),
                 // meu time: igual ao jogo (5 bolinhas do Pré-jogo) quando o Calendário está incompleto; Calendário em dia vale mais
-                myForm = FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), f[K.MY_FORM]?.takeIf { now - it.updatedAt <= 24L * 3_600_000L }?.value),
-                rivalForm = f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
+                myForm = FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
+                    ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }),
+                rivalForm = (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
+                    ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
@@ -2108,10 +2111,9 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(s.rivalForm) }
             }
         }
-        // três barras
+        // vitória / empate / derrota (previsão calibrada com os seus jogos) + dados lidos e tática
+        WdlBar(s.win, Modifier.padding(top = 12.dp))
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            val w = s.win
-            MetricBar("Chance de vitória", w?.win ?: 0, w?.let { "${it.win}%" } ?: "—", if ((w?.win ?: 0) >= 50) C.OK else C.GOLD, Modifier.weight(1f))
             MetricBar("Dados lidos", s.pct, "${s.pct}%", if (s.pct >= 80) C.OK else if (s.pct >= 50) C.GOLD else C.WARN, Modifier.weight(1f))
             MetricBar("Tática", if (s.tacticReady) 100 else if (s.tacticStale) 50 else 0, if (s.tacticReady) "pronta" else if (s.tacticStale) "reler rival" else "falta", if (s.tacticReady) C.OK else C.GOLD, Modifier.weight(1f))
         }
@@ -2128,6 +2130,30 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
 
 
 /** Bolinhas V/E/D como no pré-jogo do OSM: verde vitória, laranja empate, vermelho derrota. */
+/** Chance de vitória, empate e derrota: barra única proporcional e três colunas com o número grande. */
+@Composable
+private fun WdlBar(p: WinModel.Prob?, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        if (p == null) {
+            Text("Chance de vitória • aparece quando a tática é gerada", fontSize = 12.5.sp, color = C.MUTED)
+            return@Column
+        }
+        Row(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50))) {
+            for ((v, col) in listOf(p.win to C.WIN, p.draw to C.DRAW, p.loss to C.LOSS)) {
+                Box(Modifier.weight(v.toFloat().coerceAtLeast(1f)).fillMaxSize().background(col))
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            for ((label, v, col) in listOf(Triple("Vitória", p.win, C.WIN), Triple("Empate", p.draw, C.DRAW), Triple("Derrota", p.loss, C.LOSS))) {
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$v%", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = col)
+                    Text(label, fontSize = 11.5.sp, color = C.MUTED)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun FormDots(form: String?) {
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {

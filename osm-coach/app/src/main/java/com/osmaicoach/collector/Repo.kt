@@ -450,7 +450,8 @@ class Repo(private val ctx: Context) {
         else if (ex.fields[K.RIVAL_HUMAN]?.value == "Não" && (nickSeen || ex.fields.containsKey(K.RIVAL_LOGIN_BONUS) || humanHints(slot))) {
             ex.fields - K.RIVAL_HUMAN
         } else ex.fields
-        var n = putTracked(slot, readings, source, "PREGAME", now)
+        var n = putTracked(slot, readings - K.MY_FORM - K.RIVAL_FORM, source, "PREGAME", now)
+        runCatching { keepForms(slot, ex, now) }
         // Meu apelido não foi lido: o apelido sob o time que é o rival guardado ainda conta.
         if (!ex.fields.containsKey(K.RIVAL_NICK)) {
             val rk = (ex.fields[K.RIVAL_TEAM]?.value ?: fieldMap(slot)[K.RIVAL_TEAM]?.value)?.let { Txt.key(it) }
@@ -458,6 +459,31 @@ class Repo(private val ctx: Context) {
             if (nk != null && Evidence.plausibleNick(nk)) n += recordEvidence(slot, mapOf(K.RIVAL_NICK to nk.trim()), "PREGAME", now)
         }
         return n + confirmHuman(slot, planJson(slot, "evidence"), now) + estimateMid(slot, "rival.", now) + estimateMid(slot, "my.", now)
+    }
+
+    /**
+     * Forma (bolinhas) do Pré-jogo: a leitura mais COMPLETA do mesmo jogo vence (janela do app por cima, transição ou quadro
+     * parcial mostravam 1–2 bolinhas e apagavam as 5). Guarda a rodada da leitura: o jogo seguinte completa as bolinhas
+     * com os resultados novos (`FormRead.mine`). Plano `formread` {tag, round, my, rival, at}.
+     */
+    private suspend fun keepForms(slot: Int, ex: Extraction, now: Long) {
+        val my = ex.fields[K.MY_FORM]?.value?.takeIf { it.isNotEmpty() }
+        val rv = ex.fields[K.RIVAL_FORM]?.value?.takeIf { it.isNotEmpty() }
+        if (my == null && rv == null) return
+        val f = fieldMap(slot)
+        val round = f[K.ROUND]?.value?.toIntOrNull() ?: ex.roundRead ?: -1
+        val tag = "$round|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")
+        val old = planJson(slot, "formread")
+        val same = old.optString("tag") == tag
+        fun pick(k: String, nw: String?): String {
+            val o = if (same) old.optString(k) else ""
+            return if (nw != null && nw.length >= o.length) nw else o
+        }
+        val m = pick("my", my)
+        val r = pick("rival", rv)
+        dao.putPlan(PlanEntity(slot, "formread", JSONObject().put("tag", tag).put("round", round).put("my", m).put("rival", r).put("at", now).toString(), now))
+        if (m.isNotEmpty()) dao.putField(FieldEntity(slot, K.MY_FORM, m, 0.85, now, "ocr"))
+        if (r.isNotEmpty()) dao.putField(FieldEntity(slot, K.RIVAL_FORM, r, 0.85, now, "ocr"))
     }
 
     private suspend fun applySquad(slot: Int, ex: Extraction, source: String, now: Long): Int {

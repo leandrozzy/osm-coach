@@ -21,12 +21,23 @@ object FormRead {
         else -> cal.lastRound >= roundDone - 1
     }
 
-    fun mine(matches: List<MatchEntity>, roundDone: Int?, dots: String?): String? {
+    /**
+     * Bolinhas do jogo (lidas no Pré-jogo da rodada `dotsRound`) + os resultados dos jogos disputados DEPOIS dessa leitura,
+     * últimos 5: é o que o OSM mostraria agora. O Calendário só entra se estiver em dia e tiver MAIS jogos que as bolinhas
+     * (leitura parcial/ocultada).
+     */
+    fun mine(matches: List<MatchEntity>, roundDone: Int?, dots: String?, dotsRound: Int? = null): String? {
         val cal = fromMatches(matches)
+        val calOk = calendarCurrent(cal, roundDone)
+        val a = dots?.takeIf { it.isNotEmpty() }?.let { d ->
+            if (dotsRound == null || dotsRound <= 0) d
+            else (d + matches.filter { it.result in listOf("V", "E", "D") && (it.round ?: 0) >= dotsRound }.sortedBy { it.round }.joinToString("") { it.result!! }).takeLast(5)
+        }
         return when {
-            calendarCurrent(cal, roundDone) -> cal.form
-            !dots.isNullOrEmpty() -> dots
-            else -> cal.form.ifEmpty { null }
+            a != null && calOk && cal.form.length > a.length -> cal.form
+            a != null -> a
+            cal.form.isNotEmpty() -> cal.form
+            else -> null
         }
     }
 
