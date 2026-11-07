@@ -590,6 +590,27 @@ object Parsers {
         return j
     }
 
+    /** Diferenças entre o que está montado (`tacmounted`) e a tática gerada. */
+    fun tacticDiff(m: JSONObject, plan: JSONObject, referee: String?): List<String> {
+        val out = ArrayList<String>()
+        val wantF = Formations.canonical(plan.optString("formation"))
+        val gotF = m.optString("formation").takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }
+        if (gotF != null && wantF != null && gotF != wantF) out.add("Formação $gotF — a gerada é $wantF")
+        val st = m.optString("playStyle").takeIf { it.isNotBlank() }?.let { Osm.style(it) }
+        val wantSt = Osm.style(plan.optString("playStyle"))
+        if (st != null && wantSt != null && st != wantSt) out.add("Estilo $st — a gerada é $wantSt")
+        val tk = m.optString("tackle").takeIf { it.isNotBlank() }?.let { Osm.tackle(it) }
+        val wantTk = Osm.tackle(plan.optString("tackle"))
+        if (tk != null) {
+            if (tk !in Osm.allowedTackles(referee)) out.add("Desarme $tk com árbitro ${referee ?: "não lido"}: risco de expulsão")
+            else if (wantTk != null && tk != wantTk) out.add("Desarme $tk — a gerada é $wantTk")
+        }
+        val mk = m.optString("marking").takeIf { it.isNotBlank() }?.let { Osm.marking(it) }
+        val wantMk = Osm.marking(plan.optString("marking"))
+        if (mk != null && wantMk != null && mk != wantMk) out.add("Marcação $mk — a gerada é $wantMk")
+        return out
+    }
+
     fun tacticCheck(o: OcrResult, plan: JSONObject, referee: String?): List<String> {
         val out = ArrayList<String>()
         val texts = o.lines.map { it.text.trim() }

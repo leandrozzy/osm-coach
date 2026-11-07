@@ -114,34 +114,42 @@ class FramePipeline private constructor(private val ctx: Context) {
     private var lastCheck = ""
     private var lastCheckAt = 0L
 
-    /** Tela de tática do OSM aberta: compara com a tática gerada e avisa por cima do jogo o que está diferente. */
+    /**
+     * Tela de Tática do OSM: guarda o que está montado (juntando as rolagens da mesma rodada) e marca o resumo para o fim da
+     * leitura. O aviso (confere / difere) só sai quando você deixa a tela: antes avisava a cada rolagem, com a tática meio lida.
+     */
     private suspend fun checkTactic(slot: Int, ocr: OcrResult, now: Long) {
+        val f = repo.fieldMap(slot)
+        runCatching {
+            val seen = Parsers.tacticRead(ocr)
+            if (seen.length() > 0) {
+                val round = f[K.ROUND]?.value?.toIntOrNull() ?: -1
+                val old = dao.plan(slot, "tacmounted")?.json?.let { JSONObject(it) }?.takeIf { it.optInt("round", -2) == round && now - it.optLong("at") < 15 * 60_000L }
+                val merged = old ?: JSONObject()
+                for (k in seen.keys()) merged.put(k, seen.get(k))
+                dao.putPlan(PlanEntity(slot, "tacmounted", merged.put("at", now).put("round", round).toString(), now))
+            }
+        }
+        pending = Pending(slot, ScreenType.TACTIC, null)
+    }
+
+    /** O que está montado no OSM contra a tática gerada (formação, estilo, desarme com o árbitro, marcação). */
+    private suspend fun tacticSummary(slot: Int, now: Long): String? {
         val p = dao.plan(slot, "tactic")
         val j = p?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val f = repo.fieldMap(slot)
-        // o que o usuário realmente montou no OSM (pode diferir da gerada): é isso que o resultado do jogo vai ensinar
-        runCatching {
-            val mounted = Parsers.tacticRead(ocr)
-            if (mounted.length() > 0) {
-                val round = f[K.ROUND]?.value?.toIntOrNull()
-                dao.putPlan(PlanEntity(slot, "tacmounted", mounted.put("at", now).put("round", round ?: -1).toString(), now))
-            }
-        }
         val farAway = (f[K.MATCH_AT]?.value?.toLongOrNull() ?: 0L).let { it > 0 && it - now > Director.TACTIC_WINDOW_MS }
-        val msg = if (p == null || j == null || !Director.tacticValid(j, p.at, f, now)) {
+        if (p == null || j == null || !Director.tacticValid(j, p.at, f, now)) {
             // jogo longe (fora das 8 h): a tática ainda nem deveria existir, não cobra
-            if (farAway) "" else "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
-        } else {
-            val w = Parsers.tacticCheck(ocr, j, f[K.REFEREE]?.value)
-            // igual ao gerado: a tarefa "montar a tática" está feita
-            if (w.isEmpty()) dao.putPlan(PlanEntity(slot, "tacticdone", JSONObject().put("at", p.at).toString(), now))
-            if (w.isEmpty()) "" else "⚠ S$slot: " + w.joinToString(" • ")
+            return if (farAway) null else "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
         }
-        if (msg.isEmpty() || (msg == lastCheck && now - lastCheckAt < 20000L)) return
-        lastCheck = msg
-        lastCheckAt = now
-        Diag.log("Tática no OSM → $msg")
-        CaptureService.instance?.notice(msg)
+        val m = dao.plan(slot, "tacmounted")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+        val w = Parsers.tacticDiff(m, j, f[K.REFEREE]?.value)
+        if (w.isEmpty()) {
+            dao.putPlan(PlanEntity(slot, "tacticdone", JSONObject().put("at", p.at).toString(), now))
+            return "✅ S$slot: a tática montada no OSM confere com a gerada."
+        }
+        return "⚠ S$slot: " + w.joinToString(" • ")
     }
     private val autoTacticAt = HashMap<Int, Long>()
     private val lastNote = HashMap<Int, Pair<String, Long>>()
@@ -201,42 +209,60 @@ class FramePipeline private constructor(private val ctx: Context) {
         return Txt.sim(Txt.key(a), Txt.key(b)) >= 0.82
     }
 
-    /** Uma linha curta por tela lida: o que foi lido e o que ainda falta (antes só Pré-jogo/Análise avisavam; Resultado e outras ficavam mudas). */
-    private val screenNoteAt = HashMap<Pair<Int, ScreenType>, Long>()
-    private suspend fun screenNote(slot: Int, type: ScreenType, ex: Extraction, now: Long) {
-        if (now - (screenNoteAt[slot to type] ?: 0L) < 12_000L) return
+    /** Tela que está sendo lida (várias rolagens): o resumo só sai quando você passa para outra tela. */
+    private class Pending(val slot: Int, val type: ScreenType, val round: Int?)
+    private var pending: Pending? = null
+
+    /** Marca a tela como "em leitura" (o resumo é montado em `flushPending`, com tudo o que já foi guardado dela). */
+    private fun screenNote(slot: Int, type: ScreenType, ex: Extraction) {
+        when (type) {
+            ScreenType.RESULT -> ex.matchReport?.let { pending = Pending(slot, type, it.round) }
+            ScreenType.CALENDAR -> if (ex.matches.size >= 3) pending = Pending(slot, type, null)
+            ScreenType.SQUAD -> if (ex.players.size >= 3 && ex.ownerTeam != null) pending = Pending(slot, type, null)
+            ScreenType.MARKET -> if (ex.listings.size >= 3) pending = Pending(slot, type, null)
+            else -> {}
+        }
+    }
+
+    /** Emite o resumo da tela que você acabou de deixar (ou ao encerrar a captura). */
+    suspend fun flushPending() {
+        val pd = pending ?: return
+        pending = null
+        val now = System.currentTimeMillis()
+        val slot = pd.slot
         val f = repo.fieldMap(slot)
-        val txt: String? = when (type) {
+        val txt: String? = when (pd.type) {
             ScreenType.RESULT -> {
-                val r = ex.matchReport ?: return
-                // a tela de Resultado vem em várias rolagens: o aviso mostra o que JÁ está guardado deste jogo, não só o quadro atual
-                val rd = r.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull() ?: return
-                val j = repo.dao.plan(slot, "mr_R$rd")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
-                val st = j.optJSONObject("stats")?.length() ?: 0
-                val rt = (j.optJSONArray("rh")?.length() ?: 0) + (j.optJSONArray("ra")?.length() ?: 0)
-                val ev = j.optJSONArray("events")?.length() ?: 0
-                if (!j.has("sh")) null
+                val rd = pd.round ?: ResultCtx.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull()
+                val j = rd?.let { repo.dao.plan(slot, "mr_R$it")?.json?.let { s -> runCatching { JSONObject(s) }.getOrNull() } }
+                if (rd == null || j == null) null
                 else {
-                    val lacks = buildList { if (st < 7) add("estatísticas (role até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
-                    "✅ S$slot: Resultado da J$rd: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
-                        (if (lacks.isEmpty()) " Completo: o aprendizado das táticas foi atualizado." else " Falta ler: " + lacks.joinToString(", ") + ".")
+                    val st = j.optJSONObject("stats")?.length() ?: 0
+                    val rt = (j.optJSONArray("rh")?.length() ?: 0) + (j.optJSONArray("ra")?.length() ?: 0)
+                    val ev = j.optJSONArray("events")?.length() ?: 0
+                    if (!j.has("sh")) "S$slot: Resultado da J$rd: não li o placar. Abra de novo e role a tela inteira (placar, estatísticas, notas)."
+                    else {
+                        val lacks = buildList { if (st < 7) add("estatísticas (role até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
+                        "✅ S$slot: Resultado da J$rd lido: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
+                            (if (lacks.isEmpty()) " Completo: o aprendizado foi atualizado." else " Falta: " + lacks.joinToString(", ") + ".")
+                    }
                 }
             }
             ScreenType.CALENDAR -> {
-                if (ex.matches.size < 3) return
                 val all = repo.dao.matchesOf(slot)
                 val lag = FormRead.lag(all, f[K.ROUND_DONE]?.value?.toIntOrNull())
                 "✅ S$slot: Calendário lido: ${all.size} jogos, ${all.count { it.result != null }} com resultado." +
                     (if (lag >= 2) " Faltam as últimas $lag rodadas: role até o fim." else " Em dia.")
             }
             ScreenType.SQUAD -> {
-                if (ex.players.size < 3 || ex.ownerTeam == null) return
-                "✅ S$slot: Plantel lido: ${ex.players.size} jogadores nesta tela" + (if (ex.fields.keys.any { it.startsWith("x.") }) " (com as forças por setor)" else " (role para ver o resto)") + "."
+                val mine = repo.playersOf(slot).filter { it.owner == "MY" }
+                "✅ S$slot: Plantel lido: ${mine.size} jogadores guardados." + (if (mine.size < 18) " Role a lista inteira para ler todos." else "")
             }
-            ScreenType.MARKET -> if (ex.listings.size >= 3) "✅ S$slot: Mercado lido: ${ex.listings.size} jogadores à venda." else null
+            ScreenType.MARKET -> "✅ S$slot: Mercado lido: ${repo.dao.listingsOf(slot).size} jogadores à venda guardados."
+            ScreenType.TACTIC -> tacticSummary(slot, now)
             else -> null
         }
-        if (txt != null) { screenNoteAt[slot to type] = now; note(slot, txt, now) }
+        if (txt != null) { Diag.log("Resumo da tela → $txt"); note(slot, txt, now) }
     }
 
     private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
@@ -532,6 +558,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 return
             }
 
+            runCatching { OsmThumb.set(bmp) }   // miniatura do OSM para achar o cartão nos Recentes ao fechar
             val ocr = OcrEngine.read(bmp)
             lastProcessedAt = now
             Diag.ocr.incrementAndGet()
@@ -558,6 +585,8 @@ class FramePipeline private constructor(private val ctx: Context) {
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")
                 return
             }
+            // passou para outra tela: fecha o resumo da anterior (Resultado, Calendário, Plantel, Mercado, Tática)
+            if (pending != null && pending?.type != type) runCatching { flushPending() }
             Diag.valid.incrementAndGet()
             lastOsmAcceptedAt = now
 
@@ -653,7 +682,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 try { autoTactic(asgSlot, now, type) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
             }
             if (asgSlot != null && type != ScreenType.PREGAME && type != ScreenType.REPORT && !rivalSquad) {
-                try { screenNote(asgSlot, type, ex, now) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
+                try { screenNote(asgSlot, type, ex) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }

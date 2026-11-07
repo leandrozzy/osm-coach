@@ -168,32 +168,54 @@ class CaptureService : AccessibilityService() {
         val h = android.os.Handler(mainLooper)
         var finished = false
         fun finish() { if (!finished) { finished = true; done() } }
-        try {
-            packageManager.getLaunchIntentForPackage(OSM_PACKAGE)?.let { startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        } catch (e: Exception) { }
-        // rápido: Recentes já ao encerrar (o OSM costuma estar na frente) e o arrasto logo que o cartão aparece
-        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 120L)
+        // Recentes já ao encerrar; depois uma foto da tela de Recentes acha onde está o cartão do OSM (a posição e a rotação
+        // mudam com o launcher) e o arrasto sai dali. ~1 s no total.
+        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 100L)
         h.postDelayed({
-            try {
-                val dm = resources.displayMetrics
-                val w = dm.widthPixels.toFloat(); val hh = dm.heightPixels.toFloat()
-                val p = android.graphics.Path().apply { moveTo(w * 0.5f, hh * 0.58f); lineTo(w * 0.5f, hh * 0.05f) }
-                val ok = dispatchGesture(
-                    android.accessibilityservice.GestureDescription.Builder()
-                        .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, 200L)).build(),
-                    object : GestureResultCallback() {
-                        override fun onCompleted(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto concluído"); h.postDelayed({ finish() }, 120L) }
-                        override fun onCancelled(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto CANCELADO pelo Android"); finish() }
-                    }, null
-                )
-                if (!ok) {
-                    Diag.log("Arrastar OSM: o Android recusou o gesto (religue a Acessibilidade do OSM AI Coach)")
-                    Toast.makeText(applicationContext, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach.", Toast.LENGTH_LONG).show()
-                    finish()
+            scope.launch {
+                var hit: OsmThumb.Hit? = null
+                var w = 0f; var hh = 0f
+                for (attempt in 1..2) {
+                    val shot = try { takeShot() } catch (e: Exception) { null }
+                    if (shot != null) {
+                        w = shot.width.toFloat(); hh = shot.height.toFloat()
+                        hit = try { OsmThumb.find(shot) } catch (e: Exception) { null }
+                        shot.recycle()
+                    }
+                    if (hit != null) break
+                    delay(350L)
                 }
-            } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)); finish() }
-        }, 750L)
-        h.postDelayed({ finish() }, 1500L)
+                withContext(Dispatchers.Main) {
+                    try {
+                        val p = android.graphics.Path()
+                        if (hit != null) {
+                            Diag.log("Arrastar OSM: cartão achado em (${hit.cx.toInt()}, ${hit.cy.toInt()}) score ${"%.2f".format(hit.score)}")
+                            val sy = (hit.cy + hit.cardH * 0.2f).coerceIn(hh * 0.15f, hh * 0.8f)
+                            p.moveTo(hit.cx, sy); p.lineTo(hit.cx, hh * 0.03f)
+                        } else {
+                            Diag.log("Arrastar OSM: não achei a miniatura do OSM nos Recentes (usando o centro)")
+                            val dm = resources.displayMetrics
+                            w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat()
+                            p.moveTo(w * 0.5f, hh * 0.58f); p.lineTo(w * 0.5f, hh * 0.05f)
+                        }
+                        val ok = dispatchGesture(
+                            android.accessibilityservice.GestureDescription.Builder()
+                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, 170L)).build(),
+                            object : GestureResultCallback() {
+                                override fun onCompleted(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto concluído"); h.postDelayed({ finish() }, 100L) }
+                                override fun onCancelled(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto CANCELADO pelo Android"); finish() }
+                            }, null
+                        )
+                        if (!ok) {
+                            Diag.log("Arrastar OSM: o Android recusou o gesto (religue a Acessibilidade do OSM AI Coach)")
+                            Toast.makeText(applicationContext, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach.", Toast.LENGTH_LONG).show()
+                            finish()
+                        }
+                    } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)); finish() }
+                }
+            }
+        }, 650L)
+        h.postDelayed({ finish() }, 2600L)
     }
 
     fun notice(text: String) {

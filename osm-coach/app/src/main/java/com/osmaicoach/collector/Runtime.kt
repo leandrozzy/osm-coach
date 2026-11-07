@@ -299,6 +299,7 @@ object Control {
         prefs(ctx).edit().remove("active_session").apply()
         val s = dao.session(id)
         if (s != null) dao.putSession(s.copy(endedAt = System.currentTimeMillis(), state = "processing"))
+        runCatching { FramePipeline.get(ctx.applicationContext).flushPending() }
         runCatching { closeOsmAndOpenApp(ctx) }
         AppScope.scope.launch {
             try {

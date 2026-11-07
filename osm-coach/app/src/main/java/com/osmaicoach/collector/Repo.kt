@@ -301,6 +301,7 @@ class Repo(private val ctx: Context) {
             }
             r[K.COMP_TYPE] = Reading(type, 0.7)
             if (type == "Batalha") r[K.RIVAL_HUMAN] = Reading("Sim", 0.9)
+            changed += runCatching { detectSwitchFromHub(c, type, now) }.getOrDefault(0)
             changed += putFields(c.slot, r, "hub", now)
         }
         return changed
@@ -347,10 +348,61 @@ class Repo(private val ctx: Context) {
     private suspend fun newSeasonIfNeeded(slot: Int, roundRead: Int?, now: Long): Boolean {
         val r = roundRead ?: return false
         val done = Fixtures.lastDone(dao.matchesOf(slot), scoredRounds(slot)) ?: return false
-        if (r > 3 || done < r + 5) return false
-        archiveSeason(slot, now, false)
-        learn(slot, "temporada", "Competição nova (rodada $r depois da $done): calendário e relatórios antigos arquivados; o aprendizado das táticas continua.", now)
+        if (r <= 3 && done >= r + 5) {
+            archiveSeason(slot, now, false)
+            learn(slot, "temporada", "Competição nova (rodada $r depois da $done): calendário e relatórios antigos arquivados; o aprendizado das táticas continua.", now)
+            return true
+        }
+        // competição que entrou no meio (vídeo 07/11: nova liga já na rodada 5 e a anterior tinha 22 jogos): a rodada nunca volta
+        // na mesma competição, então rodada lida MENOR que as já jogadas = outra competição (2 leituras iguais para confirmar)
+        if (r < done) return confirmSwitch(slot, "R$r|$done", false, "rodada $r depois de $done jogadas", now, 2)
+        return false
+    }
+
+    /**
+     * Troca de competição/clube no slot, confirmada por leituras repetidas do mesmo sinal (o OCR pisca): arquiva a anterior
+     * (calendário, relatórios, tática, tabela, fim de temporada) e, se o clube mudou, apaga também elenco e leituras do clube
+     * e do rival antigos. O aprendizado das táticas (tlog) e as regras coladas do slot ficam.
+     */
+    private suspend fun confirmSwitch(slot: Int, sig: String, clearClub: Boolean, reason: String, now: Long, need: Int): Boolean {
+        val p = planJson(slot, "compswitch")
+        val n = if (p.optString("sig") == sig) p.optInt("n") + 1 else 1
+        if (n < need) {
+            dao.putPlan(PlanEntity(slot, "compswitch", org.json.JSONObject().put("sig", sig).put("n", n).toString(), now))
+            return false
+        }
+        dao.deletePlan(slot, "compswitch")
+        archiveSeason(slot, now, clearClub)
+        dao.deleteRivalFields(slot)
+        dao.deleteRivalPlayers(slot)
+        if (clearClub) {
+            for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger")) dao.deletePlan(slot, k)
+        }
+        learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
+        Diag.log("S$slot: competição nova detectada ($reason)")
         return true
+    }
+
+    /** A central mostra outro clube/competição/nº de rodadas neste slot: é uma competição nova (não só a rodada que avança). */
+    private suspend fun detectSwitchFromHub(c: HubCard, type: String, now: Long): Int {
+        val f = fieldMap(c.slot)
+        val oldTitle = f[K.HUB_TITLE]?.value
+        val oldComp = f[K.COMPETITION]?.value
+        val oldTotal = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
+        if (oldTitle == null && oldComp == null) return 0
+        val newTitle = Txt.titleCase(c.team)
+        val titleChanged = oldTitle != null && newTitle.isNotBlank() && Txt.sim(Txt.key(oldTitle), Txt.key(newTitle)) < 0.7
+        val compChanged = oldComp != null && c.subtitle.isNotBlank() && Txt.sim(Txt.key(oldComp), Txt.key(Txt.titleCase(c.subtitle))) < 0.6
+        val totalChanged = oldTotal != null && c.roundTotal != null && oldTotal != c.roundTotal
+        val strong = (titleChanged && (compChanged || totalChanged)) || (compChanged && totalChanged)
+        if (!strong && !titleChanged) {
+            dao.deletePlan(c.slot, "compswitch")
+            return 0
+        }
+        val sig = "H|" + Txt.key(newTitle) + "|" + Txt.key(c.subtitle) + "|" + c.roundTotal
+        // só apaga o clube quando o título E a competição/nº de rodadas mudaram; título sozinho (OCR repetido) só arquiva a competição
+        return if (confirmSwitch(c.slot, sig, titleChanged && strong, "a central mostra $newTitle (${c.subtitle})", now, if (strong) 2 else 3)) 1 else 0
     }
 
     /**
@@ -402,6 +454,14 @@ class Repo(private val ctx: Context) {
 
     private suspend fun applyPregame(slot: Int, ex: Extraction, source: String, now: Long): Int {
         // competição nova só pela jornada lida com segurança (OCR); a leitura da IA (0,65) pode errar a jornada
+        run {
+            // o time lido no pré-jogo é outro: clube novo neste slot (a leitura é confiável: nome grande do meu time)
+            val nt = ex.fields[K.TEAM]?.takeIf { it.conf >= 0.8 }?.value
+            val ot = dao.fieldsOf(slot).firstOrNull { it.fkey == K.TEAM }?.fvalue
+            if (nt != null && ot != null && Txt.sim(Txt.key(ot), Txt.key(nt)) < 0.6) {
+                runCatching { confirmSwitch(slot, "P|" + Txt.key(nt), true, "meu time agora é $nt", now, 2) }
+            }
+        }
         newSeasonIfNeeded(slot, ex.roundRead ?: ex.fields[K.ROUND]?.takeIf { it.conf >= 0.85 }?.value?.toIntOrNull(), now)
         // Jogo novo (outra rodada): o cadeado do jogo anterior não vale mais.
         val oldRound = dao.fieldsOf(slot).firstOrNull { it.fkey == K.ROUND }?.fvalue?.toIntOrNull()

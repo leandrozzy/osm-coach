@@ -485,3 +485,27 @@ class FormKeepTest {
         org.junit.Assert.assertEquals("VVDV", FormRead.mine(listOf(m(18, "V"), m(19, "D")), 19, "VVDV", 20))
     }
 }
+
+class OsmThumbMatchTest {
+    @org.junit.Test fun achaAMiniaturaGiradaNaTelaDeRecentes() {
+        val tw = OsmThumb.TW; val th = OsmThumb.TH
+        // miniatura paisagem com padrão (gradiente + blocos)
+        val t = IntArray(tw * th) { i -> val x = i % tw; val y = i / tw; (x * 3 + (if ((x / 8 + y / 7) % 2 == 0) 90 else 20)).coerceIn(0, 255) }
+        val sw = 108; val sh = 240
+        val s = IntArray(sw * sh) { 40 }
+        // cartão girado 90° anti-horária: 28 colunas ×64 linhas esticado para 44×(44*64/28≈100) em x=50, y=70
+        val w = 44; val h = 100; val ox = 50; val oy = 70
+        for (y in 0 until h) for (x in 0 until w) {
+            val u = x * 28 / w; val v = y * 64 / h          // mesma regra do detector (girada anti-horária)
+            s[(oy + y) * sw + ox + x] = t[u.coerceIn(0, th - 1) * tw + (tw - 1 - v).coerceIn(0, tw - 1)]
+        }
+        // outro cartão (aplicativo azul liso) não pode ganhar
+        for (y in 0 until 100) for (x in 0 until 20) s[(70 + y) * sw + 5 + x] = 60
+        val hit = OsmThumb.match(s, sw, sh, t, tw, th)
+        org.junit.Assert.assertNotNull(hit)
+        org.junit.Assert.assertTrue("cx ${hit!!.cx} cy ${hit.cy} score ${hit.score}", kotlin.math.abs(hit.cx - (ox + w / 2f)) < 8 && kotlin.math.abs(hit.cy - (oy + h / 2f)) < 12)
+        // tela sem a miniatura: nada convincente
+        val noise = IntArray(sw * sh) { (it * 7919 % 251) }
+        org.junit.Assert.assertNull(OsmThumb.match(noise, sw, sh, t, tw, th))
+    }
+}
