@@ -209,60 +209,106 @@ class FramePipeline private constructor(private val ctx: Context) {
         return Txt.sim(Txt.key(a), Txt.key(b)) >= 0.82
     }
 
-    /** Tela que está sendo lida (várias rolagens): o resumo só sai quando você passa para outra tela. */
-    private class Pending(val slot: Int, val type: ScreenType, val round: Int?, val seen: MutableSet<String> = HashSet()) { var offAt = 0L }
+    /**
+     * Tela em leitura (várias rolagens). A leitura só é "completa" quando o CONTEÚDO prova: a lista chegou ao fim (sobra espaço
+     * em branco embaixo da última linha) e as seções esperadas foram vistas. Nunca por tempo: você pode rolar rápido ou devagar.
+     */
+    private class Pending(val slot: Int, val type: ScreenType, val round: Int?, val seen: MutableSet<String> = HashSet()) {
+        var offFrames = 0
+        var endSeen = false
+        var done = false
+        val cats = HashSet<String>()
+        var ratings = false
+        var maxRound = 0
+    }
     private var pending: Pending? = null
+    private var reportPassAt = 0L
+    private var reportPrev: ScreenType? = null
 
-    /** Marca a tela como "em leitura" (o resumo é montado em `flushPending`, com tudo o que já foi guardado dela). */
-    private fun screenNote(slot: Int, type: ScreenType, ex: Extraction) {
-        // mantém a mesma "passada" enquanto você rola a lista: conta o que foi VISTO agora (não o que já estava guardado)
+    /** Chegou ao fim da lista: a última linha de conteúdo termina bem acima do rodapé da tela (há espaço em branco abaixo). */
+    private fun bottomReached(o: OcrResult): Boolean {
+        val ys = o.lines.filter { it.yc > 0.12f }.map { it.yc }
+        return ys.isNotEmpty() && ys.max() < 0.86f
+    }
+
+    private suspend fun screenNote(slot: Int, type: ScreenType, ex: Extraction, ocr: OcrResult) {
         val cur = pending?.takeIf { it.slot == slot && it.type == type }
-        when (type) {
-            ScreenType.RESULT -> ex.matchReport?.let { pending = Pending(slot, type, it.round) }
-            ScreenType.CALENDAR -> if (ex.matches.size >= 3) { pending = cur ?: Pending(slot, type, null); ex.matches.forEach { pending!!.seen.add("${it.round}") } }
-            ScreenType.SQUAD -> if (ex.players.size >= 3 && ex.ownerTeam != null) { pending = cur ?: Pending(slot, type, null); ex.players.forEach { pending!!.seen.add(Txt.key(it.name)) } }
-            ScreenType.MARKET -> if (ex.listings.size >= 3) { pending = cur ?: Pending(slot, type, null); ex.listings.forEach { pending!!.seen.add(Txt.key(it.name)) } }
-            else -> {}
+        val end = bottomReached(ocr)
+        val pd: Pending = when (type) {
+            ScreenType.RESULT -> {
+                val r = ex.matchReport ?: return
+                (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (end) it.endSeen = true } }
+            }
+            ScreenType.CALENDAR -> {
+                if (ex.matches.size < 3) return
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (end) pd.endSeen = true }
+            }
+            ScreenType.SQUAD -> {
+                if (ex.players.size < 3 || ex.ownerTeam == null) return
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.players.forEach { p -> pd.seen.add(Txt.key(p.name)); p.cat?.let { c -> pd.cats.add(c) } }; if (end && ex.players.any { it.cat == "GOL" }) pd.endSeen = true }
+            }
+            ScreenType.MARKET -> {
+                if (ex.listings.size < 3) return
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.listings.forEach { l -> pd.seen.add(Txt.key(l.name)) }; if (end) pd.endSeen = true }
+            }
+            else -> return
+        }
+        pd.offFrames = 0
+        if (!pd.done && complete(pd)) {
+            pd.done = true
+            summary(pd, true)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, System.currentTimeMillis()) }
         }
     }
 
-    /** Emite o resumo da tela que você acabou de deixar (ou ao encerrar a captura). */
-    suspend fun flushPending() {
-        val pd = pending ?: return
-        pending = null
-        val now = System.currentTimeMillis()
+    private suspend fun complete(pd: Pending): Boolean {
+        val f = repo.fieldMap(pd.slot)
+        return when (pd.type) {
+            ScreenType.SQUAD -> pd.endSeen && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
+            ScreenType.MARKET -> pd.endSeen
+            ScreenType.CALENDAR -> {
+                val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
+                if (total != null) pd.maxRound >= total else pd.endSeen
+            }
+            ScreenType.RESULT -> pd.endSeen && pd.ratings
+            else -> false
+        }
+    }
+
+    /** Resumo da tela. `complete`: a leitura chegou ao fim; senão diz que ficou incompleta (sem supor nada). */
+    private suspend fun summary(pd: Pending, complete: Boolean): String? {
         val slot = pd.slot
         val f = repo.fieldMap(slot)
-        val txt: String? = when (pd.type) {
+        val tail = if (complete) "" else " Leitura INCOMPLETA: role até o fim para concluir."
+        return when (pd.type) {
             ScreenType.RESULT -> {
                 val rd = pd.round ?: ResultCtx.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull()
                 val j = rd?.let { repo.dao.plan(slot, "mr_R$it")?.json?.let { s -> runCatching { JSONObject(s) }.getOrNull() } }
                 if (rd == null || j == null) null
+                else if (!j.has("sh")) "S$slot: Resultado da J$rd: não li o placar. Abra de novo e role a tela inteira (placar, estatísticas, notas)."
                 else {
                     val st = j.optJSONObject("stats")?.length() ?: 0
                     val rt = (j.optJSONArray("rh")?.length() ?: 0) + (j.optJSONArray("ra")?.length() ?: 0)
                     val ev = j.optJSONArray("events")?.length() ?: 0
-                    if (!j.has("sh")) "S$slot: Resultado da J$rd: não li o placar. Abra de novo e role a tela inteira (placar, estatísticas, notas)."
-                    else {
-                        val lacks = buildList { if (st < 7) add("estatísticas (role até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
-                        "✅ S$slot: Resultado da J$rd lido: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
-                            (if (lacks.isEmpty()) " Completo: o aprendizado foi atualizado." else " Falta: " + lacks.joinToString(", ") + ".")
-                    }
+                    val lacks = buildList { if (st < 7) add("estatísticas (até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
+                    (if (complete) "✅" else "⚠") + " S$slot: Resultado da J$rd: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
+                        (if (lacks.isEmpty()) (if (complete) " Completo: o aprendizado foi atualizado." else tail) else " Falta: " + lacks.joinToString(", ") + ".")
                 }
             }
-            ScreenType.CALENDAR -> {
-                val all = repo.dao.matchesOf(slot)
-                val lag = FormRead.lag(all, f[K.ROUND_DONE]?.value?.toIntOrNull())
-                "S$slot: Calendário: li ${pd.seen.size} rodadas nesta passada • ${all.count { it.result != null }} com resultado." +
-                    (if (lag >= 2) " Faltam as últimas $lag rodadas: role até o fim." else "")
-            }
-            // elenco e mercado são voláteis (compra/venda): nunca se compara com o que estava guardado; só diz o que foi visto agora
-            ScreenType.SQUAD -> "S$slot: Plantel: li ${pd.seen.size} jogadores nesta passada."
-            ScreenType.MARKET -> "S$slot: Mercado: li ${pd.seen.size} jogadores à venda nesta passada."
-            ScreenType.TACTIC -> tacticSummary(slot, now)
+            ScreenType.CALENDAR -> (if (complete) "✅ " else "⚠ ") + "S$slot: Calendário: li ${pd.seen.size} rodadas" + (if (complete) " (até a última)." else ".$tail")
+            ScreenType.SQUAD -> (if (complete) "✅ " else "⚠ ") + "S$slot: Plantel: li ${pd.seen.size} jogadores" + (if (complete) " (do goleiro ao ataque, até o fim da lista)." else ".$tail")
+            ScreenType.MARKET -> (if (complete) "✅ " else "⚠ ") + "S$slot: Mercado: li ${pd.seen.size} jogadores à venda" + (if (complete) " (até o fim da lista)." else ".$tail")
+            ScreenType.TACTIC -> tacticSummary(slot, System.currentTimeMillis())
             else -> null
         }
-        if (txt != null) { Diag.log("Resumo da tela → $txt"); note(slot, txt, now) }
+    }
+
+    /** Você deixou a tela (ou encerrou): se a leitura não chegou ao fim, avisa que ficou incompleta; se já foi concluída, não repete. */
+    suspend fun flushPending() {
+        val pd = pending ?: return
+        pending = null
+        if (pd.done) return
+        val txt = summary(pd, false)
+        if (txt != null) { Diag.log("Resumo da tela → $txt"); note(pd.slot, txt, System.currentTimeMillis()) }
     }
 
     private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
@@ -279,7 +325,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         // "Mudou/manteve" só logo depois de LER a tela de Análise (últimos 90 s); em qualquer outra passada vale o checklist.
         val secret = SecretTraining.on(f)
         // a Análise tem 2 telas (1ª: formação; 2ª: estilo, marcação…): só compara quando as DUAS foram lidas nesta passada (antes cada tela avisava sozinha: "mudou", "manteve", "mudou" em 6 s)
-        val justRead = type == ScreenType.REPORT && listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN).all { k -> f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= 150_000L } == true }
+        val justRead = type == ScreenType.REPORT && listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN).all { k -> f[k]?.let { FieldMerge.known(it.value) && it.updatedAt >= reportPassAt } == true }
         val gaps = Director.tacticGaps(f, now)
         val check = Director.checklist(f, now)
         val delta = if (justRead) runCatching { rivalDelta(slot, f, now) }.getOrNull() else null
@@ -597,14 +643,13 @@ class FramePipeline private constructor(private val ctx: Context) {
                 return
             }
             // passou para outra tela: fecha o resumo da anterior (Resultado, Calendário, Plantel, Mercado, Tática)
-            // (só depois de 6 s fora dela e numa tela claramente outra: telas intermediárias da rolagem não fecham a leitura)
+            // saiu da tela em leitura: 2 quadros seguidos de outra tela (não por tempo; telas intermediárias da rolagem, OTHER_OSM, não contam)
             pending?.let { pd ->
-                if (pd.type == type) pd.offAt = 0L
-                else if (type != ScreenType.OTHER_OSM) {
-                    if (pd.offAt == 0L) pd.offAt = now
-                    if (now - pd.offAt >= 6_000L) runCatching { flushPending() }
-                }
+                if (pd.type == type) pd.offFrames = 0
+                else if (type != ScreenType.OTHER_OSM) { pd.offFrames++; if (pd.offFrames >= 2) runCatching { flushPending() } }
             }
+            // início da passada pela Análise do rival: as 2 telas dela precisam ser lidas DEPOIS daqui (conteúdo, não relógio)
+            if (type != ScreenType.OTHER_OSM) { if (type == ScreenType.REPORT && reportPrev != ScreenType.REPORT) reportPassAt = now; reportPrev = type }
             Diag.valid.incrementAndGet()
             lastOsmAcceptedAt = now
 
@@ -700,7 +745,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 try { autoTactic(asgSlot, now, type) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
             }
             if (asgSlot != null && type != ScreenType.PREGAME && type != ScreenType.REPORT && !rivalSquad) {
-                try { screenNote(asgSlot, type, ex) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
+                try { screenNote(asgSlot, type, ex, ocr) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }
