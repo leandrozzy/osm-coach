@@ -102,3 +102,13 @@ class CoinsTest {
         assertEquals(1, c.getJSONArray("tips").length())
     }
 }
+
+class ReadSummaryTest {
+    private fun sc(type: String, ex: Int) = ScreenEntity(0, "s", 0L, type, 1, 1.0, "h", null, 10, ex, "done", "")
+    @Test fun resumoMostraTelasLidasDeVerdade() {
+        val t = Processor.readSummary(listOf(sc("PREGAME", 2), sc("PREGAME", 0), sc("RESULT", 5), sc("OTHER_OSM", 0)))!!
+        assertTrue(t, t.startsWith("Telas lidas nesta sessão: 4"))
+        assertTrue(t.contains("Pré-jogo 2") && t.contains("Resultado 1") && t.contains("7 campo(s)"))
+        assertNull(Processor.readSummary(emptyList()))
+    }
+}

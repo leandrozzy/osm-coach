@@ -1330,6 +1330,20 @@ object Processor {
         return ReadResult("done", changed, "IA aplicou $changed campos")
     }
 
+    private val TYPE_NAMES = mapOf(
+        "PREGAME" to "Pré-jogo", "REPORT" to "Análise", "SQUAD" to "Elenco", "RESULT" to "Resultado", "CALENDAR" to "Calendário",
+        "MARKET" to "Mercado", "TRAINING" to "Treino", "TACTIC" to "Tática", "HUB" to "Central", "STADIUM" to "Estádio", "PREP" to "Preparação"
+    )
+
+    /** "Telas lidas nesta sessão: 83 (Pré-jogo 30, Elenco 12…) • campos novos: 41" (antes dizia só "reprocessadas: 0", que não é o que foi lido). */
+    internal fun readSummary(screens: List<ScreenEntity>): String? {
+        if (screens.isEmpty()) return null
+        val by = screens.groupingBy { TYPE_NAMES[it.type] ?: "outras" }.eachCount().entries.sortedByDescending { it.value }
+        val top = by.take(5).joinToString(", ") { "${it.key} ${it.value}" }
+        val fields = screens.sumOf { it.extracted }
+        return "Telas lidas nesta sessão: ${screens.size} ($top${if (by.size > 5) "…" else ""})" + (if (fields > 0) " • $fields campo(s) gravado(s)" else "")
+    }
+
     suspend fun run(ctx: Context, sessionId: String) {
         val repo = Repo(ctx)
         val dao = repo.dao
@@ -1380,7 +1394,8 @@ object Processor {
         } else 0
         ProcessState.finish(
             listOfNotNull(
-                "Telas reprocessadas: $fixed",
+                readSummary(dao.screensOfSession(sessionId)),
+                if (fixed > 0) "$fixed tela(s) re-lida(s) depois de reconhecer o slot" else null,
                 if (pending.isEmpty()) "IA: nada pendente" else "IA: ${pending.size - waiting} lida(s), $applied campo(s) novo(s)",
                 if (dropped > 0) "$dropped tela(s) que não precisavam mais da IA saíram da fila" else null,
                 if (noData > 0) "$noData tela(s) sem relatório do rival" else null,
