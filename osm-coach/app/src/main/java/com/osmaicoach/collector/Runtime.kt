@@ -261,8 +261,28 @@ object Control {
     }
 
     /** Encerra a captura imediatamente e processa o que ficou pendente em segundo plano. */
+    /**
+     * Ao encerrar: traz ESTE app para a frente e, em seguida, fecha o OSM (o Android só deixa matar app que está em segundo
+     * plano, por isso a ordem). Ajuste "close_osm" (padrão ligado). Quem chama: botão da bolha, botões do app.
+     */
+    private fun closeOsmAndOpenApp(ctx: Context) {
+        if (Settings.get(ctx, "close_osm", "1") != "1") return
+        val app = ctx.applicationContext
+        try {
+            app.startActivity(android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        } catch (e: Exception) { Diag.log("Fechar OSM: não consegui abrir o app (${e.message})"); return }
+        AppScope.scope.launch {
+            kotlinx.coroutines.delay(1800L)   // o OSM precisa ir para o fundo antes
+            try {
+                (app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).killBackgroundProcesses(OSM_PACKAGE)
+                Diag.log("OSM fechado ao encerrar a leitura")
+            } catch (e: Exception) { Diag.log("Fechar OSM: " + (e.message ?: e.javaClass.simpleName)) }
+        }
+    }
+
     suspend fun end(ctx: Context) {
         val id = activeSession(ctx) ?: return
+        runCatching { closeOsmAndOpenApp(ctx) }
         val dao = CoachDb.get(ctx).dao()
         prefs(ctx).edit().remove("active_session").apply()
         val s = dao.session(id)

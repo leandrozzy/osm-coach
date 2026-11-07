@@ -5658,6 +5658,14 @@ private fun SettingsTab() {
             }
             Text("Desligado (padrão): o app nunca sugere gastar Boss Coins; só dicas que usam dinheiro comum ($).", fontSize = 13.sp, color = C.MUTED)
         }
+        var closeOsm by remember { mutableStateOf(Settings.get(ctx, "close_osm", "1") == "1") }
+        Fold("⏹", "Ao encerrar a leitura", if (closeOsm) "fecha o OSM" else "só encerra") {
+            SwitchRow("Fechar o OSM e abrir este app", closeOsm) {
+                closeOsm = it
+                Settings.put(ctx, "close_osm", if (it) "1" else "0")
+            }
+            Text("O app vem para a frente e, 2 s depois, pede ao Android para encerrar o OSM. Funciona porque o OSM já está em segundo plano; o próximo acesso ao jogo abre do zero (um pouco mais lento). Não perde nada: o OSM salva no servidor.", fontSize = 13.sp, color = C.MUTED)
+        }
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }
         var metaMsg by remember { mutableStateOf("") }
