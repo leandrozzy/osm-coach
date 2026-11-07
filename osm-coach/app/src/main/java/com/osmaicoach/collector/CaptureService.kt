@@ -157,6 +157,33 @@ class CaptureService : AccessibilityService() {
     private var hintType = ""
 
     /** Aviso curto por cima do OSM (ex.: tática montada diferente da gerada). Some sozinho. */
+    /** O serviço foi (re)ligado com a capacidade de gestos (config nova)? */
+    fun canSwipeAway(): Boolean = (serviceInfo?.capabilities ?: 0) and android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0
+
+    /**
+     * Fecha o OSM como na mão: traz o OSM para a frente, abre os Recentes (o cartão do OSM fica no centro) e arrasta
+     * para cima. Chama `done` no fim (o app abre depois). Cada passo tem uma pausa para a animação do Android.
+     */
+    fun swipeAwayOsm(done: () -> Unit) {
+        val h = android.os.Handler(mainLooper)
+        try {
+            packageManager.getLaunchIntentForPackage(OSM_PACKAGE)?.let { startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } catch (e: Exception) { }
+        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 1300L)
+        h.postDelayed({
+            try {
+                val dm = resources.displayMetrics
+                val w = dm.widthPixels.toFloat(); val hh = dm.heightPixels.toFloat()
+                val p = android.graphics.Path().apply { moveTo(w * 0.5f, hh * 0.62f); lineTo(w * 0.5f, hh * 0.06f) }
+                dispatchGesture(
+                    android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, 240L)).build(), null, null
+                )
+            } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)) }
+        }, 2600L)
+        h.postDelayed({ done() }, 3600L)
+    }
+
     fun notice(text: String) {
         mainExecutor.execute {
             val tv = noticeView ?: return@execute

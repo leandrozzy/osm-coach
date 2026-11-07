@@ -262,31 +262,42 @@ object Control {
 
     /** Encerra a captura imediatamente e processa o que ficou pendente em segundo plano. */
     /**
-     * Ao encerrar: traz ESTE app para a frente e, em seguida, fecha o OSM (o Android só deixa matar app que está em segundo
-     * plano, por isso a ordem). Ajuste "close_osm" (padrão ligado). Quem chama: botão da bolha, botões do app.
+     * Ao encerrar: fecha o OSM como você faz à mão (Recentes → arrastar o cartão do OSM para cima) e só então abre este app.
+     * `killBackgroundProcesses` sozinho NÃO fechava (testado no aparelho 07/11). Precisa do serviço de acessibilidade com
+     * gestos; sem ele, cai no jeito antigo (abre o app e pede ao Android para matar o OSM em segundo plano).
+     * Ajuste "close_osm" (padrão ligado).
      */
     private fun closeOsmAndOpenApp(ctx: Context) {
         if (Settings.get(ctx, "close_osm", "1") != "1") return
         val app = ctx.applicationContext
-        try {
-            app.startActivity(android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
-        } catch (e: Exception) { Diag.log("Fechar OSM: não consegui abrir o app (${e.message})"); return }
-        AppScope.scope.launch {
-            kotlinx.coroutines.delay(1800L)   // o OSM precisa ir para o fundo antes
+        fun openApp() {
             try {
-                (app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).killBackgroundProcesses(OSM_PACKAGE)
-                Diag.log("OSM fechado ao encerrar a leitura")
-            } catch (e: Exception) { Diag.log("Fechar OSM: " + (e.message ?: e.javaClass.simpleName)) }
+                app.startActivity(android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            } catch (e: Exception) { Diag.log("Fechar OSM: não consegui abrir o app (${e.message})") }
+        }
+        fun killBg() {
+            try { (app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).killBackgroundProcesses(OSM_PACKAGE) } catch (e: Exception) { }
+        }
+        val svc = CaptureService.instance
+        if (svc != null && svc.canSwipeAway()) {
+            svc.swipeAwayOsm {
+                openApp()
+                AppScope.scope.launch { kotlinx.coroutines.delay(1500L); killBg() }
+                Diag.log("OSM fechado pelos Recentes ao encerrar a leitura")
+            }
+        } else {
+            openApp()
+            AppScope.scope.launch { kotlinx.coroutines.delay(1800L); killBg(); Diag.log("OSM: kill em segundo plano (sem gestos de acessibilidade)") }
         }
     }
 
     suspend fun end(ctx: Context) {
         val id = activeSession(ctx) ?: return
-        runCatching { closeOsmAndOpenApp(ctx) }
         val dao = CoachDb.get(ctx).dao()
         prefs(ctx).edit().remove("active_session").apply()
         val s = dao.session(id)
         if (s != null) dao.putSession(s.copy(endedAt = System.currentTimeMillis(), state = "processing"))
+        runCatching { closeOsmAndOpenApp(ctx) }
         AppScope.scope.launch {
             try {
                 Processor.run(ctx.applicationContext, id)

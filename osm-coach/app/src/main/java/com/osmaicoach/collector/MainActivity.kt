@@ -5664,7 +5664,7 @@ private fun SettingsTab() {
                 closeOsm = it
                 Settings.put(ctx, "close_osm", if (it) "1" else "0")
             }
-            Text("O app vem para a frente e, 2 s depois, pede ao Android para encerrar o OSM. Funciona porque o OSM já está em segundo plano; o próximo acesso ao jogo abre do zero (um pouco mais lento). Não perde nada: o OSM salva no servidor.", fontSize = 13.sp, color = C.MUTED)
+            Text("O app abre os Recentes e arrasta o OSM para cima (como você faz), depois abre este app. Leva uns 4 s: não toque na tela. Precisa do serviço de acessibilidade com gestos: depois de atualizar o app, DESLIGUE e LIGUE de novo o OSM AI Coach em Acessibilidade. O próximo acesso ao OSM abre do zero (o jogo salva no servidor).", fontSize = 13.sp, color = C.MUTED)
         }
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }

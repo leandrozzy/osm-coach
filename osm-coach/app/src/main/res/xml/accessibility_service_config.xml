@@ -6,4 +6,5 @@
     android:packageNames="com.gamebasics.osm"
     android:canRetrieveWindowContent="false"
     android:canTakeScreenshot="true"
+    android:canPerformGestures="true"
     android:description="@string/service_description" />
