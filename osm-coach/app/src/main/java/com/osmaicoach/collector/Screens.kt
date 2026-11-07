@@ -101,7 +101,9 @@ object Screens {
             t.contains("nao podes recorrer") || t.contains("nao pode recorrer")
         // cartão de UM jogador em tratamento (nome, idade, lesão, cronômetro): não é a lista toda
         val card = t.contains("tratamento em curso") && t.contains("idade") && !t.contains("tratar imediatamente")
-        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("card", card).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
+        // o número dentro da cruz vermelha = tratamentos que ainda faltam para esse jogador (ex.: 3)
+        val cross = if (card) o.tokens.firstOrNull { t -> t.xc in 0.66f..0.84f && t.yc in 0.40f..0.60f && t.text.trim().length == 1 && t.text.trim()[0] in '1'..'9' }?.text?.trim()?.toIntOrNull() else null
+        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("card", card).put("cross", cross ?: JSONObject.NULL).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
     }
 
     // ------------------------------------------------------------ especialistas

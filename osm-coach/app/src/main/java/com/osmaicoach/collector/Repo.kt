@@ -932,7 +932,11 @@ class Repo(private val ctx: Context) {
                 // quem está em tratamento sai da lista de lesionados quando o cronômetro acaba (curado)
                 if (ex.type == ScreenType.DOCTOR && x.optBoolean("card") && !x.isNull("endsIn")) {
                     val cardNames = lines?.let { l -> (0 until l.length()).mapNotNull { i -> mine.firstOrNull { nameMatches(l.optString(i), it) }?.nameKey } }.orEmpty().distinct()
-                    if (cardNames.isNotEmpty()) dao.putPlan(PlanEntity(slot, "treating", JSONObject().put("names", JSONArray(cardNames)).put("until", now + x.optLong("endsIn") * 1000L).toString(), now))
+                    if (cardNames.isNotEmpty()) {
+                        val left = if (x.isNull("cross")) null else x.optInt("cross")
+                        dao.putPlan(PlanEntity(slot, "treating", JSONObject().put("names", JSONArray(cardNames)).put("until", now + x.optLong("endsIn") * 1000L).apply { left?.let { put("left", it) } }.toString(), now))
+                        if (left != null) learn(slot, "elenco", "Tratamentos que faltam (cruz): ${cardNames.joinToString { n -> mine.firstOrNull { it.nameKey == n }?.name ?: n }} = $left.", now)
+                    }
                 }
                 dao.putPlan(PlanEntity(slot, kind, JSONObject().put("names", JSONArray(names)).put("at", now).toString(), now))
                 noteScreen(slot, ex.type, now)
@@ -1009,9 +1013,8 @@ class Repo(private val ctx: Context) {
             return (0 until a.length()).map { a.optString(it) }.toSet()
         }
         val reds = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
-        val tr = planJson(slot, "treating")
-        val cured = if (tr.optLong("until", Long.MAX_VALUE) <= System.currentTimeMillis()) names(tr) else emptySet()
-        return Pair(names(planJson(slot, "injured")) - cured, names(planJson(slot, "suspended")) + reds)
+        // lesionado só sai da lista quando a cruz some (Médico sem ele): o fim de UM cronômetro não cura, a cruz pode pedir vários tratamentos
+        return Pair(names(planJson(slot, "injured")), names(planJson(slot, "suspended")) + reds)
     }
 
     // ------------------------------------------------------------------ leituras extras (eventos, teto de venda, patrocínio)
