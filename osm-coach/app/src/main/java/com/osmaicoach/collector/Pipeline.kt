@@ -118,6 +118,18 @@ class FramePipeline private constructor(private val ctx: Context) {
      * Tela de Tática do OSM: guarda o que está montado (juntando as rolagens da mesma rodada) e marca o resumo para o fim da
      * leitura. O aviso (confere / difere) só sai quando você deixa a tela: antes avisava a cada rolagem, com a tática meio lida.
      */
+    /** Campo com os cartões do 11 ("7 KELMAN", "10 MOFFI"…): junta os números de camisa vistos (os cartões ficam atrás da bolha em alguns quadros). 11 distintos = onze completo. */
+    private suspend fun scanLineup(slot: Int, ocr: OcrResult, now: Long) {
+        val rx = Regex("^(\\d{1,2})\\s+[\\p{L}][\\p{L}.' -]{2,}$")
+        val nums = ocr.lines.filter { it.yc in 0.15f..0.95f && it.xc in 0.08f..0.92f }.mapNotNull { rx.find(it.text.trim())?.groupValues?.get(1)?.toIntOrNull() }.filter { it in 1..40 }
+        if (nums.size < 3) return
+        val old = dao.plan(slot, "lineup")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }?.takeIf { now - it.optLong("at") < 10 * 60_000L }
+        val set = HashSet<Int>()
+        old?.optJSONArray("n")?.let { a -> for (i in 0 until a.length()) set.add(a.optInt(i)) }
+        set.addAll(nums)
+        dao.putPlan(PlanEntity(slot, "lineup", JSONObject().put("n", org.json.JSONArray(set.toList())).put("at", now).put("full", set.size >= 11).toString(), now))
+    }
+
     private suspend fun checkTactic(slot: Int, ocr: OcrResult, now: Long) {
         val f = repo.fieldMap(slot)
         runCatching {
@@ -220,6 +232,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         val cats = HashSet<String>()
         var ratings = false
         var maxRound = 0
+        var lastSig = ""
+        var moved = false
     }
     private var pending: Pending? = null
     private var reportPassAt = 0L
@@ -231,29 +245,37 @@ class FramePipeline private constructor(private val ctx: Context) {
         return ys.isNotEmpty() && ys.max() < 0.86f
     }
 
+    private fun lowestRow(o: OcrResult): Float = o.lines.filter { it.yc > 0.12f }.maxOfOrNull { it.yc } ?: 1f
+
     private suspend fun screenNote(slot: Int, type: ScreenType, ex: Extraction, ocr: OcrResult) {
         val cur = pending?.takeIf { it.slot == slot && it.type == type }
-        val end = bottomReached(ocr)
+        val gap = bottomReached(ocr)
         val pd: Pending = when (type) {
             ScreenType.RESULT -> {
                 val r = ex.matchReport ?: return
-                (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (end) it.endSeen = true } }
+                (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (gap) it.endSeen = true } }
             }
             ScreenType.CALENDAR -> {
                 if (ex.matches.size < 3) return
-                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (end) pd.endSeen = true }
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (gap) pd.endSeen = true }
             }
             ScreenType.SQUAD -> {
                 if (ex.players.size < 3 || ex.ownerTeam == null) return
-                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.players.forEach { p -> pd.seen.add(Txt.key(p.name)); p.cat?.let { c -> pd.cats.add(c) } }; if (end && ex.players.any { it.cat == "GOL" }) pd.endSeen = true }
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.players.forEach { p -> pd.seen.add(Txt.key(p.name)); p.cat?.let { c -> pd.cats.add(c) } }; if (gap && ex.players.any { it.cat == "GOL" }) pd.endSeen = true }
             }
             ScreenType.MARKET -> {
                 if (ex.listings.size < 3) return
-                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.listings.forEach { l -> pd.seen.add(Txt.key(l.name)) }; if (end) pd.endSeen = true }
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.listings.forEach { l -> pd.seen.add(Txt.key(l.name)) }; if (gap) pd.endSeen = true }
             }
             else -> return
         }
         pd.offFrames = 0
+        // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
+        val sig = (ex.players.map { it.name } + ex.listings.map { it.name } + ex.matches.map { "${it.round}" }).sorted().joinToString("|")
+        if (pd.lastSig.isNotEmpty() && sig != pd.lastSig) pd.moved = true
+        val stalled = pd.moved && sig == pd.lastSig && lowestRow(ocr) < 0.93f
+        pd.lastSig = sig
+        if (stalled && (type != ScreenType.SQUAD || ex.players.any { it.cat == "GOL" }) && type != ScreenType.RESULT) pd.endSeen = true
         if (!pd.done && complete(pd)) {
             pd.done = true
             summary(pd, true)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, System.currentTimeMillis()) }
@@ -746,6 +768,9 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
             if (asgSlot != null && type != ScreenType.PREGAME && type != ScreenType.REPORT && !rivalSquad) {
                 try { screenNote(asgSlot, type, ex, ocr) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
+            }
+            if ((type == ScreenType.TACTIC || type == ScreenType.OTHER_OSM) && asgSlot != null) {
+                try { scanLineup(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Onze inicial: " + (e.message ?: "") }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }

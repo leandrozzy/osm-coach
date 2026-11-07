@@ -377,7 +377,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -929,6 +929,11 @@ class Repo(private val ctx: Context) {
                 val oldNames = old.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
                 // cartão de um jogador em tratamento: só soma (continua lesionado até acabar), sem apagar os outros da lista
                 if (x.optBoolean("card")) for (n in oldNames) if (n !in names) names.add(n)
+                // quem está em tratamento sai da lista de lesionados quando o cronômetro acaba (curado)
+                if (ex.type == ScreenType.DOCTOR && x.optBoolean("card") && !x.isNull("endsIn")) {
+                    val cardNames = lines?.let { l -> (0 until l.length()).mapNotNull { i -> mine.firstOrNull { nameMatches(l.optString(i), it) }?.nameKey } }.orEmpty().distinct()
+                    if (cardNames.isNotEmpty()) dao.putPlan(PlanEntity(slot, "treating", JSONObject().put("names", JSONArray(cardNames)).put("until", now + x.optLong("endsIn") * 1000L).toString(), now))
+                }
                 dao.putPlan(PlanEntity(slot, kind, JSONObject().put("names", JSONArray(names)).put("at", now).toString(), now))
                 noteScreen(slot, ex.type, now)
                 if (names.sorted() != oldNames.sorted()) {
@@ -1004,7 +1009,9 @@ class Repo(private val ctx: Context) {
             return (0 until a.length()).map { a.optString(it) }.toSet()
         }
         val reds = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
-        return Pair(names(planJson(slot, "injured")), names(planJson(slot, "suspended")) + reds)
+        val tr = planJson(slot, "treating")
+        val cured = if (tr.optLong("until", Long.MAX_VALUE) <= System.currentTimeMillis()) names(tr) else emptySet()
+        return Pair(names(planJson(slot, "injured")) - cured, names(planJson(slot, "suspended")) + reds)
     }
 
     // ------------------------------------------------------------------ leituras extras (eventos, teto de venda, patrocínio)

@@ -115,17 +115,17 @@ object Hints {
         val late2 = kv(f, K.ROUND)?.toIntOrNull()?.let { r -> kv(f, K.ROUND_TOTAL)?.toIntOrNull()?.let { t -> r > t / 2 } } == true
         // 2º turno sem transferências: some com as dicas de vender/listar (a liga proíbe)
         val baseOk = if (rules?.noTransferSecondHalf == true && late2) base.filter { it.icon !in setOf("💰", "🔁", "📉") } else base
-        baseOk + ruleTips + todoTips(repo.dao.plan(slot, "todolist")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, now, repo.dao.plan(slot, "tacmounted")?.at ?: 0L, repo.dao.plan(slot, "sponsor")?.at ?: 0L) + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
+        baseOk + ruleTips + todoTips(repo.dao.plan(slot, "todolist")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, now, repo.dao.plan(slot, "tacmounted")?.at ?: 0L, repo.dao.plan(slot, "sponsor")?.at ?: 0L, repo.dao.plan(slot, "lineup")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }?.takeIf { it.optBoolean("full") }?.optLong("at") ?: 0L) + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
     }.getOrDefault(emptyList())
 
     /** O que a aba "Lista de Afazeres" do OSM pediu na última leitura (vale 24 h): 11 inicial incompleto e patrocinador à espera. */
-    fun todoTips(j: JSONObject?, now: Long, tacticAt: Long = 0L, sponsorAt: Long = 0L): List<Playbook.Tip> {
+    fun todoTips(j: JSONObject?, now: Long, tacticAt: Long = 0L, sponsorAt: Long = 0L, lineupFullAt: Long = 0L): List<Playbook.Tip> {
         if (j == null || now - j.optLong("at", 0L) > 24L * 3600000L) return emptyList()
         val listAt = j.optLong("at", 0L)
         val keys = j.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
         val out = ArrayList<Playbook.Tip>()
         // lista lida ANTES de você ter passado pela tela de Tática / Patrocinadores: o item pode já ter sido resolvido
-        if ("onze" in keys && tacticAt <= listAt) out.add(Playbook.Tip("🧩", "Onze inicial incompleto: escolha o 11", "O OSM avisa que faltam jogadores no 11 (lesão, venda ou suspensão). Menu ☰ → Equipa inicial: time sem 11 em campo joga enfraquecido.", 96, 4))
+        if ("onze" in keys && tacticAt <= listAt && lineupFullAt <= listAt) out.add(Playbook.Tip("🧩", "Onze inicial incompleto: escolha o 11", "O OSM avisa que faltam jogadores no 11 (lesão, venda ou suspensão). Menu ☰ → Equipa inicial: time sem 11 em campo joga enfraquecido.", 96, 4))
         if ("patroc" in keys && sponsorAt <= listAt) out.add(Playbook.Tip("💼", "Patrocinador à espera: escolha um acordo", "Menu ☰ → Estádio → Bancada: contrato novo rende por jogo em casa (ex.: +97K) e não gasta Boss Coins.", 70, 0))
         return out
     }
