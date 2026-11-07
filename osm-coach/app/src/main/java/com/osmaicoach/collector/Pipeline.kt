@@ -127,8 +127,10 @@ class FramePipeline private constructor(private val ctx: Context) {
                 dao.putPlan(PlanEntity(slot, "tacmounted", mounted.put("at", now).put("round", round ?: -1).toString(), now))
             }
         }
+        val farAway = (f[K.MATCH_AT]?.value?.toLongOrNull() ?: 0L).let { it > 0 && it - now > Director.TACTIC_WINDOW_MS }
         val msg = if (p == null || j == null || !Director.tacticValid(j, p.at, f, now)) {
-            "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
+            // jogo longe (fora das 8 h): a tática ainda nem deveria existir, não cobra
+            if (farAway) "" else "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
         } else {
             val w = Parsers.tacticCheck(ocr, j, f[K.REFEREE]?.value)
             // igual ao gerado: a tarefa "montar a tática" está feita
@@ -258,6 +260,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         delta?.let { why(slot, it.substringAfter(": ")) }
         if (gaps.isNotEmpty()) {
             why(slot, "faltam leituras: " + gaps.joinToString("; ") { it.first })
+            // longe do jogo (fora das 8 h) não há o que fazer agora: sem mensagem ao entrar no slot
+            if (matchAt - now > Director.TACTIC_WINDOW_MS && delta == null) return
             val missing = Director.groups(f, now).filter { !it.ok }
             val read = when (type) { ScreenType.PREGAME -> "Pré-jogo"; ScreenType.REPORT -> "Análise do rival"; ScreenType.SQUAD -> "Plantel do rival"; else -> null }
             note(slot, (delta ?: ("S$slot:" + (read?.let { " $it lido." } ?: ""))) + " Falta ler: " +
@@ -265,8 +269,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             return
         }
         if (matchAt - now > Director.TACTIC_WINDOW_MS) {
-            val h = (matchAt - now) / 3600000L
-            note(slot, (delta ?: "S$slot:") + " Tudo lido (" + check.replace("✓ ", "") + "). Jogo em ${h}h: a tática sai sozinha nas últimas 8 h.", now)
+            delta?.let { note(slot, it, now) }
             return
         }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
@@ -294,8 +297,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             // só vira "conferido" quando a Análise foi lida AGORA (justRead); entrar no slot não confere o rival
             val chk = if (justRead) now else old?.optLong("chk", 0L)?.takeIf { it > 0L }
             repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { chk?.let { put("chk", it) } }.toString(), now))
-            note(slot, if (justRead) (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo."
-                else "S$slot: a tática deste jogo já foi gerada. Passe pela Análise do rival para eu conferir se ele mudou.", now)
+            // só avisa quando acabou de ler a Análise; entrar no slot não gera mensagem (o cartão já mostra o estado da tática)
+            if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
             return
         }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return

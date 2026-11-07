@@ -109,6 +109,8 @@ object Diag {
     fun resetCounters() {
         valid.set(0); discarded.set(0); dedup.set(0); ocr.set(0)
         parsed.set(0); extracted.set(0); unassigned.set(0); aiCalls.set(0)
+        // nova captura: o slot/tela da anterior não valem (antes a bolha mostrava dicas do S1 na tela de abertura do OSM)
+        currentSlot = 0; currentType = "—"
     }
 }
 
