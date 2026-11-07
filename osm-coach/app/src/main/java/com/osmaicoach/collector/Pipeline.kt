@@ -273,9 +273,14 @@ class FramePipeline private constructor(private val ctx: Context) {
         // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
         val sig = (ex.players.map { it.name } + ex.listings.map { it.name } + ex.matches.map { "${it.round}" }).sorted().joinToString("|")
         if (pd.lastSig.isNotEmpty() && sig != pd.lastSig) pd.moved = true
-        val stalled = pd.moved && sig == pd.lastSig && lowestRow(ocr) < 0.93f
+        // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
+        // Plantel e Mercado vão até os goleiros e a última linha cola no rodapé: não dá para exigir folga embaixo.
+        val hasGk = ex.players.any { it.cat == "GOL" } || ex.listings.any { it.cat == "GOL" }
+        val stalled = pd.moved && sig == pd.lastSig
         pd.lastSig = sig
-        if (stalled && (type != ScreenType.SQUAD || ex.players.any { it.cat == "GOL" }) && type != ScreenType.RESULT) pd.endSeen = true
+        if (stalled && ((type == ScreenType.SQUAD || type == ScreenType.MARKET) && hasGk || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
+        if (hasGk) pd.cats.add("GOL")
+        ex.listings.forEach { l -> l.cat?.let { c -> pd.cats.add(c) } }
         if (!pd.done && complete(pd)) {
             pd.done = true
             summary(pd, true)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, System.currentTimeMillis()) }
@@ -286,7 +291,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val f = repo.fieldMap(pd.slot)
         return when (pd.type) {
             ScreenType.SQUAD -> pd.endSeen && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
-            ScreenType.MARKET -> pd.endSeen
+            ScreenType.MARKET -> pd.endSeen && "GOL" in pd.cats
             ScreenType.CALENDAR -> {
                 val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
                 if (total != null) pd.maxRound >= total else pd.endSeen
@@ -659,6 +664,8 @@ class FramePipeline private constructor(private val ctx: Context) {
                 }.take(4000))
             }
             lastProcessed = h
+            // campo com os 11 (Equipa inicial) pode cair em NOISE/OTHER: conta os cartões antes de descartar
+            if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { scanLineup(sl, ocr, now) } }
             if (type == ScreenType.NOISE || type == ScreenType.NON_OSM) {
                 Diag.discarded.incrementAndGet()
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")
@@ -768,9 +775,6 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
             if (asgSlot != null && type != ScreenType.PREGAME && type != ScreenType.REPORT && !rivalSquad) {
                 try { screenNote(asgSlot, type, ex, ocr) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
-            }
-            if ((type == ScreenType.TACTIC || type == ScreenType.OTHER_OSM) && asgSlot != null) {
-                try { scanLineup(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Onze inicial: " + (e.message ?: "") }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }

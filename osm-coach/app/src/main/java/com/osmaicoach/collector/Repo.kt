@@ -681,6 +681,20 @@ class Repo(private val ctx: Context) {
                 if (!y && cards.has(near)) { cards.remove(near); cardsChanged = true }
             }
             if (cardsChanged) dao.putPlan(PlanEntity(slot, "cards", cards.toString(), now))
+            // cruz vermelha no Estado = lesionado; só sai da lista quando a cruz some (linha lida sem cruz)
+            run {
+                val inj = planJson(slot, "injured")
+                val oldNames = inj.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().toMutableList()
+                var ch = false
+                for (p in ex.players) {
+                    val flag = p.injured ?: continue
+                    val k = Txt.key(p.name)
+                    val near = existing.firstOrNull { it.nameKey == k }?.nameKey ?: existing.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                    if (flag && near !in oldNames) { oldNames.add(near); ch = true }
+                    if (!flag && near in oldNames) { oldNames.remove(near); ch = true }
+                }
+                if (ch) dao.putPlan(PlanEntity(slot, "injured", JSONObject().put("names", JSONArray(oldNames)).put("at", now).toString(), now))
+            }
             // cartão vermelho = suspenso (vale mesmo sem passar pelo Advogado); quem foi lido sem vermelho sai
             val reds = planJson(slot, "reds")
             var redsChanged = false

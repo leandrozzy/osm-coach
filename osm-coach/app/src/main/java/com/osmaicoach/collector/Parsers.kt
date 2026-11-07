@@ -394,8 +394,10 @@ object Parsers {
                     forSale = null,
                     cond = img?.let { PixelProbe.barFill(it, 0.757f, 0.800f, a.yc) },
                     morale = img?.let { PixelProbe.barFill(it, 0.808f, 0.850f, a.yc) },
-                    yellow = img?.let { PixelProbe.goldBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
-                    red = img?.let { PixelProbe.redBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
+                    yellow = img?.let { PixelProbe.goldBox(it, 0.883f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
+                    // a cruz de lesão fica um pouco à esquerda do cartão (0,856–0,876): a caixa do vermelho começa depois dela
+                    red = img?.let { PixelProbe.redBox(it, 0.883f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
+                    injured = img?.let { PixelProbe.redBox(it, 0.852f, 0.880f, a.yc - 0.03f, a.yc + 0.03f) >= 0.10f },
                     nat = img?.let { PixelProbe.flagSig(it, (ageX + posX) / 2f, a.yc) }
                 )
             )
