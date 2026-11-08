@@ -654,6 +654,9 @@ object Director {
     }
 
     /** Só pede a tática nas últimas horas antes do jogo: antes disso o rival humano ainda pode mudar tudo. */
+    /** Assinatura do que se monta no OSM (jogo + formação, estilo, desarme, marcação): regerar a mesma tática não desfaz o "já montei". */
+    fun mountSig(j: JSONObject): String = listOf(j.optString("forRound"), j.optString("matchAt"), j.optString("formation"), j.optString("playStyle"), j.optString("tackle"), j.optString("marking")).joinToString("|")
+
     const val TACTIC_WINDOW_MS = 8L * 3600_000L
 
     /**

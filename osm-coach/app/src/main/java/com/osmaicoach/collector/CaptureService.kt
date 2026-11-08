@@ -171,7 +171,26 @@ class CaptureService : AccessibilityService() {
         // Recentes já ao encerrar; depois uma foto da tela de Recentes acha onde está o cartão do OSM (a posição e a rotação
         // mudam com o launcher) e o arrasto sai dali. ~1 s no total.
         h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 100L)
+        // até 3 rodadas: acha o cartão do OSM, (se estiver na ponta, centraliza), arrasta para cima e confere por foto se sumiu
+        fun gesture(p: android.graphics.Path, ms: Long, onDone: (Boolean) -> Unit) {
+            val ok = try {
+                dispatchGesture(
+                    android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, ms)).build(),
+                    object : GestureResultCallback() {
+                        override fun onCompleted(g: android.accessibilityservice.GestureDescription?) { onDone(true) }
+                        override fun onCancelled(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto CANCELADO pelo Android"); onDone(false) }
+                    }, null
+                )
+            } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)); false }
+            if (!ok) {
+                Diag.log("Arrastar OSM: o Android recusou o gesto (religue a Acessibilidade do OSM AI Coach)")
+                Toast.makeText(applicationContext, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach.", Toast.LENGTH_LONG).show()
+                finish()
+            }
+        }
         fun swipeRound(round: Int) {
+            if (finished) return
             scope.launch {
                 var hit: OsmThumb.Hit? = null
                 var w = 0f; var hh = 0f
@@ -183,45 +202,41 @@ class CaptureService : AccessibilityService() {
                         shot.recycle()
                     }
                     if (hit != null) break
-                    delay(300L)
+                    delay(250L)
                 }
-                // 2ª rodada: se a miniatura já sumiu, o OSM fechou
-                if (round == 2 && hit == null) { Diag.log("Arrastar OSM: miniatura sumiu, OSM fechado"); withContext(Dispatchers.Main) { finish() }; return@launch }
+                // da 2ª rodada em diante: miniatura sumiu = OSM fechado
+                if (round >= 2 && hit == null) { Diag.log("Arrastar OSM: miniatura sumiu, OSM fechado (rodada $round)"); withContext(Dispatchers.Main) { finish() }; return@launch }
                 withContext(Dispatchers.Main) {
-                    try {
+                    val dm = resources.displayMetrics
+                    if (hit == null) { w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat() }
+                    val hx = hit
+                    if (hx != null && (hx.cx < w * 0.18f || hx.cx > w * 0.82f)) {
+                        // cartão na ponta do carrossel (o app fica no centro): puxa para o meio antes de arrastar para cima
+                        Diag.log("Arrastar OSM: cartão na ponta (${hx.cx.toInt()}), centralizando (rodada $round)")
                         val p = android.graphics.Path()
-                        if (hit != null) {
-                            Diag.log("Arrastar OSM: cartão achado em (${hit.cx.toInt()}, ${hit.cy.toInt()}) score ${"%.2f".format(hit.score)} rodada $round")
-                            val sy = (hit.cy + hit.cardH * (if (round == 1) 0.2f else 0.1f)).coerceIn(hh * 0.15f, hh * 0.8f)
-                            p.moveTo(hit.cx, sy); p.lineTo(hit.cx, hh * 0.02f)
-                        } else {
-                            Diag.log("Arrastar OSM: não achei a miniatura do OSM nos Recentes (usando o centro)")
-                            val dm = resources.displayMetrics
-                            w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat()
-                            p.moveTo(w * 0.5f, hh * 0.58f); p.lineTo(w * 0.5f, hh * 0.05f)
-                        }
-                        val ok = dispatchGesture(
-                            android.accessibilityservice.GestureDescription.Builder()
-                                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, if (round == 1) 170L else 110L)).build(),
-                            object : GestureResultCallback() {
-                                override fun onCompleted(g: android.accessibilityservice.GestureDescription?) {
-                                    Diag.log("Arrastar OSM: gesto concluído")
-                                    if (round == 1) h.postDelayed({ swipeRound(2) }, 300L) else h.postDelayed({ finish() }, 100L)
-                                }
-                                override fun onCancelled(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto CANCELADO pelo Android"); finish() }
-                            }, null
-                        )
-                        if (!ok) {
-                            Diag.log("Arrastar OSM: o Android recusou o gesto (religue a Acessibilidade do OSM AI Coach)")
-                            Toast.makeText(applicationContext, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach.", Toast.LENGTH_LONG).show()
-                            finish()
-                        }
-                    } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)); finish() }
+                        val y = hh * 0.5f
+                        if (hx.cx > w * 0.5f) { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) } else { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) }
+                        gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
+                        return@withContext
+                    }
+                    val p = android.graphics.Path()
+                    if (hx != null) {
+                        Diag.log("Arrastar OSM: cartão achado em (${hx.cx.toInt()}, ${hx.cy.toInt()}) score ${"%.2f".format(hx.score)} rodada $round")
+                        val sy = (hx.cy + hx.cardH * (if (round == 1) 0.2f else 0.12f)).coerceIn(hh * 0.15f, hh * 0.85f)
+                        p.moveTo(hx.cx, sy); p.lineTo(hx.cx, hh * 0.02f)
+                    } else {
+                        Diag.log("Arrastar OSM: não achei a miniatura do OSM nos Recentes (usando o centro)")
+                        p.moveTo(w * 0.5f, hh * 0.58f); p.lineTo(w * 0.5f, hh * 0.05f)
+                    }
+                    gesture(p, if (round == 1) 170L else 130L) { ok ->
+                        Diag.log("Arrastar OSM: gesto ${if (ok) "concluído" else "não concluído"} (rodada $round)")
+                        if (round >= 3 || !ok) h.postDelayed({ finish() }, 100L) else h.postDelayed({ swipeRound(round + 1) }, 450L)
+                    }
                 }
             }
         }
         h.postDelayed({ swipeRound(1) }, 650L)
-        h.postDelayed({ finish() }, 3600L)
+        h.postDelayed({ finish() }, 5000L)
     }
 
     fun notice(text: String) {

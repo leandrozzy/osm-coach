@@ -158,7 +158,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val m = dao.plan(slot, "tacmounted")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
         val w = Parsers.tacticDiff(m, j, f[K.REFEREE]?.value)
         if (w.isEmpty()) {
-            dao.putPlan(PlanEntity(slot, "tacticdone", JSONObject().put("at", p.at).toString(), now))
+            dao.putPlan(PlanEntity(slot, "tacticdone", JSONObject().put("at", p.at).put("sig", Director.mountSig(j)).toString(), now))
             return "✅ S$slot: a tática montada no OSM confere com a gerada."
         }
         return "⚠ S$slot: " + w.joinToString(" • ")

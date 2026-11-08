@@ -1495,7 +1495,8 @@ private suspend fun loadToday(ctx: Context): TodayData {
                 readAna = Director.groups(f, now)[1].ok,
                 readSquad = Director.groups(f, now)[2].ok,
                 readMine = Director.groups(f, now)[3].ok,
-                mounted = repo.dao.plan(slot, "tactic")?.at.let { ta -> ta != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() } == ta },
+                mounted = repo.dao.plan(slot, "tactic").let { tp -> tp != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }.let { dj ->
+                    dj != null && (dj.optLong("at") == tp.at || dj.optString("sig").let { sg -> sg.isNotBlank() && runCatching { sg == Director.mountSig(JSONObject(tp.json)) }.getOrDefault(false) }) } },
                 readAges = Director.groupAgesMs(f, now),
                 // meu time: igual ao jogo (5 bolinhas do Pré-jogo) quando o Calendário está incompleto; Calendário em dia vale mais
                 myForm = FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }

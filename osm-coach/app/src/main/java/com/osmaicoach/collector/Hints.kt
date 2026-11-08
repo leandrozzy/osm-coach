@@ -235,8 +235,10 @@ object Hints {
         if (activeSlot && ch.isNotEmpty()) pend.add(Hint("⚠", "O rival mudou: gere a tática de novo", RivalWatch.headline(ch), true))
 
         // tática gerada: montar no OSM é pendência até a tela de tática do jogo confirmar que está igual
-        val done = repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() }
-        if (activeSlot && tacticOk && tj != null && tp != null && done != tp.at) {
+        val doneJ = repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val done = doneJ?.optLong("at")
+        val doneSame = tj != null && doneJ?.optString("sig").orEmpty().let { it.isNotBlank() && it == Director.mountSig(tj) }
+        if (activeSlot && tacticOk && tj != null && tp != null && done != tp.at && !doneSame) {
             pend.add(Hint("📋", "Monte: ${tj.optString("formation")} • ${tj.optString("playStyle")}", Director.tacticSummary(tj), true))
         }
         // O cartão mostra SÓ o que falta fazer (o que já foi feito não aparece nem conta). Na tela de preparação, cada item.
