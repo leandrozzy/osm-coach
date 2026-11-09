@@ -189,6 +189,7 @@ class CaptureService : AccessibilityService() {
                 finish()
             }
         }
+        var scrollTries = 0
         fun swipeRound(round: Int) {
             if (finished) return
             scope.launch {
@@ -210,6 +211,18 @@ class CaptureService : AccessibilityService() {
                     val dm = resources.displayMetrics
                     if (hit == null) { w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat() }
                     val hx = hit
+                    if (hx == null) {
+                        // sem achar o OSM: NUNCA arrasta no centro (o centro pode ser o cartão do nosso app); procura no carrossel
+                        if (scrollTries < 3) {
+                            scrollTries++
+                            Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries)")
+                            val p = android.graphics.Path()
+                            val y = hh * 0.5f
+                            if (scrollTries % 2 == 1) { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) } else { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y); }
+                            gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
+                        } else { Diag.log("Arrastar OSM: não achei o OSM nos Recentes; nada foi arrastado"); finish() }
+                        return@withContext
+                    }
                     if (hx != null && (hx.cx < w * 0.18f || hx.cx > w * 0.82f)) {
                         // cartão na ponta do carrossel (o app fica no centro): puxa para o meio antes de arrastar para cima
                         Diag.log("Arrastar OSM: cartão na ponta (${hx.cx.toInt()}), centralizando (rodada $round)")
