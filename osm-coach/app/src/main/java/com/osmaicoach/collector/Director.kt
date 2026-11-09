@@ -214,6 +214,10 @@ object Director {
             "Regras: não escolha sempre 4-3-3; use a composição do elenco e o adversário. Formações do OSM (nome exato, com a letra): ${Formations.ALL}. " +
             "Valores exatos do jogo: playStyle ${Osm.STYLES}; marking ${Osm.MARKING}; tackle ${Osm.TACKLES}; advAttack ${Osm.ATTACK}; " +
             "advMid ${Osm.MIDFIELD}; advDef ${Osm.DEFENSE}. " +
+            "OBJETIVO: VENCER o jogo (vitória = 3 pontos; empate só é aceitável quando o adversário é claramente mais forte). Raciocine como um técnico experiente: " +
+            "compare os setores (ataque, meio, defesa, goleiro) dos dois times, use o histórico deste slot e dos outros 3 (campo \"aprendizado\"/\"historico\" dos dados: formação e estilo que deram pontos, gols feitos e sofridos), " +
+            "NÃO repita formação+estilo que perdeu 2 vezes ou mais, prefira o que marcou gols contra humanos, e se o time sofre muitos gols reforce o meio/defesa sem abrir mão de finalizar. " +
+            "Se o adversário é humano, ele pode ter trocado a tática: escolha algo que funcione contra as 2–3 táticas mais prováveis dele. " +
             "árbitro \"Rigoroso\" => desarme NÃO agressivo; sliders são números inteiros de 0 a 100. " +
             "Responda APENAS JSON com as chaves: formation (ex.: \"4-5-1\"), playStyle (ex.: \"Jogo de passe\", \"Jogar pelas alas\", \"Remate à vista\"), " +
             "pressure (0-100), mentality (0-100, estilo ofensivo/defensivo), tempo (0-100, temporização), " +

@@ -410,8 +410,18 @@ class Repo(private val ctx: Context) {
      * ficam, renomeados, para o aprendizado). Com clearClub (slot livre ou batalha nova com outro clube) apaga também
      * os campos e o elenco do clube antigo.
      */
+    /** O que só vale DENTRO de uma competição (suspensões, tática montada, leituras do rival, forma, listas): apaga; o aprendizado (tlog arquivado, lições, histórico de treino) fica. */
+    private suspend fun clearCompetitionState(slot: Int) {
+        for (k in listOf("reds", "suspended", "noappeal", "tacticdone", "tacmounted", "autogen", "rivalsnap", "formread", "lineup", "todolist", "watch", "rivalchange", "prep"))
+            dao.deletePlan(slot, k)
+        for (k in listOf(K.MY_FORM, K.RIVAL_FORM)) dao.deleteField(slot, k)
+        dao.deleteRivalFields(slot)
+        dao.deleteRivalPlayers(slot)
+    }
+
     private suspend fun archiveSeason(slot: Int, now: Long, clearClub: Boolean) {
         val tag = "X" + (now / 1000)
+        clearCompetitionState(slot)
         dao.deleteMatches(slot)
         // competição nova = linha de base nova: semanas (valor do elenco) e livro de caixa do que acabou não valem
         dao.deletePlan(slot, "weekly"); dao.deletePlan(slot, "ledger")
@@ -1223,6 +1233,9 @@ class Repo(private val ctx: Context) {
                 n++
             }
             if (f[K.MATCH_AT] != null) dao.deleteField(slot, K.MATCH_AT)
+            // competição acabou: some o que era só dela (rival, tática, suspensões, forma); resultados e aprendizado ficam para a revisão e o aprendizado
+            clearCompetitionState(slot)
+            dao.deletePlan(slot, "tactic")
         }
         return n
     }

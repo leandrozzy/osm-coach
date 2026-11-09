@@ -293,8 +293,9 @@ class FramePipeline private constructor(private val ctx: Context) {
             ScreenType.SQUAD -> pd.endSeen && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
             ScreenType.MARKET -> pd.endSeen && "GOL" in pd.cats
             ScreenType.CALENDAR -> {
+                // o total do OSM ("43") inclui jogos de copa ainda sem data/rival que o calendário nem lista: vale chegar à última rodada OU ao fim da lista
                 val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
-                if (total != null) pd.maxRound >= total else pd.endSeen
+                pd.endSeen || (total != null && pd.maxRound >= total)
             }
             ScreenType.RESULT -> pd.endSeen && pd.ratings
             else -> false

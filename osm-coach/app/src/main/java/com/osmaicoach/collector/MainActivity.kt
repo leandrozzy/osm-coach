@@ -1499,9 +1499,9 @@ private suspend fun loadToday(ctx: Context): TodayData {
                     dj != null && (dj.optLong("at") == tp.at || dj.optString("sig").let { sg -> sg.isNotBlank() && runCatching { sg == Director.mountSig(JSONObject(tp.json)) }.getOrDefault(false) }) } },
                 readAges = Director.groupAgesMs(f, now),
                 // meu time: igual ao jogo (5 bolinhas do Pré-jogo) quando o Calendário está incompleto; Calendário em dia vale mais
-                myForm = FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
+                myForm = if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
                     ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }),
-                rivalForm = (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
+                rivalForm = if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
                     ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
@@ -3049,9 +3049,15 @@ private fun FlagPicker(slot: Int) {
             val repo = Repo(ctx)
             groups = SlotRules.flagGroups(repo, slot)
             chosen = SlotRules.leagueFlag(repo, slot)
+            // sem escolha: o grupo de longe maior costuma ser a nacionalidade da liga (clubes do país); sugere e grava, dá para trocar
+            val g = groups
+            if (chosen == null && g.size >= 2 && g[0].second.size >= 8 && g[0].second.size >= g[1].second.size * 2) {
+                SlotRules.setLeagueFlag(repo, slot, g[0].first, System.currentTimeMillis())
+                chosen = g[0].first
+            }
         }
     }
-    Text("Bandeira da liga (toque na que é a da nacionalidade da liga):", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    Text("Qual é a nacionalidade da liga? O jogo só mostra a bandeira (sem o nome do país), então cada linha abaixo é um GRUPO de jogadores do seu elenco com a mesma bandeira (os quadradinhos são a bandeira como o app a viu). O grupo marcado ✓ é o da liga; toque em outro para trocar.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
     if (groups.isEmpty()) {
         Text("Abra o Plantel e role a lista para eu ler as bandeiras.", fontSize = 12.5.sp, color = C.MUTED)
         return
