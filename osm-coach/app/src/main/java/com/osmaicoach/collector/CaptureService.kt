@@ -217,13 +217,15 @@ class CaptureService : AccessibilityService() {
                     val hx = hit
                     if (hx == null) {
                         // sem achar o OSM: NUNCA arrasta no centro (o centro pode ser o cartão do nosso app); procura no carrossel
-                        if (scrollTries < 4) {
+                        if (scrollTries < 6) {
+                            // varre o carrossel: 2 passos para um lado, depois volta e vai 2 para o outro (a posição do OSM muda com a ordem dos apps recentes)
+                            val rl = scrollTries < 2
                             scrollTries++
-                            Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries)")
+                            Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries, ${if (rl) "p/ esquerda" else "p/ direita"})")
                             val p = android.graphics.Path()
                             val y = hh * 0.5f
-                            if (scrollTries % 2 == 1) { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) } else { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) }
-                            gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
+                            if (rl) { p.moveTo(w * 0.78f, y); p.lineTo(w * 0.22f, y) } else { p.moveTo(w * 0.22f, y); p.lineTo(w * 0.78f, y) }
+                            gesture(p, 260L) { h.postDelayed({ swipeRound(round) }, 500L) }
                         } else { Diag.log("Arrastar OSM: não achei o OSM nos Recentes; nada foi arrastado"); finish() }
                         return@withContext
                     }
@@ -232,7 +234,8 @@ class CaptureService : AccessibilityService() {
                         Diag.log("Arrastar OSM: cartão na ponta (${hx.cx.toInt()}), centralizando (rodada $round)")
                         val p = android.graphics.Path()
                         val y = hh * 0.5f
-                        if (hx.cx > w * 0.5f) { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) } else { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) }
+                        // (no vídeo de 10/11 arrastar da esquerda p/ direita trouxe o cartão da DIREITA para o centro)
+                        if (hx.cx > w * 0.5f) { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) } else { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) }
                         gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
                         return@withContext
                     }
@@ -253,7 +256,7 @@ class CaptureService : AccessibilityService() {
             }
         }
         h.postDelayed({ swipeRound(1) }, 1250L)
-        h.postDelayed({ finish() }, 6000L)
+        h.postDelayed({ finish() }, 9000L)
     }
 
     fun notice(text: String) {
