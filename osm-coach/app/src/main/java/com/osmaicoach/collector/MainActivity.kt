@@ -2116,12 +2116,12 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
         WdlBar(s.win, Modifier.padding(top = 12.dp))
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricBar("Dados lidos", s.pct, "${s.pct}%", if (s.pct >= 80) C.OK else if (s.pct >= 50) C.GOLD else C.WARN, Modifier.weight(1f))
-            MetricBar("Tática", if (s.tacticReady) 100 else if (s.tacticStale) 50 else 0, if (s.tacticReady) "pronta" else if (s.tacticStale) "reler rival" else "falta", if (s.tacticReady) C.OK else C.GOLD, Modifier.weight(1f))
+            MetricBar("Tática", if (s.tacticReady) 100 else if (s.tacticStale) 50 else 0, if (s.tacticReady) "pronta" else if (at!! - now > Director.TACTIC_WINDOW_MS) "só nas 8 h antes" else if (s.tacticStale) "reler rival" else "falta", if (s.tacticReady) C.OK else C.GOLD, Modifier.weight(1f))
         }
         TacticStatusLine(s)
         val inWindow = at!! - now <= Director.TACTIC_WINDOW_MS
         when {
-            s.tacticStale || (!s.tacticReady && s.rivalGaps) -> CtaButton("🔎 Ler o rival antes da tática",  Modifier.padding(top = 12.dp)) { onTab(4) }
+            inWindow && (s.tacticStale || (!s.tacticReady && s.rivalGaps)) -> CtaButton("🔎 Ler o rival antes da tática",  Modifier.padding(top = 12.dp)) { onTab(4) }
             !s.tacticReady && inWindow -> CtaButton("⚡ Gerar tática", Modifier.padding(top = 12.dp)) { onTab(4) }
             s.tacticReady -> CtaButton("Ver a tática", Modifier.padding(top = 12.dp)) { onTab(4) }
             else -> CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }

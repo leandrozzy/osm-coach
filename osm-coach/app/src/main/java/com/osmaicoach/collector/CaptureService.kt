@@ -170,7 +170,11 @@ class CaptureService : AccessibilityService() {
         fun finish() { if (!finished) { finished = true; done() } }
         // Recentes já ao encerrar; depois uma foto da tela de Recentes acha onde está o cartão do OSM (a posição e a rotação
         // mudam com o launcher) e o arrasto sai dali. ~1 s no total.
-        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 100L)
+        // 1º traz o OSM para a frente (se o nosso app estiver no topo, os Recentes abrem centrados no NOSSO cartão e o do OSM fica na ponta)
+        try {
+            packageManager.getLaunchIntentForPackage(OSM_PACKAGE)?.let { startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        } catch (e: Exception) { Diag.log("Arrastar OSM: não consegui trazer o OSM à frente (${e.message})") }
+        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 600L)
         // até 3 rodadas: acha o cartão do OSM, (se estiver na ponta, centraliza), arrasta para cima e confere por foto se sumiu
         fun gesture(p: android.graphics.Path, ms: Long, onDone: (Boolean) -> Unit) {
             val ok = try {
@@ -213,12 +217,12 @@ class CaptureService : AccessibilityService() {
                     val hx = hit
                     if (hx == null) {
                         // sem achar o OSM: NUNCA arrasta no centro (o centro pode ser o cartão do nosso app); procura no carrossel
-                        if (scrollTries < 3) {
+                        if (scrollTries < 4) {
                             scrollTries++
                             Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries)")
                             val p = android.graphics.Path()
                             val y = hh * 0.5f
-                            if (scrollTries % 2 == 1) { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) } else { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y); }
+                            if (scrollTries % 2 == 1) { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) } else { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) }
                             gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
                         } else { Diag.log("Arrastar OSM: não achei o OSM nos Recentes; nada foi arrastado"); finish() }
                         return@withContext
@@ -248,8 +252,8 @@ class CaptureService : AccessibilityService() {
                 }
             }
         }
-        h.postDelayed({ swipeRound(1) }, 650L)
-        h.postDelayed({ finish() }, 5000L)
+        h.postDelayed({ swipeRound(1) }, 1250L)
+        h.postDelayed({ finish() }, 6000L)
     }
 
     fun notice(text: String) {
