@@ -194,12 +194,15 @@ class CaptureService : AccessibilityService() {
             }
         }
         var scrollTries = 0
+        // Os Recentes deste aparelho (ASUS/ROG) ficam com o layout do jogo (paisagem) mesmo com a tela em retrato: os cartões ficam
+        // EMPILHADOS na vertical (o nosso app em cima, o OSM embaixo, "Limpar tudo" girado na lateral). Então a rolagem do carrossel é
+        // vertical e "arrastar para cima" do launcher vira arrastar para a ESQUERDA na tela. Como não dá para saber, tenta os dois e confere por foto.
+        var vertical = false
         fun swipeRound(round: Int) {
             if (finished) return
             scope.launch {
                 var hit: OsmThumb.Hit? = null
                 var w = 0f; var hh = 0f
-                // os Recentes abrem na posição do jogo (paisagem) e só depois giram para retrato: espera o layout assentar (retrato) antes de medir
                 for (attempt in 1..12) {
                     val shot = try { takeShot() } catch (e: Exception) { null }
                     if (shot != null) {
@@ -217,50 +220,67 @@ class CaptureService : AccessibilityService() {
                 if (round >= 2 && hit == null) { Diag.log("Arrastar OSM: miniatura sumiu, OSM fechado (rodada $round)"); withContext(Dispatchers.Main) { finish() }; return@launch }
                 withContext(Dispatchers.Main) {
                     val dm = resources.displayMetrics
-                    if (hit == null) { w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat() }
+                    if (w <= 0f || hh <= 0f) { w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat() }
                     val hx = hit
                     if (hx == null) {
-                        // sem achar o OSM: NUNCA arrasta no centro (o centro pode ser o cartão do nosso app); procura no carrossel
-                        if (scrollTries < 6) {
-                            // varre o carrossel: 2 passos para um lado, depois volta e vai 2 para o outro (a posição do OSM muda com a ordem dos apps recentes)
-                            val rl = scrollTries < 2
+                        // sem achar o OSM: NUNCA arrasta no centro (é o cartão do nosso app); procura rolando o carrossel nos dois eixos
+                        if (scrollTries < 8) {
+                            val step = scrollTries
                             scrollTries++
-                            Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries, ${if (rl) "p/ esquerda" else "p/ direita"})")
+                            // 0: sobe (traz o cartão de baixo) • 1: esquerda • 2: desce • 3: direita • repete
+                            val dirs = listOf("cima", "esquerda", "baixo", "direita")
+                            val d = dirs[step % 4]
+                            Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries: $d)")
                             val p = android.graphics.Path()
-                            val y = hh * 0.5f
-                            if (rl) { p.moveTo(w * 0.78f, y); p.lineTo(w * 0.22f, y) } else { p.moveTo(w * 0.22f, y); p.lineTo(w * 0.78f, y) }
+                            when (d) {
+                                "cima" -> { p.moveTo(w * 0.5f, hh * 0.75f); p.lineTo(w * 0.5f, hh * 0.25f) }
+                                "baixo" -> { p.moveTo(w * 0.5f, hh * 0.25f); p.lineTo(w * 0.5f, hh * 0.75f) }
+                                "esquerda" -> { p.moveTo(w * 0.78f, hh * 0.5f); p.lineTo(w * 0.22f, hh * 0.5f) }
+                                else -> { p.moveTo(w * 0.22f, hh * 0.5f); p.lineTo(w * 0.78f, hh * 0.5f) }
+                            }
                             gesture(p, 260L) { h.postDelayed({ swipeRound(round) }, 500L) }
                         } else { Diag.log("Arrastar OSM: não achei o OSM nos Recentes; nada foi arrastado"); finish() }
                         return@withContext
                     }
-                    if (hx != null && (hx.cx < w * 0.18f || hx.cx > w * 0.82f)) {
-                        // cartão na ponta do carrossel (o app fica no centro): puxa para o meio antes de arrastar para cima
+                    val offX = hx.cx - w * 0.5f
+                    val offY = hx.cy - hh * 0.5f
+                    if (Math.abs(offY) > hh * 0.22f && Math.abs(offY) > Math.abs(offX)) {
+                        // empilhado na vertical e fora do centro: puxa o cartão para o meio
+                        vertical = true
+                        Diag.log("Arrastar OSM: cartão em (${hx.cx.toInt()}, ${hx.cy.toInt()}) fora do centro na vertical, centralizando (rodada $round)")
+                        val p = android.graphics.Path()
+                        if (offY > 0) { p.moveTo(w * 0.5f, hh * 0.75f); p.lineTo(w * 0.5f, hh * 0.75f - offY.coerceAtMost(hh * 0.45f)) }
+                        else { p.moveTo(w * 0.5f, hh * 0.25f); p.lineTo(w * 0.5f, hh * 0.25f - offY.coerceAtLeast(-hh * 0.45f)) }
+                        gesture(p, 260L) { h.postDelayed({ swipeRound(round) }, 500L) }
+                        return@withContext
+                    }
+                    if (Math.abs(offX) > w * 0.32f) {
                         Diag.log("Arrastar OSM: cartão na ponta (${hx.cx.toInt()}), centralizando (rodada $round)")
                         val p = android.graphics.Path()
                         val y = hh * 0.5f
-                        // (no vídeo de 10/11 arrastar da esquerda p/ direita trouxe o cartão da DIREITA para o centro)
                         if (hx.cx > w * 0.5f) { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) } else { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) }
                         gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
                         return@withContext
                     }
+                    // arrasto de fechar: no layout vertical (girado) é para a esquerda/direita; no normal, para cima. Alterna a cada rodada e confere por foto.
+                    val styles = if (vertical) listOf("esquerda", "direita", "esquerda", "cima") else listOf("cima", "esquerda", "direita", "cima")
+                    val st = styles[(round - 1).coerceIn(0, 3)]
+                    Diag.log("Arrastar OSM: cartão achado em (${hx.cx.toInt()}, ${hx.cy.toInt()}) score ${"%.2f".format(hx.score)} rodada $round: arrasta p/ $st")
                     val p = android.graphics.Path()
-                    if (hx != null) {
-                        Diag.log("Arrastar OSM: cartão achado em (${hx.cx.toInt()}, ${hx.cy.toInt()}) score ${"%.2f".format(hx.score)} rodada $round")
-                        val sy = (hx.cy + hx.cardH * (if (round == 1) 0.2f else 0.12f)).coerceIn(hh * 0.15f, hh * 0.85f)
-                        p.moveTo(hx.cx, sy); p.lineTo(hx.cx, hh * 0.02f)
-                    } else {
-                        Diag.log("Arrastar OSM: não achei a miniatura do OSM nos Recentes (usando o centro)")
-                        p.moveTo(w * 0.5f, hh * 0.58f); p.lineTo(w * 0.5f, hh * 0.05f)
+                    when (st) {
+                        "cima" -> { val sy = (hx.cy + hx.cardH * 0.2f).coerceIn(hh * 0.15f, hh * 0.85f); p.moveTo(hx.cx, sy); p.lineTo(hx.cx, hh * 0.02f) }
+                        "esquerda" -> { p.moveTo((hx.cx + w * 0.25f).coerceAtMost(w * 0.95f), hx.cy); p.lineTo(w * 0.01f, hx.cy) }
+                        else -> { p.moveTo((hx.cx - w * 0.25f).coerceAtLeast(w * 0.05f), hx.cy); p.lineTo(w * 0.99f, hx.cy) }
                     }
-                    gesture(p, if (round == 1) 170L else 130L) { ok ->
+                    gesture(p, 150L) { ok ->
                         Diag.log("Arrastar OSM: gesto ${if (ok) "concluído" else "não concluído"} (rodada $round)")
-                        if (round >= 3 || !ok) h.postDelayed({ finish() }, 100L) else h.postDelayed({ swipeRound(round + 1) }, 450L)
+                        if (round >= 4 || !ok) h.postDelayed({ finish() }, 100L) else h.postDelayed({ swipeRound(round + 1) }, 500L)
                     }
                 }
             }
         }
         h.postDelayed({ swipeRound(1) }, 1500L)
-        h.postDelayed({ finish() }, 12000L)
+        h.postDelayed({ finish() }, 16000L)
     }
 
     fun notice(text: String) {
