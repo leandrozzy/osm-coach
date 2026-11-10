@@ -199,14 +199,18 @@ class CaptureService : AccessibilityService() {
             scope.launch {
                 var hit: OsmThumb.Hit? = null
                 var w = 0f; var hh = 0f
-                for (attempt in 1..2) {
+                // os Recentes abrem na posição do jogo (paisagem) e só depois giram para retrato: espera o layout assentar (retrato) antes de medir
+                for (attempt in 1..12) {
                     val shot = try { takeShot() } catch (e: Exception) { null }
                     if (shot != null) {
                         w = shot.width.toFloat(); hh = shot.height.toFloat()
-                        hit = try { OsmThumb.find(shot) } catch (e: Exception) { null }
+                        val landscape = shot.width > shot.height
+                        hit = if (landscape) null else try { OsmThumb.find(shot) } catch (e: Exception) { null }
                         shot.recycle()
+                        if (landscape) { delay(300L); continue }
                     }
                     if (hit != null) break
+                    if (attempt >= 3) break
                     delay(250L)
                 }
                 // da 2ª rodada em diante: miniatura sumiu = OSM fechado
@@ -255,8 +259,8 @@ class CaptureService : AccessibilityService() {
                 }
             }
         }
-        h.postDelayed({ swipeRound(1) }, 1250L)
-        h.postDelayed({ finish() }, 9000L)
+        h.postDelayed({ swipeRound(1) }, 1500L)
+        h.postDelayed({ finish() }, 12000L)
     }
 
     fun notice(text: String) {
