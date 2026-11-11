@@ -169,6 +169,47 @@ object PixelProbe {
     }
 
     /**
+     * Assinatura rica de uma bandeira/emblema: grade gx×gy com a cor média (RGB) de cada célula, em hexadecimal (6 dígitos por célula).
+     * Serve para reconhecer o país: a bandeira do Plantel (pequena) e a da tela de filtro "Nacionalidade" (grande) dão assinaturas parecidas
+     * (distância ≈ 0,02–0,04 para a mesma bandeira, ≥ 0,07 para outra). Null se quase tudo é escuro (sem bandeira).
+     */
+    fun flagRich(img: Img, cx: Float, cy: Float, w: Float, h: Float, gx: Int = 8, gy: Int = 5): String? {
+        val x0 = ((cx - w / 2) * img.w).toInt().coerceAtLeast(0)
+        val x1 = ((cx + w / 2) * img.w).toInt().coerceAtMost(img.w)
+        val y0 = ((cy - h / 2) * img.h).toInt().coerceAtLeast(0)
+        val y1 = ((cy + h / 2) * img.h).toInt().coerceAtMost(img.h)
+        if (x1 - x0 < gx || y1 - y0 < gy) return null
+        val sb = StringBuilder()
+        var dark = 0
+        for (r in 0 until gy) for (c in 0 until gx) {
+            val xa = x0 + (x1 - x0) * c / gx; val xb = max(xa + 1, x0 + (x1 - x0) * (c + 1) / gx)
+            val ya = y0 + (y1 - y0) * r / gy; val yb = max(ya + 1, y0 + (y1 - y0) * (r + 1) / gy)
+            var sr = 0L; var sg = 0L; var sbl = 0L; var n = 0
+            for (y in ya until yb) for (x in xa until xb) {
+                val px = img.px[y * img.w + x]
+                sr += (px shr 16) and 0xFF; sg += (px shr 8) and 0xFF; sbl += px and 0xFF; n++
+            }
+            if (n == 0) return null
+            val rr = (sr / n).toInt(); val gg = (sg / n).toInt(); val bb = (sbl / n).toInt()
+            if (rr + gg + bb < 120) dark++
+            sb.append("%02x%02x%02x".format(rr, gg, bb))
+        }
+        return if (dark >= gx * gy * 8 / 10) null else sb.toString()
+    }
+
+    /** Distância média (0..1) entre duas assinaturas ricas; 1,0 se incomparáveis. */
+    fun richDist(a: String, b: String): Float {
+        if (a.length != b.length || a.isEmpty()) return 1f
+        var sum = 0
+        var i = 0
+        while (i < a.length) {
+            sum += Math.abs(a.substring(i, i + 2).toInt(16) - b.substring(i, i + 2).toInt(16))
+            i += 2
+        }
+        return sum / (255f * (a.length / 2))
+    }
+
+    /**
      * Ícone de um evento da tela de Resultado (vídeo/prints de 05/11): cruz vermelha = lesão, retângulo amarelo/vermelho = cartão,
      * setas verde+vermelha = substituição, bola = gol (sem cor viva). Distingue cruz de cartão pelo preenchimento da caixa
      * que envolve o vermelho (cruz ≈ 0,56; cartão ≈ 0,8+). null = nada reconhecível.

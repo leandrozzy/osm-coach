@@ -653,6 +653,8 @@ class FramePipeline private constructor(private val ctx: Context) {
                 lastProcessed = h
                 return
             }
+            // telas de filtro Nacionalidade/Liga: aprende bandeira + nome (Atlas, global)
+            Atlas.detect(ocr)?.let { k -> runCatching { Atlas.learn(repo, ocr, img, k, now) } }
             val type = ScreenClassifier.classify(ocr, topBar)
             Diag.currentType = type.name
             lastType = type

@@ -1308,6 +1308,13 @@ data class SlotData(
     val logsAll: List<PlanEntity> = emptyList(),
     val reports: List<PlanEntity> = emptyList(),
     val fitness: Map<String, Pair<Int, Int>> = emptyMap(),
+    /** País de cada jogador (nome do Atlas pela bandeira) e a assinatura rica para desenhar a bandeira. */
+    val countries: Map<String, String?> = emptyMap(),
+    val flagRich: Map<String, String> = emptyMap(),
+    /** Emblema da liga do slot (Atlas), se o nome da competição casa com uma liga aprendida. */
+    val leagueRich: String? = null,
+    /** Véspera do jogo: (feito?, texto) na ordem em que se faz. Vazio = jogo longe. */
+    val eve: List<Pair<Boolean, String>> = emptyList(),
     val rivalProfile: PlanEntity? = null,
     val win: WinModel.Prob? = null,
     val evidence: JSONObject? = null,
@@ -1337,6 +1344,26 @@ data class SlotData(
 
 data class SessionRow(val s: SessionEntity, val counts: String, val unassigned: Int)
 
+/** Véspera do jogo (≤ 8 h): o que já foi feito e o que falta, na ordem. */
+private suspend fun buildEve(repo: Repo, slot: Int, f: Map<String, StoredField>, tplan: JSONObject?): List<Pair<Boolean, String>> {
+    val now = System.currentTimeMillis()
+    val at = f[K.MATCH_AT]?.value?.toLongOrNull() ?: return emptyList()
+    if (at <= now || at - now > Director.TACTIC_WINDOW_MS || Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return emptyList()
+    val out = ArrayList<Pair<Boolean, String>>()
+    for (g in Director.groups(f, now)) out.add(Pair(g.ok, (if (g.ok) "Lido: " else "Ler: ") + g.name.substringBefore(" (") + (if (g.ok || g.missing.isEmpty()) "" else " (" + g.missing.joinToString(", ").take(40) + ")")))
+    val tp = repo.dao.plan(slot, "tactic")
+    val valid = tp != null && tplan != null && runCatching { Director.tacticValid(tplan, tp.at, f, now) }.getOrDefault(false)
+    out.add(Pair(valid, if (valid) "Tática gerada: ${tplan?.optString("formation")} • ${tplan?.optString("playStyle")}" else "Gerar a tática do jogo"))
+    val dj = repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+    val mounted = valid && dj != null && (dj.optLong("at") == tp?.at || (dj.optString("sig").isNotBlank() && dj.optString("sig") == Director.mountSig(tplan!!)))
+    out.add(Pair(mounted, if (mounted) "Tática montada no OSM e conferida" else "Montar a tática no OSM (Menu → Tática)"))
+    f[K.PREP_LEVEL]?.value?.let { lv -> out.add(Pair(!PrepLevel.low(lv), "Preparação do jogo: $lv" + if (PrepLevel.low(lv)) " — conclua a lista de afazeres" else "")) }
+    val (inj, susp) = repo.outByDoctorOrLawyer(slot)
+    if (inj.isNotEmpty()) out.add(Pair(false, "Lesionados: ${inj.size} (Médico, 8 h grátis)"))
+    if (susp.isNotEmpty()) out.add(Pair(false, "Suspensos: ${susp.size} (Advogado, 8 h grátis)"))
+    return out
+}
+
 private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     val repo = Repo(ctx)
     val dao = repo.dao
@@ -1361,6 +1388,10 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     )
     Director.resolveTacticLogs(repo, slot)
     val tplan = dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
+    val countriesMap = runCatching { SlotRules.playerCountries(repo, slot) }.getOrDefault(emptyMap())
+    val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
+    val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
+    val eveList = runCatching { buildEve(repo, slot, f, tplan) }.getOrDefault(emptyList())
     return SlotData(
         ready = true,
         learned = runCatching { Learned.fit(Director.allLogs(repo)) }.getOrNull(),
@@ -1387,6 +1418,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
         logsAll = dao.tacticLogs(slot),
         reports = dao.matchReports(slot),
         fitness = repo.fitness(slot),
+        countries = countriesMap, flagRich = richMap, leagueRich = leagueRichV, eve = eveList,
         rivalProfile = repo.rivalProfile(slot),
         board = repo.boardMessages(slot),
         trainScreen = dao.plan(slot, "trainscreen")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
@@ -2981,7 +3013,10 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Slot $slot • " + (known(data.fields, K.COMPETITION) ?: if (data.ready) "competição não lida" else ""), color = C.MUTED, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    data.leagueRich?.let { FlagSwatch(it, null, 18.dp, 18.dp, round = true); Spacer(Modifier.width(6.dp)) }
+                    Text("Slot $slot • " + (known(data.fields, K.COMPETITION) ?: if (data.ready) "competição não lida" else ""), color = C.MUTED, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             data.completeness?.let { c ->
                 Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.End) {
@@ -3033,49 +3068,83 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
     }
 }
 
+/** Desenha a bandeira/emblema a partir da assinatura rica (grade 8×5 suavizada); sem ela, usa os 9 quadrados da assinatura antiga. */
+@Composable
+private fun FlagSwatch(rich: String?, sig: String? = null, w: androidx.compose.ui.unit.Dp = 30.dp, h: androidx.compose.ui.unit.Dp = 20.dp, round: Boolean = false) {
+    val bmp = remember(rich) {
+        rich?.takeIf { it.length >= 6 * 8 && it.length % 6 == 0 }?.let { r ->
+            runCatching {
+                val cells = r.length / 6
+                val px = IntArray(cells) { i -> 0xFF000000.toInt() or r.substring(i * 6, i * 6 + 6).toInt(16) }
+                android.graphics.Bitmap.createBitmap(px, 8, cells / 8, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    val shape = if (round) RoundedCornerShape(50) else RoundedCornerShape(3.dp)
+    if (bmp != null) {
+        Image(bitmap = bmp, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.FillBounds, filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium, modifier = Modifier.size(w, h).clip(shape))
+    } else if (sig != null && sig.length == 9) {
+        Column(Modifier.size(w, h).clip(shape)) { for (r in 0 until 3) Row(Modifier.weight(1f)) { for (c in 0 until 3) Box(Modifier.weight(1f).fillMaxHeight().background(flagColor(sig[r * 3 + c]))) } }
+    } else Box(Modifier.size(w, h).clip(shape).background(C.SURFACE2))
+}
+
 private fun flagColor(c: Char): Color = when (c) {
     'K' -> Color(0xFF111111); 'W' -> Color(0xFFF5F5F5); 'X' -> Color(0xFF9A9A9A); 'R' -> Color(0xFFD62828); 'O' -> Color(0xFFF77F00)
     'Y' -> Color(0xFFFFD60A); 'G' -> Color(0xFF2D9D4B); 'L' -> Color(0xFF4CC9F0); 'B' -> Color(0xFF1D4ED8); else -> Color(0xFF7B2CBF)
 }
 
-/** Escolha da bandeira da liga entre as bandeiras lidas no Plantel (o jogo só mostra a bandeira, não o nome). */
+/** Escolha da bandeira da liga entre as bandeiras lidas no Plantel; o nome do país vem do Atlas (filtros Nacionalidade/Liga do OSM). */
 @Composable
 private fun FlagPicker(slot: Int) {
     val ctx = LocalContext.current
     var groups by remember(slot) { mutableStateOf<List<Pair<String, List<String>>>>(emptyList()) }
+    var infos by remember(slot) { mutableStateOf<Map<String, SlotRules.FlagInfo>>(emptyMap()) }
     var chosen by remember(slot) { mutableStateOf<String?>(null) }
+    var suggested by remember(slot) { mutableStateOf<String?>(null) }
+    var atlasN by remember(slot) { mutableStateOf(0) }
     LaunchedEffect(slot, UiBus.version) {
         withContext(Dispatchers.IO) {
             val repo = Repo(ctx)
             groups = SlotRules.flagGroups(repo, slot)
-            chosen = SlotRules.leagueFlag(repo, slot)
-            // sem escolha: o grupo de longe maior costuma ser a nacionalidade da liga (clubes do país); sugere e grava, dá para trocar
+            infos = SlotRules.flagInfo(repo, slot)
+            atlasN = Atlas.count(repo, Atlas.Kind.NAT)
+            val saved = repo.dao.plan(slot, "leagueflag")?.json?.let { runCatching { JSONObject(it).optString("sig") }.getOrNull() }?.takeIf { it.length == 9 }
+            chosen = saved
+            suggested = if (saved == null) SlotRules.suggestLeagueFlag(repo, slot) else null
+            // sem escolha e sem sugestão pelo nome da liga: o grupo de longe maior costuma ser a nacionalidade da liga
             val g = groups
-            if (chosen == null && g.size >= 2 && g[0].second.size >= 8 && g[0].second.size >= g[1].second.size * 2) {
+            if (saved == null && suggested == null && g.size >= 2 && g[0].second.size >= 8 && g[0].second.size >= g[1].second.size * 2) {
                 SlotRules.setLeagueFlag(repo, slot, g[0].first, System.currentTimeMillis())
                 chosen = g[0].first
             }
         }
     }
-    Text("Qual é a nacionalidade da liga? O jogo só mostra a bandeira (sem o nome do país), então cada linha abaixo é um GRUPO de jogadores do seu elenco com a mesma bandeira (os quadradinhos são a bandeira como o app a viu). O grupo marcado ✓ é o da liga; toque em outro para trocar.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    Text("Nacionalidades do elenco", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+    Text(
+        if (atlasN > 0) "O nome do país vem do Atlas ($atlasN nacionalidades aprendidas). Toque numa linha para dizer qual é a nacionalidade da liga (✓)."
+        else "Para ver o NOME dos países: no OSM, Lista de transferências → filtro Nacionalidade (toque nele) e role a lista inteira com a captura ligada. Sem isso mostro só a bandeira.",
+        fontSize = 12.5.sp, color = C.MUTED
+    )
     if (groups.isEmpty()) {
         Text("Abra o Plantel e role a lista para eu ler as bandeiras.", fontSize = 12.5.sp, color = C.MUTED)
         return
     }
-    for ((sig, names) in groups.take(8)) {
-        val sel = chosen != null && SlotRules.sameFlag(sig, chosen!!)
+    for ((sig, names) in groups.take(10)) {
+        val sel = (chosen != null && SlotRules.sameFlag(sig, chosen!!)) || (chosen == null && suggested != null && SlotRules.sameFlag(sig, suggested!!))
+        val inf = infos[sig]
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clickable {
-                val v = if (sel) null else sig
-                chosen = v
+                val v = if (chosen != null && SlotRules.sameFlag(sig, chosen!!)) null else sig
+                chosen = v; suggested = null
                 AppScope.scope.launch(Dispatchers.IO) { SlotRules.setLeagueFlag(Repo(ctx), slot, v, System.currentTimeMillis()); UiBus.version++ }
             },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.width(33.dp)) {
-                for (r in 0 until 3) Row { for (c in 0 until 3) Box(Modifier.size(11.dp).background(flagColor(sig[r * 3 + c]))) }
+            FlagSwatch(inf?.rich, sig, 40.dp, 27.dp)
+            Column(Modifier.padding(start = 10.dp)) {
+                Text((if (sel) "✓ " else "") + (inf?.name ?: "País não identificado") + (if (sel && chosen == null) " (pela liga)" else ""), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (sel) C.OK else Color.White)
+                Text("${names.size}: " + names.take(4).joinToString(", ") + (if (names.size > 4) "…" else ""), fontSize = 12.5.sp, color = C.MUTED, maxLines = 2)
             }
-            Text((if (sel) "✓ " else "") + "${names.size}: " + names.take(4).joinToString(", ") + (if (names.size > 4) "…" else ""), fontSize = 13.sp, color = if (sel) C.OK else Color.White, modifier = Modifier.padding(start = 10.dp))
         }
     }
 }
@@ -3135,6 +3204,26 @@ private fun RulesCard(slot: Int) {
     }
 }
 
+/** Véspera do jogo: checklist do que fazer antes da partida (só nas 8 h antes). */
+@Composable
+private fun EveCard(items: List<Pair<Boolean, String>>) {
+    val done = items.count { it.first }
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("🌙 Véspera do jogo", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text("$done/${items.size}", color = if (done == items.size) C.OK else C.GOLD, fontWeight = FontWeight.Bold)
+        }
+        LinearProgressIndicator(progress = { done / items.size.toFloat() }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp).height(5.dp).clip(RoundedCornerShape(50)), color = if (done == items.size) C.OK else C.GOLD, trackColor = C.SURFACE2)
+        for ((ok, t) in items) {
+            Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (ok) "✅" else "⬜", fontSize = 14.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(t, fontSize = 13.5.sp, color = if (ok) C.MUTED else Color.White)
+            }
+        }
+    }
+}
+
 @Composable
 private fun SlotSummaryTab(slot: Int, d: SlotData) {
     var missingEdit by remember { mutableStateOf<Completeness.Item?>(null) }
@@ -3145,6 +3234,7 @@ private fun SlotSummaryTab(slot: Int, d: SlotData) {
         if (d.board.size > 1) Fold("💬", "Mensagens da direção", d.board.size.toString()) { BoardLines(d.board) }
     } else {
         MatchupHero(slot, d)
+        if (d.eve.isNotEmpty()) EveCard(d.eve)
         StrengthsAttention(d)
         Panel { WinCard(d.win) }
     }
@@ -3528,7 +3618,10 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                             Text(p.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                         }
-                        Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}", fontSize = 13.sp, color = C.MUTED)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            d.flagRich[p.nameKey]?.let { FlagSwatch(it, null, 24.dp, 16.dp); Spacer(Modifier.width(6.dp)) }
+                            Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (d.countries[p.nameKey]?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                         val ft = d.fitness[p.nameKey]
                         if (ft != null) {
                             Row(Modifier.fillMaxWidth().padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -5672,6 +5765,13 @@ private fun SettingsTab() {
                 Settings.put(ctx, "close_osm", if (it) "1" else "0")
             }
             Text("O app abre sozinho e processa o que leu. O OSM fica aberto em segundo plano: feche-o à mão se quiser (o app não consegue fechar outro app neste aparelho).", fontSize = 13.sp, color = C.MUTED)
+        }
+        val atlasTick = rememberTick(4000L)
+        val atlasCounts = rememberLoaded(Pair(0, 0), atlasTick, UiBus.version) { Pair(Atlas.count(Repo(ctx), Atlas.Kind.NAT), Atlas.count(Repo(ctx), Atlas.Kind.LEAGUE)) }
+        Fold("🏳", "Atlas de bandeiras e ligas", "${atlasCounts.first} países • ${atlasCounts.second} ligas") {
+            Text("O app aprende o nome de cada bandeira (e o emblema de cada liga) olhando os filtros do OSM. Com a captura ligada: Lista de transferências → toque no filtro Nacionalidade e role a lista até o fim; depois o filtro Liga. Vale para os 4 slots e é feito uma vez só.", fontSize = 13.sp, color = C.MUTED)
+            Text(if (atlasCounts.first >= 150) "✅ Nacionalidades completas: o Elenco mostra o país de cada jogador." else if (atlasCounts.first > 0) "⚠ Faltam nacionalidades: role o filtro até o fim." else "Ainda não li o filtro de Nacionalidade.", fontSize = 13.sp, color = if (atlasCounts.first >= 150) C.OK else C.GOLD, modifier = Modifier.padding(top = 4.dp))
+            Text(if (atlasCounts.second >= 80) "✅ Ligas lidas: o emblema aparece no cabeçalho do slot." else if (atlasCounts.second > 0) "⚠ Faltam ligas: role o filtro Liga até o fim." else "Ainda não li o filtro de Liga.", fontSize = 13.sp, color = if (atlasCounts.second >= 80) C.OK else C.GOLD, modifier = Modifier.padding(top = 2.dp))
         }
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }

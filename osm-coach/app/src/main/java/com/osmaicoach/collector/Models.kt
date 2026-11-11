@@ -59,7 +59,9 @@ data class PlayerRead(
     /** Assinatura da bandeira (coluna Nac.): ver `PixelProbe.flagSig`. */
     val nat: String? = null,
     /** Cruz vermelha de lesão na coluna "Estado" (x≈0,856–0,876, medido em vídeo 07/11); false = linha lida sem cruz. */
-    val injured: Boolean? = null
+    val injured: Boolean? = null,
+    /** Assinatura rica da bandeira (`PixelProbe.flagRich`): reconhece o país pelo Atlas. */
+    val natRich: String? = null
 )
 
 data class MatchRead(

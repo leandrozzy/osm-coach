@@ -76,8 +76,51 @@ object SlotRules {
         return by.entries.sortedByDescending { it.value.size }.map { it.key to it.value }
     }
 
+    /** Escolhida pelo usuário; senão a sugerida pelo nome da liga (Atlas) — ex.: "Alemanha, 3ª Divisão" → jogadores "Alemão". */
     suspend fun leagueFlag(repo: Repo, slot: Int): String? =
         repo.dao.plan(slot, "leagueflag")?.json?.let { runCatching { JSONObject(it).optString("sig") }.getOrNull() }?.takeIf { it.length == 9 }
+            ?: runCatching { suggestLeagueFlag(repo, slot) }.getOrNull()
+
+    /** País de cada jogador do meu elenco (nome do Atlas pela bandeira); null = Atlas ainda não conhece. */
+    suspend fun playerCountries(repo: Repo, slot: Int): Map<String, String?> {
+        val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyMap()
+        val out = HashMap<String, String?>()
+        for (k in rich.keys()) out[k] = Atlas.nameOf(repo, rich.optString(k))
+        return out
+    }
+
+    data class FlagInfo(val name: String?, val rich: String?)
+
+    /** Por grupo de bandeira (assinatura 3×3): nome do país (maioria dos jogadores) e uma assinatura rica para desenhar. */
+    suspend fun flagInfo(repo: Repo, slot: Int): Map<String, FlagInfo> {
+        val nat = repo.dao.plan(slot, "nations")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyMap()
+        val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val countries = playerCountries(repo, slot)
+        val votes = HashMap<String, HashMap<String, Int>>()
+        val sample = HashMap<String, String>()
+        for (k in nat.keys()) {
+            val sig = nat.optString(k)
+            countries[k]?.let { n -> votes.getOrPut(sig) { HashMap() }.merge(n, 1, Int::plus) }
+            rich?.optString(k)?.takeIf { it.isNotEmpty() }?.let { sample.putIfAbsent(sig, it) }
+        }
+        val out = HashMap<String, FlagInfo>()
+        for (k in nat.keys()) {
+            val sig = nat.optString(k)
+            if (out.containsKey(sig)) continue
+            out[sig] = FlagInfo(votes[sig]?.maxByOrNull { it.value }?.key, sample[sig])
+        }
+        return out
+    }
+
+    /** Bandeira da liga deduzida do nome da liga (Atlas) e do elenco; null se não deu para casar. */
+    suspend fun suggestLeagueFlag(repo: Repo, slot: Int): String? {
+        val f = repo.fieldMap(slot)
+        val comp = f[K.COMPETITION]?.value ?: f[K.HUB_TITLE]?.value ?: return null
+        val nat = Atlas.nationalityForCountry(repo, comp.substringBefore(',').trim()) ?: return null
+        val infos = flagInfo(repo, slot)
+        return infos.entries.filter { e -> e.value.name?.let { it == nat || it.startsWith(nat) } == true }
+            .let { l -> l.firstOrNull() }?.key?.takeIf { it.length == 9 }
+    }
 
     suspend fun setLeagueFlag(repo: Repo, slot: Int, sig: String?, now: Long) =
         repo.dao.putPlan(PlanEntity(slot, "leagueflag", if (sig == null) "{}" else JSONObject().put("sig", sig).toString(), now))

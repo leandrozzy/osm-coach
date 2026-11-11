@@ -377,7 +377,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -676,6 +676,15 @@ class Repo(private val ctx: Context) {
                 }
                 dao.putPlan(PlanEntity(slot, "natreps", JSONObject().put("reps", JSONArray(reps)).toString(), now))
                 dao.putPlan(PlanEntity(slot, "nations", nat.toString(), now))
+                // assinatura rica por jogador (o Atlas dá o nome do país)
+                val rich = planJson(slot, "natrich")
+                for (p in withNat) {
+                    val rs = p.natRich ?: continue
+                    val k = Txt.key(p.name)
+                    val key = seen.firstOrNull { it == k } ?: dao.playersOf(slot).firstOrNull { it.owner == "MY" && SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                    rich.put(key, rs)
+                }
+                dao.putPlan(PlanEntity(slot, "natrich", rich.toString(), now))
             }
         }
         if (ex.players.size >= 3) {

@@ -398,7 +398,8 @@ object Parsers {
                     // a cruz de lesão fica um pouco à esquerda do cartão (0,856–0,876): a caixa do vermelho começa depois dela
                     red = img?.let { PixelProbe.redBox(it, 0.883f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
                     injured = img?.let { PixelProbe.redBox(it, 0.852f, 0.880f, a.yc - 0.03f, a.yc + 0.03f) >= 0.10f },
-                    nat = img?.let { PixelProbe.flagSig(it, (ageX + posX) / 2f, a.yc) }
+                    nat = img?.let { PixelProbe.flagSig(it, (ageX + posX) / 2f, a.yc) },
+                    natRich = img?.let { PixelProbe.flagRich(it, (ageX + posX) / 2f, a.yc, 0.026f, 0.040f) }
                 )
             )
         }
