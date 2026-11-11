@@ -76,6 +76,35 @@ object CrestCut {
         return out
     }
 
+    /** O recorte é MESMO um escudo? O "?" cinza (clube sem escudo) é só um contorno azul apagado: quase nenhum pixel vivo/claro. */
+    fun looksLikeCrest(px: IntArray): Boolean {
+        if (px.isEmpty()) return false
+        var vivid = 0
+        for (c in px) {
+            val r = (c shr 16 and 0xFF) / 255f; val g = (c shr 8 and 0xFF) / 255f; val b = (c and 0xFF) / 255f
+            val mx = maxOf(r, g, b); val mn = minOf(r, g, b)
+            val s = if (mx == 0f) 0f else (mx - mn) / mx
+            if ((mx >= 0.6f && s >= 0.4f) || (mx >= 0.85f && s <= 0.2f)) vivid++
+        }
+        return vivid >= px.size * 0.07f   // escudo escuro (verde/preto) tem só ~14% vivo; o "?" tem 0%
+    }
+
+    /** Escudo de tamanho conhecido (a moldura pode ser dourada, de cobre ou prata): máscara da silhueta sobre a caixa exata. */
+    fun cutFixed(bmp: Bitmap, x: Int, y: Int, w: Int, h: Int): Bitmap? {
+        if (w < 20 || h < 20 || x < 0 || y < 0 || x + w > bmp.width || y + h > bmp.height) return null
+        val src = Bitmap.createBitmap(bmp, x, y, w, h)
+        val px = IntArray(w * h); src.getPixels(px, 0, w, 0, 0, w, h)
+        if (!looksLikeCrest(px)) { src.recycle(); return null }
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(out)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        cv.drawPath(shield(w.toFloat(), h.toFloat()), p)
+        p.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        cv.drawBitmap(src, 0f, 0f, p)
+        src.recycle()
+        return out
+    }
+
     fun dir(filesDir: File): File = File(filesDir, "crests/t2").apply { mkdirs() }
 
     fun file(filesDir: File, team: String?): File? {
@@ -95,7 +124,7 @@ object CrestCut {
     }
 
     /** Recorta a região da captura (frações 0..1), corta o escudo e grava. false se não achou escudo ou já existe. */
-    fun save(filesDir: File, bmp: Bitmap, team: String?, cx: Float, cy: Float, w: Float, h: Float, overwrite: Boolean = false): Boolean {
+    fun save(filesDir: File, bmp: Bitmap, team: String?, cx: Float, cy: Float, w: Float, h: Float, overwrite: Boolean = false, fixedW: Float? = null, fixedH: Float? = null): Boolean {
         val f = file(filesDir, team) ?: return false
         if (f.exists() && !overwrite) return false
         return try {
@@ -105,7 +134,11 @@ object CrestCut {
             val hh = (h * bmp.height).toInt().coerceAtMost(bmp.height - y)
             if (ww < 20 || hh < 20) return false
             val crop = Bitmap.createBitmap(bmp, x, y, ww, hh)
-            val cut = cut(crop)
+            // moldura dourada achada = caixa exata; senão (moldura de cobre/prata) usa a caixa fixa da tela, se informada
+            val cut = cut(crop) ?: if (fixedW != null && fixedH != null) {
+                val fw = (fixedW * bmp.width).toInt(); val fh = (fixedH * bmp.height).toInt()
+                cutFixed(bmp, (cx * bmp.width - fw / 2f).toInt(), (cy * bmp.height - fh / 2f).toInt(), fw, fh)
+            } else null
             crop.recycle()
             if (cut == null) return false
             f.parentFile?.mkdirs()

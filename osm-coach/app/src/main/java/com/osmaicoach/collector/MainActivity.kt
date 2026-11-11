@@ -325,6 +325,16 @@ private fun rememberTick(ms: Long = 1500L): Int {
 
 object UiBus {
     var version by mutableIntStateOf(0)
+    private var lastBump = 0L
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Chamado pela captura depois de gravar algo (campos, escudos, bandeiras): a tela recarrega sozinha, sem botão de atualizar. No máx. 1× a cada 1,2 s. */
+    fun bump() {
+        val now = System.currentTimeMillis()
+        if (now - lastBump < 1200L) return
+        lastBump = now
+        main.post { version++ }
+    }
 }
 
 data class EditRow(val label: String, val key: String?, val display: String? = null)

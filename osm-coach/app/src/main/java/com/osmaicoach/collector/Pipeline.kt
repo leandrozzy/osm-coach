@@ -624,6 +624,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 if (cut != null) CrestCut.file(ctx.filesDir, card.team)?.let { tf -> if (!tf.exists()) { tf.parentFile?.mkdirs(); FileOutputStream(tf).use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) } } }
                 cut?.recycle(); crop.recycle()
                 if (team.isNotEmpty()) tag.writeText("$team|v2")
+                UiBus.bump()
             } catch (e: Exception) {
                 Diag.lastError = "Escudo: " + (e.message ?: "erro")
             }
@@ -631,13 +632,23 @@ class FramePipeline private constructor(private val ctx: Context) {
     }
 
     /** Miniatura NÍTIDA (WebP, ~44×30) de uma região da captura inteira, em base64; null se quase tudo escuro. */
-    private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int): Pair<Float, String>? = try {
+    private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int, refine: Boolean = false): Pair<Float, String>? = try {
         val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
         val y = ((cy - h / 2) * bmp.height).toInt().coerceIn(0, bmp.height - 2)
         val ww = (w * bmp.width).toInt().coerceAtMost(bmp.width - x)
         val hh = (h * bmp.height).toInt().coerceAtMost(bmp.height - y)
         if (ww < 8 || hh < 8) null else {
-            val crop = Bitmap.createBitmap(bmp, x, y, ww, hh)
+            var crop = Bitmap.createBitmap(bmp, x, y, ww, hh)
+            if (refine) {
+                // o recorte vem maior que a bandeira (~35×24 px em 1280×564); acha a caixa real e recorta nela (sem sobra à direita/esquerda)
+                val cpx = IntArray(ww * hh); crop.getPixels(cpx, 0, ww, 0, 0, ww, hh)
+                val box = Flags.flagBox(cpx, ww, hh, (0.0273f * bmp.width).toInt(), (0.0426f * bmp.height).toInt())
+                if (box != null) {
+                    val bx = (box[0] - 1).coerceAtLeast(0); val by = (box[1] - 1).coerceAtLeast(0)
+                    val bw2 = (box[2] + 2).coerceAtMost(ww) - bx; val bh2 = (box[3] + 2).coerceAtMost(hh) - by
+                    if (bw2 >= 8 && bh2 >= 8) { val c2 = Bitmap.createBitmap(crop, bx, by, bw2, bh2); crop.recycle(); crop = c2 }
+                }
+            }
             val small = Bitmap.createScaledBitmap(crop, outW, outH, true)
             val px = IntArray(outW * outH); small.getPixels(px, 0, outW, 0, 0, outW, outH)
             val dark = px.count { ((it shr 16 and 0xFF) + (it shr 8 and 0xFF) + (it and 0xFF)) < 120 }
@@ -663,17 +674,17 @@ class FramePipeline private constructor(private val ctx: Context) {
             val key = Txt.key(p.name)
             if (key.isBlank()) continue
             val old = Flags.imgQuality(cur.optString(key))
-            val t = thumb(bmp, x, y, 0.031f, 0.047f, 48, 32) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
+            val t = thumb(bmp, x, y, 0.040f, 0.062f, 48, 32, refine = true) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
             if (old == null || t.first > old * 1.08f + 1f) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
         }
-        if (n > 0) repo.dao.putPlan(PlanEntity(slot, "natimg2", cur.toString(), System.currentTimeMillis()))
+        if (n > 0) { repo.dao.putPlan(PlanEntity(slot, "natimg2", cur.toString(), System.currentTimeMillis())); UiBus.bump() }
     }
 
     /** Faixa de clubes do topo do Calendário: escudo + nome de cada clube da liga (um por clube; só grava o que ainda não existe). */
     private fun saveStripCrests(bmp: Bitmap, spots: List<CrestSpot>) {
         for (s in spots) {
             if (CrestCut.find(ctx.filesDir, s.team) != null) continue
-            try { CrestCut.save(ctx.filesDir, bmp, s.team, s.x, s.y, 0.065f, 0.16f) } catch (e: Exception) { Diag.lastError = "Escudo da liga: " + (e.message ?: "erro") }
+            try { if (CrestCut.save(ctx.filesDir, bmp, s.team, s.x, s.y, 0.065f, 0.16f, fixedW = 0.046f, fixedH = 0.115f)) UiBus.bump() } catch (e: Exception) { Diag.lastError = "Escudo da liga: " + (e.message ?: "erro") }
         }
     }
 
@@ -682,7 +693,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             val cx = m.crestX ?: continue; val cy = m.crestY ?: continue
             val team = m.opponent ?: continue
             if (CrestCut.find(ctx.filesDir, team) != null) continue
-            try { CrestCut.save(ctx.filesDir, bmp, team, cx, cy, 0.075f, 0.18f) } catch (e: Exception) { Diag.lastError = "Escudo do calendário: " + (e.message ?: "erro") }
+            try { if (CrestCut.save(ctx.filesDir, bmp, team, cx, cy, 0.075f, 0.18f, fixedW = 0.054f, fixedH = 0.128f)) UiBus.bump() } catch (e: Exception) { Diag.lastError = "Escudo do calendário: " + (e.message ?: "erro") }
         }
     }
 
@@ -708,9 +719,10 @@ class FramePipeline private constructor(private val ctx: Context) {
             FileOutputStream(f).use { (cut ?: crop).compress(Bitmap.CompressFormat.PNG, 100, it) }
             cut?.recycle(); crop.recycle()
             tag.writeText("$key|v2")
+            UiBus.bump()
             // os dois escudos do Pré-jogo também entram no arquivo global por nome do time (escudo não muda)
-            CrestCut.save(ctx.filesDir, bmp, rival, cx, 0.255f, 0.08f, 0.20f)
-            ex.fields[K.TEAM]?.value?.let { mine -> CrestCut.save(ctx.filesDir, bmp, mine, if (mineLeft) 0.232f else 0.768f, 0.255f, 0.08f, 0.20f) }
+            CrestCut.save(ctx.filesDir, bmp, rival, cx, 0.258f, 0.08f, 0.20f, fixedW = 0.067f, fixedH = 0.16f)
+            ex.fields[K.TEAM]?.value?.let { mine -> CrestCut.save(ctx.filesDir, bmp, mine, if (mineLeft) 0.233f else 0.767f, 0.258f, 0.08f, 0.20f, fixedW = 0.067f, fixedH = 0.16f) }
         } catch (e: Exception) { Diag.lastError = "Escudo do rival: " + (e.message ?: "erro") }
     }
 
@@ -866,6 +878,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 noSlot.clear()
             }
             var changed = repo.apply(asg.slot, ex, "ocr", now)
+            if (changed > 0) UiBus.bump()   // tudo o que a captura gravou aparece no app sozinho
             if (asgSlot != null && type == ScreenType.SQUAD && ex.ownerTeam != null && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
             if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, asgSlot, ex)
             // o Calendário mostra o escudo de cada rival: guarda uma vez por clube (só grava o que ainda não tem)

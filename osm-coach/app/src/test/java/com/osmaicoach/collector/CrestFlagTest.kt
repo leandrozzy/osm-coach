@@ -60,4 +60,20 @@ class CrestFlagTest {
     @Test fun flagColumnIsAFixedLayoutConstant() {
         assertEquals(0.5914f, Parsers.FLAG_X, 0.0001f)
     }
+
+    @Test fun placeholderIsNotACrest() {
+        val dark = IntArray(2500) { (0xFF shl 24) or (22 shl 16) or (45 shl 8) or 95 }        // fundo azul do estádio com "?" apagado
+        assertFalse(CrestCut.looksLikeCrest(dark))
+        val crest = IntArray(2500) { i -> if (i % 4 == 0) (0xFF shl 24) or (200 shl 16) or (30 shl 8) or 30 else (0xFF shl 24) or (22 shl 16) or (45 shl 8) or 95 }
+        assertTrue(CrestCut.looksLikeCrest(crest))                                           // 25% de vermelho vivo
+    }
+
+    @Test fun flagBoxCorrectsOffset() {
+        val w = 51; val h = 35
+        val px = IntArray(w * h) { (0xFF shl 24) or (255 shl 16) or (255 shl 8) or 255 }      // fundo branco da linha
+        for (y in 5..28) for (x in 12..46) px[y * w + x] = (0xFF shl 24) or (200 shl 16) or (30 shl 8) or 30   // bandeira 35×24 deslocada p/ a direita
+        val b = Flags.flagBox(px, w, h, 34, 24)!!
+        assertEquals(12, b[0]); assertEquals(46, b[2]); assertEquals(5, b[1]); assertEquals(28, b[3])
+        assertNull(Flags.flagBox(px, w, h, 20, 24))                                         // largura fora do esperado: não acha
+    }
 }

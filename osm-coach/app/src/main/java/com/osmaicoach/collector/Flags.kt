@@ -91,6 +91,30 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
 
     fun emojiOf(name: String?): String? = emoji(iso(name))
 
+    /**
+     * Caixa [x0,y0,x1,y1] (inclusive) da bandeira dentro de um recorte um pouco MAIOR que ela: o fundo da linha é a cor dos 4 cantos e a
+     * bandeira é tudo que difere dele (inclui o contorno claro). Corrige desvios de alguns pixels para qualquer lado. null = não achou
+     * (tamanho fora do esperado): quem chama usa o recorte centrado.
+     */
+    fun flagBox(px: IntArray, w: Int, h: Int, expW: Int, expH: Int): IntArray? {
+        if (w < 8 || h < 8 || px.size < w * h) return null
+        fun ch(c: Int, s: Int) = (c shr s) and 0xFF
+        val corners = intArrayOf(px[0], px[w - 1], px[(h - 1) * w], px[h * w - 1])
+        val bgR = corners.map { ch(it, 16) }.sorted()[1]; val bgG = corners.map { ch(it, 8) }.sorted()[1]; val bgB = corners.map { ch(it, 0) }.sorted()[1]
+        val cols = IntArray(w); val rows = IntArray(h)
+        for (y in 0 until h) for (x in 0 until w) {
+            val c = px[y * w + x]
+            if (maxOf(Math.abs(ch(c, 16) - bgR), Math.abs(ch(c, 8) - bgG), Math.abs(ch(c, 0) - bgB)) > 22) { cols[x]++; rows[y]++ }
+        }
+        val cMin = (h * 0.35f).toInt().coerceAtLeast(3); val rMin = (w * 0.35f).toInt().coerceAtLeast(3)
+        val x0 = cols.indexOfFirst { it >= cMin }; val x1 = cols.indexOfLast { it >= cMin }
+        val y0 = rows.indexOfFirst { it >= rMin }; val y1 = rows.indexOfLast { it >= rMin }
+        if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0) return null
+        val bw = x1 - x0 + 1; val bh = y1 - y0 + 1
+        if (bw < expW * 0.8f || bw > expW * 1.2f || bh < expH * 0.8f || bh > expH * 1.2f) return null
+        return intArrayOf(x0, y0, x1, y1)
+    }
+
     /** Recorte da bandeira guardado como "q:<nitidez×10>|<base64>" (o mais nítido vence); texto antigo sem prefixo vale como está. */
     fun imgQuality(s: String?): Float? = if (s.isNullOrEmpty()) null else if (s.startsWith("q:")) s.substring(2, s.indexOf('|').coerceAtLeast(2)).toFloatOrNull()?.div(10f) ?: 0f else 0f
     fun imgPayload(s: String): String = if (s.startsWith("q:")) s.substringAfter('|') else s
