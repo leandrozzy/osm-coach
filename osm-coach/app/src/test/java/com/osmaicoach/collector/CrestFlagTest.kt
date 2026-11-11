@@ -137,4 +137,16 @@ class CrestFlagTest {
         assertEquals("000000", g.substring(0, 6))           // 1ª linha: preto
         assertEquals("ffce00", g.substring(4 * 8 * 6, 4 * 8 * 6 + 6))   // última linha: amarelo
     }
+
+    @Test fun repositorioEscolheArquivoPeloNome() {
+        val paths = listOf("logos/austria/Amstetten.svg", "logos/austria/ASK_Voitsberg.svg", "logos/austria/SW_Bregenz.svg", "logos/austria/Austria_National_Team.svg",
+            "logos/brazil/RB_Bragantino.svg", "logos/germany/SV_Waldhof_Mannheim.svg", "logos/germany/Fortuna_Düsseldorf.svg", "logos/england/Sporting_X.svg", "logos/portugal/Sporting_X.svg")
+        assertEquals("logos/austria/Amstetten.svg", CrestWeb.pickPath("SKU Amstetten", paths))
+        assertEquals("logos/austria/ASK_Voitsberg.svg", CrestWeb.pickPath("ASK Voitsberg", paths))
+        assertEquals("logos/brazil/RB_Bragantino.svg", CrestWeb.pickPath("Red Bull Bragantino", paths))
+        assertEquals("logos/germany/SV_Waldhof_Mannheim.svg", CrestWeb.pickPath("Waldhof Mannheim", paths))
+        assertEquals("logos/germany/Fortuna_Düsseldorf.svg", CrestWeb.pickPath("Fortuna Düsseldorf", paths))
+        assertNull(CrestWeb.pickPath("Sporting X", paths))            // mesmo nome em 2 países: ambíguo
+        assertNull(CrestWeb.pickPath("Austria", paths))               // seleção nacional não é clube
+    }
 }

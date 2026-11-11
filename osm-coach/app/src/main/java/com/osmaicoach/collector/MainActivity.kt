@@ -3108,6 +3108,14 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
 @Composable
 private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp, img: String? = null) {
     val e = Flags.emoji(iso)
+    val fctx = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(iso) { FlagWeb.request(fctx, iso) }   // bandeira nítida do Flagpedia (domínio público) quando o país é conhecido
+    val webFlag = remember(iso, UiBus.version) { FlagWeb.file(fctx.filesDir, iso)?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() }.getOrNull() } }
+    if (webFlag != null) {
+        Image(webFlag, contentDescription = null, contentScale = ContentScale.FillBounds, filterQuality = androidx.compose.ui.graphics.FilterQuality.High, modifier = Modifier.size(w, h).clip(RoundedCornerShape(3.dp)))
+        Spacer(Modifier.width(6.dp))
+        return
+    }
     val bmp = remember(img) { img?.let { runCatching { val b = android.util.Base64.decode(Flags.imgPayload(it), android.util.Base64.NO_WRAP); BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() } }
     if (bmp != null) {
         Image(bmp, contentDescription = null, contentScale = ContentScale.FillBounds, filterQuality = androidx.compose.ui.graphics.FilterQuality.High, modifier = Modifier.size(w, h).clip(RoundedCornerShape(3.dp)))

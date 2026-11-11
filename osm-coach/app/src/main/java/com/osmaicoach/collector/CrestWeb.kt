@@ -116,7 +116,74 @@ object CrestWeb {
                 return
             }
         }
+        if (fetchRepo(ctx, team)) return
         markMiss(fd, team)
         Diag.log("Escudo real de $team: não encontrado na web (uso o recorte do jogo)")
+    }
+
+    // ------------------------------------------------------------ 2ª fonte: repositório football-logos (SVG, licença MIT)
+
+    private const val TREE = "https://api.github.com/repos/JoseArroyave/football-logos/git/trees/main?recursive=1"
+    private const val RAW = "https://raw.githubusercontent.com/JoseArroyave/football-logos/main/"
+    private const val IDX_MS = 7L * 86400000L
+    private const val MAX_SVG = 600_000
+    @Volatile private var index: List<String>? = null
+
+    /** Lista dos SVGs do repositório (um pedido por semana, guardado em `_idx.json`). */
+    private fun loadIndex(fd: File): List<String> {
+        index?.let { return it }
+        val f = File(dir(fd), "_idx.json")
+        runCatching {
+            if (f.exists() && System.currentTimeMillis() - f.lastModified() < IDX_MS) {
+                val a = org.json.JSONArray(f.readText()); val l = List(a.length()) { a.getString(it) }
+                if (l.isNotEmpty()) { index = l; return l }
+            }
+        }
+        val (code, body) = get(TREE, true)
+        val list = if (code in 200..299 && body != null) runCatching {
+            val arr = JSONObject(String(body)).getJSONArray("tree")
+            (0 until arr.length()).map { arr.getJSONObject(it).optString("path") }.filter { it.startsWith("logos/") && it.endsWith(".svg") }
+        }.getOrDefault(emptyList()) else emptyList()
+        if (list.isNotEmpty()) { f.writeText(org.json.JSONArray(list).toString()); index = list; return list }
+        // sem rede/limite do GitHub: usa o índice velho se existir
+        return runCatching { val a = org.json.JSONArray(f.readText()); List(a.length()) { a.getString(it) }.also { index = it } }.getOrDefault(emptyList())
+    }
+
+    /** "logos/germany/SV_Waldhof_Mannheim.svg" → "SV Waldhof Mannheim" */
+    internal fun nameOfPath(path: String): String = path.substringAfterLast('/').removeSuffix(".svg").replace('_', ' ')
+
+    /** Melhor arquivo do repositório para o nome do clube: nome parecido; empate entre países diferentes = ambíguo (null). */
+    internal fun pickPath(team: String, paths: List<String>): String? {
+        val k = Txt.key(team)
+        val c = paths.filter { sameClub(team, nameOfPath(it)) && !nameOfPath(it).contains("National Team", true) }
+        if (c.isEmpty()) return null
+        val scored = c.map { it to Txt.sim(k, Txt.key(nameOfPath(it))) }.sortedByDescending { it.second }
+        val top = scored[0]
+        val rivals = scored.filter { it.second >= top.second - 0.02 && it.first.substringAfter("logos/").substringBefore('/') != top.first.substringAfter("logos/").substringBefore('/') }
+        return if (rivals.isEmpty()) top.first else null
+    }
+
+    private fun fetchRepo(ctx: Context, team: String): Boolean {
+        val fd = ctx.filesDir
+        val path = pickPath(team, loadIndex(fd)) ?: return false
+        val url = RAW + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        val (code, body) = get(url, true)
+        if (code !in 200..299 || body == null || body.size > MAX_SVG) return false
+        val bmp = runCatching {
+            val svg = com.caverock.androidsvg.SVG.getFromInputStream(body.inputStream())
+            val pic = svg.renderToPicture(256, 256)
+            val b = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+            android.graphics.Canvas(b).drawPicture(pic)
+            b
+        }.getOrNull() ?: return false
+        // desenho vazio (SVG que o renderizador não entendeu): quase nenhum pixel visível
+        val px = IntArray(256 * 256); bmp.getPixels(px, 0, 256, 0, 0, 256, 256)
+        if (px.count { (it ushr 24) > 40 } < 256 * 256 / 20) { bmp.recycle(); return false }
+        val f = File(dir(fd), Txt.key(team) + ".png")
+        java.io.FileOutputStream(f).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        bmp.recycle()
+        Diag.log("Escudo real de $team ← ${nameOfPath(path)} (football-logos)")
+        UiBus.bump()
+        return true
     }
 }
