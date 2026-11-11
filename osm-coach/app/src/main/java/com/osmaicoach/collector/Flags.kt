@@ -85,5 +85,9 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
     }
 
     fun emojiOf(name: String?): String? = emoji(iso(name))
+
+    /** Recorte da bandeira guardado como "q:<nitidez×10>|<base64>" (o mais nítido vence); texto antigo sem prefixo vale como está. */
+    fun imgQuality(s: String?): Float? = if (s.isNullOrEmpty()) null else if (s.startsWith("q:")) s.substring(2, s.indexOf('|').coerceAtLeast(2)).toFloatOrNull()?.div(10f) ?: 0f else 0f
+    fun imgPayload(s: String): String = if (s.startsWith("q:")) s.substringAfter('|') else s
     fun emojiOfCompetition(title: String?): String? = emoji(isoFromCompetition(title))
 }

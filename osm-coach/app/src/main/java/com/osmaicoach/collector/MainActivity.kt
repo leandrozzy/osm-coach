@@ -570,8 +570,13 @@ private fun Crest(slot: Int, size: Dp) {
     val ctx = LocalContext.current
     val f = File(ctx.filesDir, "crests/s$slot.png")
     val stamp = if (f.exists()) f.lastModified() else 0L
-    val bmp = remember(stamp) { if (stamp > 0L) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null }
-    if (bmp != null) {
+    val raw = remember(stamp) { if (stamp > 0L) BitmapFactory.decodeFile(f.absolutePath) else null }
+    // escudo já recortado na silhueta (fundo transparente): mostra inteiro, sem o retângulo; recorte antigo quadrado segue como antes
+    val isCut = raw != null && raw.hasAlpha() && (raw.getPixel(0, 0) ushr 24) == 0
+    val bmp = remember(raw) { raw?.asImageBitmap() }
+    if (bmp != null && isCut) {
+        Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size))
+    } else if (bmp != null) {
         Image(bmp, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(size).clip(RoundedCornerShape(14.dp)))
     } else {
         Box(Modifier.size(size).clip(RoundedCornerShape(14.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) {
@@ -719,11 +724,17 @@ private fun initials(name: String): String {
 @Composable
 private fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
     val ctx = LocalContext.current
+    val ver = UiBus.version
     // escudo REAL do rival (recorte do Pré-jogo), só enquanto for o mesmo rival do recorte
-    val real = remember(slot, name) {
-        if (slot == null || name == null) null else runCatching {
-            val f = File(ctx.filesDir, "crests/r$slot.png"); val t = File(ctx.filesDir, "crests/r$slot.txt")
-            if (f.exists() && t.exists() && t.readText() == Txt.key(name)) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
+    val real = remember(slot, name, ver) {
+        if (name == null) null else runCatching {
+            // 1º o arquivo global por nome do time (calendário/pré-jogo: o escudo de um clube não muda), 2º o recorte do pré-jogo deste slot
+            val tf = CrestCut.file(ctx.filesDir, name)
+            if (tf != null && tf.exists()) BitmapFactory.decodeFile(tf.absolutePath)?.asImageBitmap()
+            else if (slot != null) {
+                val f = File(ctx.filesDir, "crests/r$slot.png"); val t = File(ctx.filesDir, "crests/r$slot.txt")
+                if (f.exists() && t.exists() && t.readText() == Txt.key(name)) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
+            } else null
         }.getOrNull()
     }
     if (real != null) { Image(real, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); return }
@@ -3089,7 +3100,7 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
 @Composable
 private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp, img: String? = null) {
     val e = Flags.emoji(iso)
-    val bmp = remember(img) { img?.let { runCatching { val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP); BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() } }
+    val bmp = remember(img) { img?.let { runCatching { val b = android.util.Base64.decode(Flags.imgPayload(it), android.util.Base64.NO_WRAP); BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() } }
     if (bmp != null) {
         Image(bmp, contentDescription = null, contentScale = ContentScale.FillBounds, filterQuality = androidx.compose.ui.graphics.FilterQuality.High, modifier = Modifier.size(w, h).clip(RoundedCornerShape(3.dp)))
         Spacer(Modifier.width(6.dp))
@@ -3748,8 +3759,12 @@ private fun MatchCard(m: MatchEntity, modifier: Modifier, highlight: Boolean, vo
                 ) { Text(tag.first, fontSize = 11.sp, color = tag.second, fontWeight = FontWeight.ExtraBold, maxLines = 1) }
             } else ResultBadge(m.result)
         }
-        Text(score, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         val opp = Fixtures.opponent(m)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // escudo do rival guardado do calendário do OSM (só aparece se já foi recortado)
+            if (opp != null) TeamCrest(opp, 30.dp)
+            Text(score, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+        }
         val nick = m.opponentNick?.takeIf { Evidence.plausibleNick(it) }
         Text(
             opp ?: Fixtures.stage(m) ?: (if (m.opponent != null) "a definir" else NI),
@@ -6410,4 +6425,16 @@ private fun NewsCard() {
         )) Text(t, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 3.dp))
         OutlinedButton(onClick = { Settings.put(ctx, "news_evo1", "1"); seen = true }, modifier = Modifier.padding(top = 8.dp)) { Text("Entendi") }
     }
+}
+
+
+/** Escudo guardado de um clube (arquivo global por nome); não desenha nada se ainda não foi recortado. */
+@Composable
+private fun TeamCrest(name: String?, size: Dp) {
+    val ctx = LocalContext.current
+    val ver = UiBus.version
+    val bmp = remember(name, ver) {
+        runCatching { CrestCut.file(ctx.filesDir, name)?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } }.getOrNull()
+    }
+    if (bmp != null) { Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); Spacer(Modifier.width(4.dp)) }
 }

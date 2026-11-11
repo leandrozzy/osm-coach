@@ -78,7 +78,10 @@ data class MatchRead(
     val scoreOpp: Int?,
     val result: String?,
     val opponent: String?,
-    val opponentNick: String?
+    val opponentNick: String?,
+    /** Centro do escudo do rival no card da captura (0..1); o recorte do escudo sai daqui. */
+    val crestX: Float? = null,
+    val crestY: Float? = null
 )
 
 data class ListingRead(

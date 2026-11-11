@@ -522,7 +522,9 @@ object Parsers {
                 MatchRead(
                     key = key, label = if (stage != null) "Copa • $stage" else a.label, round = a.round, date = date, time = time,
                     home = finalHome, scoreMine = mine, scoreOpp = opp, result = result,
-                    opponent = opponent, opponentNick = nick
+                    opponent = opponent, opponentNick = nick,
+                    // escudo do rival: ~0,168 da altura abaixo do "Jornada N" (frame real 2448×1080 de 10/11), na mesma coluna
+                    crestX = if (opponent != null) a.line.xc else null, crestY = if (opponent != null) a.line.yc + 0.168f else null
                 )
             )
         }

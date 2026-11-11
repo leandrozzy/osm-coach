@@ -240,8 +240,10 @@ class FramePipeline private constructor(private val ctx: Context) {
         val cats = HashSet<String>()
         var ratings = false
         var maxRound = 0
-        var lastSig = ""
+        var lastSet: Set<String> = emptySet()
         var moved = false
+        /** Dono da lista (plantel): quadros rolados sem o título continuam a mesma leitura. */
+        var owner: String? = null
     }
     private var pending: Pending? = null
     private var reportPassAt = 0L
@@ -264,12 +266,17 @@ class FramePipeline private constructor(private val ctx: Context) {
                 (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (gap) it.endSeen = true } }
             }
             ScreenType.CALENDAR -> {
-                if (ex.matches.size < 3) return
-                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (gap) pd.endSeen = true }
+                // o fim do calendário é sempre "Última rodada" + "Resumo da época": o quadro anterior é a última rodada
+                val endText = Txt.norm(ocr.fullText).contains("resumo da epoca")
+                if (ex.matches.size < 3 && !(cur != null && endText)) return
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (gap || endText) pd.endSeen = true }
             }
             ScreenType.SQUAD -> {
-                if (ex.players.size < 3 || ex.ownerTeam == null) return
-                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.players.forEach { p -> pd.seen.add(Txt.key(p.name)); p.cat?.let { c -> pd.cats.add(c) } }; if (gap && ex.players.any { it.cat == "GOL" }) pd.endSeen = true }
+                // rolada a lista, o título do time sai da tela: quadro sem dono continua a leitura em andamento (antes era descartado e o plantel nunca "chegava ao fim")
+                val own = ex.ownerTeam
+                val sameOwner = cur != null && (own == null || cur.owner == null || Txt.sim(Txt.key(own), Txt.key(cur.owner!!)) >= 0.8)
+                if (ex.players.size < 3 || (own == null && !sameOwner)) return
+                (if (sameOwner) cur!! else Pending(slot, type, null)).also { pd -> pending = pd; if (own != null) pd.owner = own; ex.players.forEach { p -> pd.seen.add(Txt.key(p.name)); p.cat?.let { c -> pd.cats.add(c) } }; if (gap && ex.players.any { it.cat == "GOL" }) pd.endSeen = true }
             }
             ScreenType.MARKET -> {
                 if (ex.listings.size < 3) return
@@ -279,13 +286,15 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         pd.offFrames = 0
         // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
-        val sig = (ex.players.map { it.name } + ex.listings.map { it.name } + ex.matches.map { "${it.round}" }).sorted().joinToString("|")
-        if (pd.lastSig.isNotEmpty() && sig != pd.lastSig) pd.moved = true
+        // quadro "igual" = ≥85% dos mesmos itens (o OCR oscila de um quadro parado para o outro)
+        val names = (ex.players.map { Txt.key(it.name) } + ex.listings.map { Txt.key(it.name) } + ex.matches.map { "${it.round}" }).toSet()
+        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.85f
+        if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
         // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
         // Plantel e Mercado vão até os goleiros e a última linha cola no rodapé: não dá para exigir folga embaixo.
         val hasGk = ex.players.any { it.cat == "GOL" } || ex.listings.any { it.cat == "GOL" }
-        val stalled = pd.moved && sig == pd.lastSig
-        pd.lastSig = sig
+        val stalled = pd.moved && same
+        pd.lastSet = names
         if (stalled && ((type == ScreenType.SQUAD || type == ScreenType.MARKET) && hasGk || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
         if (hasGk) pd.cats.add("GOL")
         ex.listings.forEach { l -> l.cat?.let { c -> pd.cats.add(c) } }
@@ -330,7 +339,13 @@ class FramePipeline private constructor(private val ctx: Context) {
                         (if (lacks.isEmpty()) (if (complete) " Completo: o aprendizado foi atualizado." else tail) else " Falta: " + lacks.joinToString(", ") + ".")
                 }
             }
-            ScreenType.CALENDAR -> (if (complete) "✅ " else "⚠ ") + "S$slot: Calendário: li ${pd.seen.size} rodadas" + (if (complete) " (até a última)." else ".$tail")
+            ScreenType.CALENDAR -> {
+                // as rodadas ficam guardadas: o total vem do banco (a passada só vê as que a tela mostrou), nunca "24" se há 43
+                val got = repo.dao.matchesOf(slot).mapNotNull { it.round }.toSet().size
+                val total = maxOf(f[K.ROUND_TOTAL]?.value?.toIntOrNull() ?: 0, pd.maxRound, got)
+                if (complete) "✅ S$slot: Calendário completo: $got de $total rodadas (até a última e o Resumo da época)."
+                else "⚠ S$slot: Calendário: $got de $total rodadas lidas (nesta passada vi ${pd.seen.size}).$tail"
+            }
             ScreenType.SQUAD -> (if (complete) "✅ " else "⚠ ") + "S$slot: Plantel: li ${pd.seen.size} jogadores" + (if (complete) " (do goleiro ao ataque, até o fim da lista)." else ".$tail")
             ScreenType.MARKET -> (if (complete) "✅ " else "⚠ ") + "S$slot: Mercado: li ${pd.seen.size} jogadores à venda" + (if (complete) " (até o fim da lista)." else ".$tail")
             ScreenType.TACTIC -> tacticSummary(slot, System.currentTimeMillis())
@@ -600,8 +615,10 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (w < 8 || hh < 8) continue
             try {
                 val crop = Bitmap.createBitmap(bmp, x, y, w, hh)
-                FileOutputStream(f).use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                crop.recycle()
+                val cut = CrestCut.cut(crop)   // escudo com a silhueta e fundo transparente; sem a moldura dourada cai no recorte quadrado
+                FileOutputStream(f).use { (cut ?: crop).compress(Bitmap.CompressFormat.PNG, 100, it) }
+                if (cut != null) CrestCut.file(ctx.filesDir, card.team)?.let { tf -> if (!tf.exists()) { tf.parentFile?.mkdirs(); FileOutputStream(tf).use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) } } }
+                cut?.recycle(); crop.recycle()
                 if (team.isNotEmpty()) tag.writeText(team)
             } catch (e: Exception) {
                 Diag.lastError = "Escudo: " + (e.message ?: "erro")
@@ -610,7 +627,7 @@ class FramePipeline private constructor(private val ctx: Context) {
     }
 
     /** Miniatura NÍTIDA (WebP, ~44×30) de uma região da captura inteira, em base64; null se quase tudo escuro. */
-    private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int): String? = try {
+    private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int): Pair<Float, String>? = try {
         val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
         val y = ((cy - h / 2) * bmp.height).toInt().coerceIn(0, bmp.height - 2)
         val ww = (w * bmp.width).toInt().coerceAtMost(bmp.width - x)
@@ -623,7 +640,13 @@ class FramePipeline private constructor(private val ctx: Context) {
             val os = java.io.ByteArrayOutputStream()
             small.compress(Bitmap.CompressFormat.WEBP_LOSSY, 92, os)
             if (crop !== small) crop.recycle(); small.recycle()
-            if (dark > px.size * 0.8) null else android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP)
+            // nitidez: quadro em movimento (rolagem) borra a bandeira; o gradiente médio é menor. Guarda o MAIS nítido de cada jogador.
+            fun g(c: Int) = ((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3
+            var grad = 0L; var n = 0
+            for (yy in 0 until outH - 1) for (xx in 0 until outW - 1) {
+                val c0 = g(px[yy * outW + xx]); grad += Math.abs(c0 - g(px[yy * outW + xx + 1])) + Math.abs(c0 - g(px[(yy + 1) * outW + xx])); n++
+            }
+            if (dark > px.size * 0.8) null else Pair(grad.toFloat() / n.coerceAtLeast(1), android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP))
         }
     } catch (e: Exception) { null }
 
@@ -634,10 +657,22 @@ class FramePipeline private constructor(private val ctx: Context) {
         for (p in players) {
             val x = p.natX ?: continue; val y = p.natY ?: continue
             val key = Txt.key(p.name)
-            if (key.isBlank() || cur.has(key)) continue
-            thumb(bmp, x, y, 0.026f, 0.040f, 48, 32)?.let { cur.put(key, it); n++ }
+            if (key.isBlank()) continue
+            val old = Flags.imgQuality(cur.optString(key))
+            val t = thumb(bmp, x, y, 0.026f, 0.040f, 48, 32) ?: continue
+            if (old == null || t.first > old * 1.08f + 1f) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
         }
         if (n > 0) repo.dao.putPlan(PlanEntity(slot, "natimg", cur.toString(), System.currentTimeMillis()))
+    }
+
+    private fun saveCalendarCrests(bmp: Bitmap, matches: List<MatchRead>) {
+        for (m in matches) {
+            val cx = m.crestX ?: continue; val cy = m.crestY ?: continue
+            val team = m.opponent ?: continue
+            val f = CrestCut.file(ctx.filesDir, team) ?: continue
+            if (f.exists()) continue
+            try { CrestCut.save(ctx.filesDir, bmp, team, cx, cy, 0.075f, 0.18f) } catch (e: Exception) { Diag.lastError = "Escudo do calendário: " + (e.message ?: "erro") }
+        }
     }
 
     /** Escudo do RIVAL, recortado do Pré-jogo (o do meu time vem da central). Guarda o nome para só valer enquanto for o mesmo rival. */
@@ -658,9 +693,13 @@ class FramePipeline private constructor(private val ctx: Context) {
             val f = File(dir, "r$slot.png")
             if (f.exists() && tag.exists() && runCatching { tag.readText() }.getOrNull() == key && System.currentTimeMillis() - f.lastModified() < 6L * 3600L * 1000L) return
             val crop = Bitmap.createBitmap(bmp, x, y, w, hh)
-            FileOutputStream(f).use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            crop.recycle()
+            val cut = CrestCut.cut(crop)
+            FileOutputStream(f).use { (cut ?: crop).compress(Bitmap.CompressFormat.PNG, 100, it) }
+            cut?.recycle(); crop.recycle()
             tag.writeText(key)
+            // os dois escudos do Pré-jogo também entram no arquivo global por nome do time (escudo não muda)
+            CrestCut.save(ctx.filesDir, bmp, rival, cx, 0.255f, 0.08f, 0.20f)
+            ex.fields[K.TEAM]?.value?.let { mine -> CrestCut.save(ctx.filesDir, bmp, mine, if (mineLeft) 0.232f else 0.768f, 0.255f, 0.08f, 0.20f) }
         } catch (e: Exception) { Diag.lastError = "Escudo do rival: " + (e.message ?: "erro") }
     }
 
@@ -818,6 +857,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             var changed = repo.apply(asg.slot, ex, "ocr", now)
             if (asgSlot != null && type == ScreenType.SQUAD && ex.ownerTeam != null && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
             if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, asgSlot, ex)
+            // o Calendário mostra o escudo de cada rival: guarda uma vez por clube (só grava o que ainda não tem)
+            if (type == ScreenType.CALENDAR) saveCalendarCrests(bmp, ex.matches)
             runCatching { Parsers.bossCoins(ocr)?.let { Coins.saveBalance(repo, it, now) } }
             runCatching { repo.smartReads(asg.slot, type, ocr, now) }
             // Fim da competição / diretoria: não é tela de adversário. Vai para o aprendizado do slot (reconhecido pela
