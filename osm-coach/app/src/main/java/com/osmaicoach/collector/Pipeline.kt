@@ -609,6 +609,61 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
     }
 
+    /** Miniatura NÍTIDA (WebP, ~44×30) de uma região da captura inteira, em base64; null se quase tudo escuro. */
+    private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int): String? = try {
+        val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
+        val y = ((cy - h / 2) * bmp.height).toInt().coerceIn(0, bmp.height - 2)
+        val ww = (w * bmp.width).toInt().coerceAtMost(bmp.width - x)
+        val hh = (h * bmp.height).toInt().coerceAtMost(bmp.height - y)
+        if (ww < 8 || hh < 8) null else {
+            val crop = Bitmap.createBitmap(bmp, x, y, ww, hh)
+            val small = Bitmap.createScaledBitmap(crop, outW, outH, true)
+            val px = IntArray(outW * outH); small.getPixels(px, 0, outW, 0, 0, outW, outH)
+            val dark = px.count { ((it shr 16 and 0xFF) + (it shr 8 and 0xFF) + (it and 0xFF)) < 120 }
+            val os = java.io.ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.WEBP_LOSSY, 92, os)
+            if (crop !== small) crop.recycle(); small.recycle()
+            if (dark > px.size * 0.8) null else android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP)
+        }
+    } catch (e: Exception) { null }
+
+    /** Bandeira de cada jogador do Plantel, recortada da captura em resolução cheia (plano `natimg`: nameKey -> WebP base64). */
+    private suspend fun saveFlagThumbs(bmp: Bitmap, slot: Int, players: List<PlayerRead>) {
+        val cur = repo.dao.plan(slot, "natimg")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        var n = 0
+        for (p in players) {
+            val x = p.natX ?: continue; val y = p.natY ?: continue
+            val key = Txt.key(p.name)
+            if (key.isBlank() || cur.has(key)) continue
+            thumb(bmp, x, y, 0.026f, 0.040f, 48, 32)?.let { cur.put(key, it); n++ }
+        }
+        if (n > 0) repo.dao.putPlan(PlanEntity(slot, "natimg", cur.toString(), System.currentTimeMillis()))
+    }
+
+    /** Escudo do RIVAL, recortado do Pré-jogo (o do meu time vem da central). Guarda o nome para só valer enquanto for o mesmo rival. */
+    private fun savePregameCrest(bmp: Bitmap, slot: Int, ex: Extraction) {
+        val rival = ex.fields[K.RIVAL_TEAM]?.value?.takeIf { it.isNotBlank() } ?: return
+        val mineLeft = ex.fields[K.HOME]?.value == "Casa"
+        if (ex.fields[K.HOME] == null) return
+        val cx = if (mineLeft) 0.768f else 0.232f
+        try {
+            val x = ((cx - 0.04f) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
+            val y = ((0.255f - 0.10f) * bmp.height).toInt().coerceIn(0, bmp.height - 2)
+            val w = (0.08f * bmp.width).toInt().coerceAtMost(bmp.width - x)
+            val hh = (0.20f * bmp.height).toInt().coerceAtMost(bmp.height - y)
+            if (w < 8 || hh < 8) return
+            val dir = File(ctx.filesDir, "crests").apply { mkdirs() }
+            val tag = File(dir, "r$slot.txt")
+            val key = Txt.key(rival)
+            val f = File(dir, "r$slot.png")
+            if (f.exists() && tag.exists() && runCatching { tag.readText() }.getOrNull() == key && System.currentTimeMillis() - f.lastModified() < 6L * 3600L * 1000L) return
+            val crop = Bitmap.createBitmap(bmp, x, y, w, hh)
+            FileOutputStream(f).use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            crop.recycle()
+            tag.writeText(key)
+        } catch (e: Exception) { Diag.lastError = "Escudo do rival: " + (e.message ?: "erro") }
+    }
+
     suspend fun onShot(sessionId: String, bmp: Bitmap) {
         mutex.withLock {
             ensureMachine(sessionId)
@@ -761,6 +816,8 @@ class FramePipeline private constructor(private val ctx: Context) {
                 noSlot.clear()
             }
             var changed = repo.apply(asg.slot, ex, "ocr", now)
+            if (asgSlot != null && type == ScreenType.SQUAD && ex.ownerTeam != null && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
+            if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, asgSlot, ex)
             runCatching { Parsers.bossCoins(ocr)?.let { Coins.saveBalance(repo, it, now) } }
             runCatching { repo.smartReads(asg.slot, type, ocr, now) }
             // Fim da competição / diretoria: não é tela de adversário. Vai para o aprendizado do slot (reconhecido pela

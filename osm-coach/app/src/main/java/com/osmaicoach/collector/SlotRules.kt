@@ -89,12 +89,14 @@ object SlotRules {
         return out
     }
 
-    data class FlagInfo(val name: String?, val rich: String?)
+    data class FlagInfo(val name: String?, val rich: String?, val img: String? = null)
 
     /** Por grupo de bandeira (assinatura 3×3): nome do país (maioria dos jogadores) e uma assinatura rica para desenhar. */
     suspend fun flagInfo(repo: Repo, slot: Int): Map<String, FlagInfo> {
         val nat = repo.dao.plan(slot, "nations")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyMap()
         val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val imgs = repo.dao.plan(slot, "natimg")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val sampleImg = HashMap<String, String>()
         val countries = playerCountries(repo, slot)
         val votes = HashMap<String, HashMap<String, Int>>()
         val sample = HashMap<String, String>()
@@ -102,12 +104,13 @@ object SlotRules {
             val sig = nat.optString(k)
             countries[k]?.let { n -> votes.getOrPut(sig) { HashMap() }.merge(n, 1, Int::plus) }
             rich?.optString(k)?.takeIf { it.isNotEmpty() }?.let { sample.putIfAbsent(sig, it) }
+            imgs?.optString(k)?.takeIf { it.isNotEmpty() }?.let { sampleImg.putIfAbsent(sig, it) }
         }
         val out = HashMap<String, FlagInfo>()
         for (k in nat.keys()) {
             val sig = nat.optString(k)
             if (out.containsKey(sig)) continue
-            out[sig] = FlagInfo(votes[sig]?.maxByOrNull { it.value }?.key, sample[sig])
+            out[sig] = FlagInfo(votes[sig]?.maxByOrNull { it.value }?.key, sample[sig], sampleImg[sig])
         }
         return out
     }

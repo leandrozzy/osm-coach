@@ -28,7 +28,7 @@ in:india,indiano;id:indonesia,indonesio;th:tailandia,tailandes;vn:vietna,vietnam
 nz:nova zelandia,neozelandes;al:albania,albanes;am:armenia,armenio;az:azerbaijao,azerbaijano;by:bielorrussia,bielorrusso;
 ba:bosnia,bosnia e herzegovina,bosnio;ge:georgia,georgiano;kz:cazaquistao,cazaque;xk:kosovo,kosovar;
 cy:chipre,cipriota;mt:malta,maltes;md:moldavia,moldavo;me:montenegro,montenegrino;mk:macedonia do norte,macedonia,macedonio;
-li:liechtenstein;ad:andorra,andorrano;sm:san marino;fo:ilhas faroe,ilhas feroe,faroes;lu2:;
+uz:uzbequistao,uzbeque;tj:tadjiquistao,tadjique;kg:quirguistao,quirguiz;tm:turcomenistao,turcomeno;mn:mongolia,mongol;kh:camboja,cambojano;pk:paquistao,paquistanes;bd:bangladesh;lk:sri lanka;np:nepal,nepales;af:afeganistao,afegao;ye:iemen;om:oma,omanense;kw:kuwait,kuwaitiano;bh:bahrein;ps:palestina,palestino;ly:libia,libio;sd:sudao,sudanes;et:etiopia,etiope;ug:uganda,ugandense;tz:tanzania,tanzaniano;rw:ruanda;mg:madagascar,malgaxe;na:namibia,namibio;bw:botsuana;mu:mauricia;lr:liberia,liberiano;sl:serra leoa;gm:gambia,gambiano;cg:congo brazzaville,congoles;gq:guine equatorial;cf:republica centro africana;td:chade;ne:niger;mr:mauritania;ss:sudao do sul;ar2:;au2:;aw:aruba;cw:curacao;sr:suriname,surinames;gy:guiana;bb:barbados;bs:bahamas;bz:belize;pr:porto rico;sg:singapura;tw:taiwan;hk:hong kong;nc:nova caledonia;fj:fiji;pg:papua nova guine;li:liechtenstein;ad:andorra,andorrano;sm:san marino;fo:ilhas faroe,ilhas feroe,faroes;lu2:;
 gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galês,gales;gb-nir:irlanda do norte;gb:reino unido,britanico;
 """
 
@@ -60,6 +60,11 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
         // do nome mais longo para o mais curto (evita "guine" casar antes de "guine bissau")
         for ((n, iso) in map.entries.sortedByDescending { it.key.length }) {
             if (n.length >= 4 && (t.startsWith("$n ") || t == n)) return iso
+        }
+        // "Superliga Uzbeque Uzm": o país/gentílico pode vir depois da 1ª palavra (palavra inteira, nomes de 5+ letras)
+        val padded = " $t "
+        for ((n, iso) in map.entries.sortedByDescending { it.key.length }) {
+            if (n.length >= 5 && padded.contains(" $n ")) return iso
         }
         return null
     }

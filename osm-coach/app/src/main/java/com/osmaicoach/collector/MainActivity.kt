@@ -717,7 +717,16 @@ private fun initials(name: String): String {
 
 /** Escudo desenhado para o rival (cor fixa pelo nome, com as iniciais). */
 @Composable
-private fun RivalShield(name: String?, size: Dp) {
+private fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
+    val ctx = LocalContext.current
+    // escudo REAL do rival (recorte do Pré-jogo), só enquanto for o mesmo rival do recorte
+    val real = remember(slot, name) {
+        if (slot == null || name == null) null else runCatching {
+            val f = File(ctx.filesDir, "crests/r$slot.png"); val t = File(ctx.filesDir, "crests/r$slot.txt")
+            if (f.exists() && t.exists() && t.readText() == Txt.key(name)) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
+        }.getOrNull()
+    }
+    if (real != null) { Image(real, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); return }
     val col = if (name == null) C.SURFACE2 else SHIELD_COLORS[(name.hashCode() and 0x7fffffff) % SHIELD_COLORS.size]
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.size(size)) {
@@ -837,7 +846,7 @@ private fun MatchupHero(slot: Int, d: SlotData) {
                 Text("VS", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
             }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(rival, 64.dp); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(rivalStr, 30.dp) } }
+                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(rival, 64.dp, slot); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(rivalStr, 30.dp) } }
                 Text(rival ?: "rival não lido", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp), color = if (rival == null) C.WARN else Color.White)
             }
         }
@@ -1312,6 +1321,8 @@ data class SlotData(
     /** País de cada jogador (nome do Atlas pela bandeira) e a assinatura rica para desenhar a bandeira. */
     val countries: Map<String, String?> = emptyMap(),
     val flagRich: Map<String, String> = emptyMap(),
+    /** Bandeira NÍTIDA de cada jogador (recorte da captura inteira, WebP base64). */
+    val flagImg: Map<String, String> = emptyMap(),
     /** Emblema da liga do slot (Atlas), se o nome da competição casa com uma liga aprendida. */
     val leagueRich: String? = null,
     /** Véspera do jogo: (feito?, texto) na ordem em que se faz. Vazio = jogo longe. */
@@ -1390,6 +1401,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     )
     Director.resolveTacticLogs(repo, slot)
     val tplan = dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
+    val imgMap = runCatching { repo.dao.plan(slot, "natimg")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val countriesMap = runCatching { SlotRules.playerCountries(repo, slot) }.getOrDefault(emptyMap())
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
@@ -1420,7 +1432,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
         logsAll = dao.tacticLogs(slot),
         reports = dao.matchReports(slot),
         fitness = repo.fitness(slot),
-        countries = countriesMap, flagRich = richMap, leagueRich = leagueRichV, eve = eveList,
+        countries = countriesMap, flagRich = richMap, flagImg = imgMap, leagueRich = leagueRichV, eve = eveList,
         rivalProfile = repo.rivalProfile(slot),
         board = repo.boardMessages(slot),
         trainScreen = dao.plan(slot, "trainscreen")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
@@ -2134,7 +2146,7 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
                 }
             }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
+                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
                 Text(s.rival ?: "rival não lido", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp), color = if (s.rival != null) Color.White else C.WARN)
             }
         }
@@ -2321,6 +2333,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
         ProcessCard()
 
         TodoCard(data, onOpenSlot)
+        NewsCard()
         Title("Seus slots")
         for (s in data.slots.sortedBy { sl -> sl.slot }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
@@ -3074,9 +3087,13 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
 
 /** Bandeira legível: emoji vetorial quando o país é conhecido (nome/gentílico/competição); senão a miniatura desenhada. */
 @Composable
-private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp) {
+private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp, img: String? = null) {
     val e = Flags.emoji(iso)
-    if (e != null) {
+    val bmp = remember(img) { img?.let { runCatching { val b = android.util.Base64.decode(it, android.util.Base64.NO_WRAP); BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() } }
+    if (bmp != null) {
+        Image(bmp, contentDescription = null, contentScale = ContentScale.FillBounds, filterQuality = androidx.compose.ui.graphics.FilterQuality.High, modifier = Modifier.size(w, h).clip(RoundedCornerShape(3.dp)))
+        Spacer(Modifier.width(6.dp))
+    } else if (e != null) {
         Box(Modifier.size(w, h), contentAlignment = Alignment.Center) { Text(e, fontSize = (h.value * 0.95f).sp, maxLines = 1, softWrap = false) }
         Spacer(Modifier.width(6.dp))
     } else if (rich != null || sig != null) {
@@ -3156,7 +3173,7 @@ private fun FlagPicker(slot: Int) {
             },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FlagBadge(Flags.iso(inf?.name), inf?.rich, sig, 40.dp, 27.dp)
+            FlagBadge(Flags.iso(inf?.name), inf?.rich, sig, 40.dp, 27.dp, inf?.img)
             Column(Modifier.padding(start = 10.dp)) {
                 Text((if (sel) "✓ " else "") + (inf?.name ?: "País não identificado") + (if (sel && chosen == null) " (pela liga)" else ""), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (sel) C.OK else Color.White)
                 Text("${names.size}: " + names.take(4).joinToString(", ") + (if (names.size > 4) "…" else ""), fontSize = 12.5.sp, color = C.MUTED, maxLines = 2)
@@ -3637,7 +3654,7 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            FlagBadge(Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 24.dp, 16.dp)
+                            FlagBadge(Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey])
                             Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (d.countries[p.nameKey]?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         val ft = d.fitness[p.nameKey]
@@ -3820,7 +3837,8 @@ private fun SlotCalendar(slot: Int, d: SlotData) {
     }
     ResultsStrip(d)
     val sorted = d.matches.sortedBy { it.round ?: 999 }
-    val total = fv(d, K.ROUND_TOTAL).toIntOrNull()
+    // o total do hub pode contar só a liga (34) enquanto o calendário traz também as copas (43): vale o maior
+    val total = fv(d, K.ROUND_TOTAL).toIntOrNull()?.let { t -> maxOf(t, sorted.maxOfOrNull { it.round ?: 0 } ?: 0) }
     val read = sorted.count { it.round != null }
     val byRound = sorted.filter { it.round != null }.associateBy { it.round!! }
     val unread = if (total != null) (1..total).filter { it !in byRound } else emptyList()
@@ -5332,7 +5350,9 @@ private fun SlotLearning(slot: Int, d: SlotData) {
         }
     }
     // ---- táticas geradas que ainda não têm resultado
-    val noResult = rows.filter { it.result == null && it.score.isBlank() }
+    // o jogo que ainda vai acontecer (horário no futuro) não "falta resultado"
+    val upcomingRound = if ((known(d.fields, K.MATCH_AT)?.toLongOrNull() ?: 0L) > System.currentTimeMillis()) known(d.fields, K.ROUND)?.toIntOrNull() else null
+    val noResult = rows.filter { it.result == null && it.score.isBlank() && !(upcomingRound != null && it.round == upcomingRound) }
     if (noResult.isNotEmpty()) {
         Fold("📝", "Táticas sem resultado", noResult.size.toString()) {
             Text("Toque para informar o placar: assim o app aprende com ele.", fontSize = 12.5.sp, color = C.MUTED)
@@ -6275,7 +6295,7 @@ private fun firstNum(s: String?): Double? = s?.let { Regex("\\d+(?:[.,]\\d+)?").
 private fun WhyCard(slot: Int, d: SlotData) {
     val ctx = LocalContext.current
     val v = rememberLoaded<Why.View?>(null, 0, d.tactic?.at ?: 0L) { runCatching { Why.build(Repo(ctx), slot) }.getOrNull() } ?: return
-    Fold("🧭", "Por que esta tática", v.head, startOpen = false) {
+    Fold("🧭", "Raciocínio e fontes (novo)", v.head, startOpen = true) {
         for (x in v.factors) Text("• $x", fontSize = 13.5.sp, modifier = Modifier.padding(vertical = 1.dp))
         if (v.web.isNotEmpty()) {
             Text("O que as fontes da web dizem", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = C.GOLD, modifier = Modifier.padding(top = 8.dp))
@@ -6367,5 +6387,27 @@ private fun LearningCard() {
         if (v.avoid.isNotEmpty()) Text("🚫 EVITE: " + v.avoid.joinToString(", "), fontSize = 13.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
         if (v.lessons.isNotEmpty()) { Text("Lições recentes da IA", fontWeight = FontWeight.Bold, color = C.GOLD, fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp)); for (x in v.lessons) Text("• $x", fontSize = 13.sp) }
         Text(v.note, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+
+/** Onde achar cada novidade (aparece até o usuário tocar em "Entendi"). */
+@Composable
+private fun NewsCard() {
+    val ctx = LocalContext.current
+    var seen by remember { mutableStateOf(Settings.get(ctx, "news_evo1", "0") == "1") }
+    if (seen) return
+    Panel {
+        Text("🆕 Novidades: onde encontrar", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
+        for (t in listOf(
+            "🏳 Bandeiras: Elenco (por jogador) e cartões dos slots (liga)",
+            "🧭 Slot → Tática → \"Raciocínio e fontes\": por que, plano B, riscos",
+            "📚 Ajustes → \"Base de conhecimento da web\" (lê as fontes sozinho toda semana)",
+            "⚖ Slot → Visão geral → \"Lado a lado\" (você × rival)",
+            "📝 Slot → Visão geral → \"Último jogo\" (2 linhas, após um resultado)",
+            "🎓 Hoje → \"O que o app aprendeu\"",
+            "🔁 Véspera do jogo: \"Reanálise dos 20 min finais\""
+        )) Text(t, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 3.dp))
+        OutlinedButton(onClick = { Settings.put(ctx, "news_evo1", "1"); seen = true }, modifier = Modifier.padding(top = 8.dp)) { Text("Entendi") }
     }
 }

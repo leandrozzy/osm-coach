@@ -104,6 +104,12 @@ class Repo(private val ctx: Context) {
             return adv.clock
         }
         val c = c0
+        // competição que ainda não começou: o hub não mostra "x/y" e as rodadas concluídas ficavam "NI" (S3, 11/11).
+        // Concluídas = próxima rodada − 1; qualquer leitura do hub/resultado (fonte ≠ sync) passa por cima.
+        val dn = rows.firstOrNull { it.fkey == K.ROUND_DONE }
+        if (c.round != null && c.round >= 1 && (dn == null || dn.source == "sync") && dn?.fvalue?.toIntOrNull() != c.round - 1) {
+            dao.putField(FieldEntity(slot, K.ROUND_DONE, (c.round - 1).toString(), 0.5, now, "sync"))
+        }
         val cur = rows.firstOrNull { it.fkey == K.ROUND }
         val old = cur?.fvalue?.toIntOrNull()
         if (c.round != null && c.round != old && (cur?.source != "manual" || (old != null && c.round > old))) {

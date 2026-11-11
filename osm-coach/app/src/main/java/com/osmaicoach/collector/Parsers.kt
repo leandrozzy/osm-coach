@@ -399,7 +399,8 @@ object Parsers {
                     red = img?.let { PixelProbe.redBox(it, 0.883f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
                     injured = img?.let { PixelProbe.redBox(it, 0.852f, 0.880f, a.yc - 0.03f, a.yc + 0.03f) >= 0.10f },
                     nat = img?.let { PixelProbe.flagSig(it, (ageX + posX) / 2f, a.yc) },
-                    natRich = img?.let { PixelProbe.flagRich(it, (ageX + posX) / 2f, a.yc, 0.026f, 0.040f) }
+                    natRich = img?.let { PixelProbe.flagRich(it, (ageX + posX) / 2f, a.yc, 0.026f, 0.040f) },
+                    natX = (ageX + posX) / 2f, natY = a.yc
                 )
             )
         }
