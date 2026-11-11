@@ -5666,12 +5666,12 @@ private fun SettingsTab() {
             Text("Desligado (padrão): o app nunca sugere gastar Boss Coins; só dicas que usam dinheiro comum ($).", fontSize = 13.sp, color = C.MUTED)
         }
         var closeOsm by remember { mutableStateOf(Settings.get(ctx, "close_osm", "1") == "1") }
-        Fold("⏹", "Ao encerrar a leitura", if (closeOsm) "fecha o OSM" else "só encerra") {
-            SwitchRow("Fechar o OSM e abrir este app", closeOsm) {
+        Fold("⏹", "Ao encerrar a leitura", if (closeOsm) "abre este app" else "só encerra") {
+            SwitchRow("Abrir este app ao encerrar", closeOsm) {
                 closeOsm = it
                 Settings.put(ctx, "close_osm", if (it) "1" else "0")
             }
-            Text("O app abre os Recentes e arrasta o OSM para cima (como você faz), depois abre este app. Leva uns 4 s: não toque na tela. Precisa do serviço de acessibilidade com gestos: depois de atualizar o app, DESLIGUE e LIGUE de novo o OSM AI Coach em Acessibilidade. O próximo acesso ao OSM abre do zero (o jogo salva no servidor).", fontSize = 13.sp, color = C.MUTED)
+            Text("O app abre sozinho e processa o que leu. O OSM fica aberto em segundo plano: feche-o à mão se quiser (o app não consegue fechar outro app neste aparelho).", fontSize = 13.sp, color = C.MUTED)
         }
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }

@@ -263,35 +263,13 @@ object Control {
     }
 
     /** Encerra a captura imediatamente e processa o que ficou pendente em segundo plano. */
-    /**
-     * Ao encerrar: fecha o OSM como você faz à mão (Recentes → arrastar o cartão do OSM para cima) e só então abre este app.
-     * `killBackgroundProcesses` sozinho NÃO fechava (testado no aparelho 07/11). Precisa do serviço de acessibilidade com
-     * gestos; sem ele, cai no jeito antigo (abre o app e pede ao Android para matar o OSM em segundo plano).
-     * Ajuste "close_osm" (padrão ligado).
-     */
-    private fun closeOsmAndOpenApp(ctx: Context) {
+    /** Ao encerrar a leitura: abre este app (o OSM continua aberto em segundo plano; fechar o OSM por gesto/Forçar parada não funcionou no aparelho e foi retirado). Ajuste "close_osm" = abrir o app (padrão ligado). */
+    private fun openAppAfterEnd(ctx: Context) {
         if (Settings.get(ctx, "close_osm", "1") != "1") return
         val app = ctx.applicationContext
-        fun openApp() {
-            try {
-                app.startActivity(android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
-            } catch (e: Exception) { Diag.log("Fechar OSM: não consegui abrir o app (${e.message})") }
-        }
-        fun killBg() {
-            try { (app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).killBackgroundProcesses(OSM_PACKAGE) } catch (e: Exception) { }
-        }
-        val svc = CaptureService.instance
-        if (svc != null && svc.canForceStop()) {
-            svc.forceStopOsm {
-                openApp()
-                Diag.log("OSM: Forçar parada pelas Configurações ao encerrar a leitura")
-            }
-        } else {
-            // serviço sem a permissão nova: precisa desligar e ligar a Acessibilidade do OSM AI Coach uma vez
-            android.widget.Toast.makeText(app, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach (uma vez).", android.widget.Toast.LENGTH_LONG).show()
-            openApp()
-            AppScope.scope.launch { kotlinx.coroutines.delay(1800L); killBg(); Diag.log("OSM: kill em segundo plano (acessibilidade sem a permissão de ler a tela)") }
-        }
+        try {
+            app.startActivity(android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        } catch (e: Exception) { Diag.log("Encerrar: não consegui abrir o app (${e.message})") }
     }
 
     suspend fun end(ctx: Context) {
@@ -301,7 +279,7 @@ object Control {
         val s = dao.session(id)
         if (s != null) dao.putSession(s.copy(endedAt = System.currentTimeMillis(), state = "processing"))
         runCatching { FramePipeline.get(ctx.applicationContext).flushPending() }
-        runCatching { closeOsmAndOpenApp(ctx) }
+        runCatching { openAppAfterEnd(ctx) }
         AppScope.scope.launch {
             try {
                 Processor.run(ctx.applicationContext, id)
