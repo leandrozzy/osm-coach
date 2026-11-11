@@ -117,4 +117,24 @@ class CrestFlagTest {
         val b = CrestCut.ringBox(px, w, h, 68)!!
         assertEquals(26.0, b[0].toDouble(), 1.0); assertEquals(94.0, b[2].toDouble(), 1.5); assertEquals(19.0, b[1].toDouble(), 1.5); assertEquals(94.0, b[3].toDouble(), 1.5)
     }
+
+    @Test fun clubeDaWebCasaPeloNome() {
+        assertTrue(CrestWeb.sameClub("Red Bull Bragantino", "Bragantino"))
+        assertTrue(CrestWeb.sameClub("Liefering", "FC Liefering"))
+        assertTrue(CrestWeb.sameClub("Young Violets Austria Wien", "Young Violets Austria Wien"))
+        assertTrue(CrestWeb.sameClub("Fortuna Düsseldorf", "Fortuna Dusseldorf"))
+        assertFalse(CrestWeb.sameClub("Hertha Wels", "Hertha BSC"))
+        assertFalse(CrestWeb.sameClub("SKU Amstetten", "SK Sturm Graz"))
+    }
+
+    @Test fun miolo8x5DaBandeiraTemCoresPorFaixa() {
+        // 48x32: moldura branca de 3 px e miolo em 3 faixas horizontais (preto, vermelho, amarelo) como a Alemanha
+        val w = 48; val h = 32
+        val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }
+        for (y in 3 until 29) for (x in 3 until 45) px[y * w + x] = when { y < 11 -> 0xFF000000.toInt(); y < 21 -> 0xFFDD0000.toInt(); else -> 0xFFFFCE00.toInt() }
+        val g = Atlas.gridOf(px, w, (w * 0.08f).toInt(), (h * 0.10f).toInt(), w - (w * 0.08f).toInt(), h - (h * 0.10f).toInt())
+        assertEquals(240, g.length)
+        assertEquals("000000", g.substring(0, 6))           // 1ª linha: preto
+        assertEquals("ffce00", g.substring(4 * 8 * 6, 4 * 8 * 6 + 6))   // última linha: amarelo
+    }
 }

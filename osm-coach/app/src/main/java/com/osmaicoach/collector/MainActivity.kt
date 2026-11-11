@@ -580,11 +580,12 @@ private fun Crest(slot: Int, size: Dp, team: String? = null) {
     val ctx = LocalContext.current
     val ver = UiBus.version
     // o escudo guardado por NOME do time (recorte novo do Pré-jogo/Calendário) vale mais que o recorte antigo do slot
-    val f = remember(slot, team, ver) { CrestCut.find(ctx.filesDir, team) ?: File(ctx.filesDir, "crests/s$slot.png") }
+    androidx.compose.runtime.LaunchedEffect(team) { CrestWeb.request(ctx, team) }   // escudo real da web (se achar); senão vale o recorte do jogo
+    val f = remember(slot, team, ver) { CrestWeb.find(ctx.filesDir, team) ?: CrestCut.find(ctx.filesDir, team) ?: File(ctx.filesDir, "crests/s$slot.png") }
     val stamp = if (f.exists()) f.lastModified() else 0L
-    val raw = remember(stamp) { if (stamp > 0L) BitmapFactory.decodeFile(f.absolutePath) else null }
+    val raw = remember(stamp, f.path) { if (stamp > 0L) BitmapFactory.decodeFile(f.absolutePath) else null }
     // escudo já recortado na silhueta (fundo transparente): mostra inteiro, sem o retângulo; recorte antigo quadrado segue como antes
-    val isCut = raw != null && raw.hasAlpha() && (raw.getPixel(0, 0) ushr 24) == 0
+    val isCut = raw != null && (f.path.contains("/crests/web/") || (raw.hasAlpha() && (raw.getPixel(0, 0) ushr 24) == 0))
     val bmp = remember(raw) { raw?.asImageBitmap() }
     if (bmp != null && isCut) {
         Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size))
@@ -736,10 +737,11 @@ private fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
     val ctx = LocalContext.current
     val ver = UiBus.version
     // escudo REAL do rival (recorte do Pré-jogo), só enquanto for o mesmo rival do recorte
+    androidx.compose.runtime.LaunchedEffect(name) { CrestWeb.request(ctx, name) }
     val real = remember(name, ver) {
         if (name == null) null else runCatching {
-            // arquivo global por nome do time (calendário/pré-jogo/central: o escudo de um clube não muda)
-            CrestCut.find(ctx.filesDir, name)?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() }
+            // escudo real da web primeiro; senão o arquivo global por nome do time (calendário/pré-jogo/central: o escudo de um clube não muda)
+            (CrestWeb.find(ctx.filesDir, name) ?: CrestCut.find(ctx.filesDir, name))?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() }
         }.getOrNull()
     }
     if (real != null) { Image(real, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); return }
@@ -1419,6 +1421,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     val tplan = dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
     val imgMap = runCatching { repo.dao.plan(slot, "natimg3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val countriesMap = runCatching { SlotRules.playerCountries(repo, slot) }.getOrDefault(emptyMap())
+    val bankMap = runCatching { repo.dao.plan(0, "natbank")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
     val eveList = runCatching { buildEve(repo, slot, f, tplan) }.getOrDefault(emptyList())
@@ -1448,7 +1451,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
         logsAll = dao.tacticLogs(slot),
         reports = dao.matchReports(slot),
         fitness = repo.fitness(slot),
-        countries = countriesMap, flagRich = richMap, flagImg = Flags.sharpen(imgMap, richMap), leagueRich = leagueRichV, eve = eveList,
+        countries = countriesMap, flagRich = richMap, flagImg = Flags.withBank(imgMap, countriesMap, bankMap), leagueRich = leagueRichV, eve = eveList,
         rivalProfile = repo.rivalProfile(slot),
         board = repo.boardMessages(slot),
         trainScreen = dao.plan(slot, "trainscreen")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
@@ -5825,6 +5828,14 @@ private fun SettingsTab() {
             }
             Text("O app abre sozinho e processa o que leu. O OSM fica aberto em segundo plano: feche-o à mão se quiser (o app não consegue fechar outro app neste aparelho).", fontSize = 13.sp, color = C.MUTED)
         }
+        var webCrests by remember { mutableStateOf(Settings.get(ctx, "web_crests", "1") == "1") }
+        Fold("🛡", "Escudos reais da web", if (webCrests) "ligado" else "desligado") {
+            SwitchRow("Buscar escudos reais pelo nome do time", webCrests) {
+                webCrests = it
+                Settings.put(ctx, "web_crests", if (it) "1" else "0")
+            }
+            Text("Só o NOME do clube é enviado (TheSportsDB, gratuito). Quem não for achado continua com o recorte do jogo. Cada clube é buscado uma vez e vale para os 4 slots.", fontSize = 13.sp, color = C.MUTED)
+        }
         val atlasTick = rememberTick(4000L)
         val atlasCounts = rememberLoaded(Pair(0, 0), atlasTick, UiBus.version) { Pair(Atlas.count(Repo(ctx), Atlas.Kind.NAT), Atlas.count(Repo(ctx), Atlas.Kind.LEAGUE)) }
         Fold("🏳", "Atlas de bandeiras e ligas", "${atlasCounts.first} países • ${atlasCounts.second} ligas") {
@@ -6438,8 +6449,9 @@ private fun NewsCard() {
 private fun TeamCrest(name: String?, size: Dp) {
     val ctx = LocalContext.current
     val ver = UiBus.version
+    androidx.compose.runtime.LaunchedEffect(name) { CrestWeb.request(ctx, name) }
     val bmp = remember(name, ver) {
-        runCatching { CrestCut.find(ctx.filesDir, name)?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } }.getOrNull()
+        runCatching { (CrestWeb.find(ctx.filesDir, name) ?: CrestCut.find(ctx.filesDir, name))?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } }.getOrNull()
     }
     if (bmp != null) { Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); Spacer(Modifier.width(4.dp)) }
 }

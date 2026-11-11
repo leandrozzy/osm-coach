@@ -130,4 +130,22 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
         if (top <= 0f) return imgs
         return imgs.filterValues { (imgQuality(it) ?: 0f) >= top * 0.6f }
     }
+
+    /**
+     * Imagem de bandeira de cada jogador: a do BANCO do país (a mais nítida já vista entre todos os jogadores/slots daquele país) quando o país
+     * foi identificado; senão a própria miniatura (se nítida); senão nada (o Elenco cai no emoji do país).
+     */
+    fun withBank(imgs: Map<String, String>, countries: Map<String, String?>, bank: Map<String, String>): Map<String, String> {
+        val best = HashMap<String, String>()
+        for ((c, v) in bank) best[c] = v
+        for ((k, v) in imgs) {
+            val c = countries[k] ?: continue
+            val cur = best[c]
+            if (cur == null || (imgQuality(v) ?: 0f) > (imgQuality(cur) ?: 0f)) best[c] = v
+        }
+        val sharp = sharpen(imgs, emptyMap())
+        val out = HashMap(sharp)
+        for ((k, c) in countries) { if (c != null) best[c]?.let { out[k] = it } }
+        return out
+    }
 }

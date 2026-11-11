@@ -736,11 +736,29 @@ class FramePipeline private constructor(private val ctx: Context) {
             val ok = if (old == null) (refQ <= 0f || t.first >= refQ * 0.6f) else t.first > old * 1.08f + 1f
             if (ok) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
         }
-        if (n > 0) { repo.dao.putPlan(PlanEntity(slot, "natimg3", cur.toString(), System.currentTimeMillis())); UiBus.bump() }
+        if (n > 0) {
+            repo.dao.putPlan(PlanEntity(slot, "natimg3", cur.toString(), System.currentTimeMillis())); UiBus.bump()
+            runCatching { updateFlagBank(cur) }
+        }
+    }
+
+    /** Banco global de bandeiras (plano `natbank`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
+    private suspend fun updateFlagBank(imgs: JSONObject) {
+        val bank = repo.dao.plan(0, "natbank")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        var ch = 0
+        for (k in imgs.keys()) {
+            val v = imgs.optString(k)
+            val c = Atlas.nameOfThumb(repo, v) ?: continue
+            val old = Flags.imgQuality(bank.optString(c))
+            val q = Flags.imgQuality(v) ?: 0f
+            if (old == null || q > old * 1.08f + 1f) { bank.put(c, v); ch++ }
+        }
+        if (ch > 0) repo.dao.putPlan(PlanEntity(0, "natbank", bank.toString(), System.currentTimeMillis()))
     }
 
     /** Faixa de clubes do topo do Calendário: escudo + nome de cada clube da liga (um por clube; só grava o que ainda não existe). */
     private fun saveStripCrests(bmp: Bitmap, spots: List<CrestSpot>) {
+        for (s in spots) CrestWeb.request(ctx, s.team)
         for (s in spots) {
             if (CrestCut.find(ctx.filesDir, s.team) != null) continue
             try { if (CrestCut.save(ctx.filesDir, bmp, s.team, s.x, s.y, 0.075f, 0.125f, expW = 0.043f, expH = 0.10f)) UiBus.bump() } catch (e: Exception) { Diag.lastError = "Escudo da liga: " + (e.message ?: "erro") }
@@ -748,6 +766,7 @@ class FramePipeline private constructor(private val ctx: Context) {
     }
 
     private fun saveCalendarCrests(bmp: Bitmap, matches: List<MatchRead>) {
+        for (m in matches) CrestWeb.request(ctx, m.opponent)
         for (m in matches) {
             // card de jogo JÁ JOGADO mostra o placar onde ficaria o escudo: só cards sem placar têm escudo
             if (m.scoreMine != null || m.scoreOpp != null || m.result != null) continue
@@ -763,6 +782,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val rival = ex.fields[K.RIVAL_TEAM]?.value?.takeIf { it.isNotBlank() } ?: return
         val home = ex.fields[K.HOME]?.value ?: return
         val mineLeft = home == "Casa"
+        CrestWeb.request(ctx, rival); CrestWeb.request(ctx, ex.fields[K.TEAM]?.value)
         try {
             if (CrestCut.find(ctx.filesDir, rival) == null &&
                 CrestCut.save(ctx.filesDir, bmp, rival, if (mineLeft) 0.767f else 0.233f, 0.258f, 0.10f, 0.17f, expW = 0.065f, expH = 0.158f)) UiBus.bump()

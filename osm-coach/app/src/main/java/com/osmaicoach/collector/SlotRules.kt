@@ -83,9 +83,12 @@ object SlotRules {
 
     /** País de cada jogador do meu elenco (nome do Atlas pela bandeira); null = Atlas ainda não conhece. */
     suspend fun playerCountries(repo: Repo, slot: Int): Map<String, String?> {
-        val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyMap()
+        val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val imgs = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val out = HashMap<String, String?>()
-        for (k in rich.keys()) out[k] = Atlas.nameOf(repo, rich.optString(k))
+        // 1º a miniatura nítida recortada na caixa real da bandeira (miolo 8×5 × Atlas); 2º a assinatura lida do Plantel
+        if (imgs != null) for (k in imgs.keys()) out[k] = Atlas.nameOfThumb(repo, imgs.optString(k))
+        if (rich != null) for (k in rich.keys()) if (out[k] == null) out[k] = Atlas.nameOf(repo, rich.optString(k))
         return out
     }
 

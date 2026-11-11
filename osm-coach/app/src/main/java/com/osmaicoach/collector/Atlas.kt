@@ -1,5 +1,7 @@
 package com.osmaicoach.collector
 
+import android.graphics.BitmapFactory
+import android.util.Base64
 import org.json.JSONObject
 import kotlin.math.abs
 
@@ -64,6 +66,60 @@ object Atlas {
             Diag.log("Atlas ${if (nat) "nacionalidades" else "ligas"}: +$added (total ${cur.size})")
         }
         return added
+    }
+
+    /**
+     * Assinatura rica (grade 8×5, mesma do Atlas) do MIOLO da miniatura da bandeira do jogador (48×32, recortada na caixa real): tira 8% dos
+     * lados e 10% de cima/baixo (a moldura branca/cinza da bandeira do OSM) para ficar comparável com o que o Atlas guardou. Medido no
+     * diagnóstico de 11/11: com a miniatura inteira acertava 6/9 e a distância ao país certo ficava em ~0,13; com o miolo 9/9.
+     */
+    fun gridOfThumb(b64: String): String? = runCatching {
+        val bytes = Base64.decode(Flags.imgPayload(b64), Base64.NO_WRAP)
+        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val w = bmp.width; val h = bmp.height
+        val px = IntArray(w * h); bmp.getPixels(px, 0, w, 0, 0, w, h); bmp.recycle()
+        val x0 = (w * 0.08f).toInt(); val x1 = w - x0; val y0 = (h * 0.10f).toInt(); val y1 = h - y0
+        gridOf(px, w, x0, y0, x1, y1)
+    }.getOrNull()
+
+    /** Média de cor em 8×5 células do retângulo [x0,x1)×[y0,y1) de [px] (largura [w]), em hexa RRGGBB por célula. */
+    internal fun gridOf(px: IntArray, w: Int, x0: Int, y0: Int, x1: Int, y1: Int): String {
+        val sb = StringBuilder()
+        for (gy in 0 until 5) for (gx in 0 until 8) {
+            val cx0 = x0 + (x1 - x0) * gx / 8; val cx1 = maxOf(cx0 + 1, x0 + (x1 - x0) * (gx + 1) / 8)
+            val cy0 = y0 + (y1 - y0) * gy / 5; val cy1 = maxOf(cy0 + 1, y0 + (y1 - y0) * (gy + 1) / 5)
+            var r = 0L; var g = 0L; var b = 0L; var n = 0
+            for (y in cy0 until cy1) for (x in cx0 until cx1) { val c = px[y * w + x]; r += c shr 16 and 0xFF; g += c shr 8 and 0xFF; b += c and 0xFF; n++ }
+            n = maxOf(n, 1)
+            sb.append("%02x%02x%02x".format((r / n).toInt(), (g / n).toInt(), (b / n).toInt()))
+        }
+        return sb.toString()
+    }
+
+    private val thumbCache = HashMap<String, String?>()
+
+    /**
+     * País (gentílico do Atlas) de uma miniatura de bandeira: o mais parecido no Atlas, se a distância é ≤0,14 e a vantagem sobre o 2º ≥0,012;
+     * duvidoso = null (o Elenco usa o emoji/imagem própria).
+     */
+    suspend fun nameOfThumb(repo: Repo, b64: String?): String? {
+        if (b64.isNullOrEmpty()) return null
+        val atlas = load(repo, Kind.NAT)
+        if (atlas.isEmpty()) return null
+        val ck = atlas.size.toString() + ":" + b64.hashCode()
+        synchronized(thumbCache) { if (thumbCache.containsKey(ck)) return thumbCache[ck] }
+        val g = gridOfThumb(b64)
+        var res: String? = null
+        if (g != null) {
+            var best = 9f; var second = 9f; var bn: String? = null
+            for ((n, r) in atlas) {
+                val d = PixelProbe.richDist(g, r)
+                if (d < best) { second = best; best = d; bn = n } else if (d < second) second = d
+            }
+            if (bn != null && best <= 0.14f && second - best >= 0.012f) res = bn
+        }
+        synchronized(thumbCache) { if (thumbCache.size > 2000) thumbCache.clear(); thumbCache[ck] = res }
+        return res
     }
 
     suspend fun count(repo: Repo, kind: Kind): Int = load(repo, kind).size
