@@ -76,4 +76,29 @@ class CrestFlagTest {
         assertEquals(12, b[0]); assertEquals(46, b[2]); assertEquals(5, b[1]); assertEquals(28, b[3])
         assertNull(Flags.flagBox(px, w, h, 20, 24))                                         // largura fora do esperado: não acha
     }
+
+    @Test fun copperRimIsFoundToo() {
+        val w = 110; val h = 100
+        val px = IntArray(w * h) { rgb(15, 30, 70) }
+        for (y in 45..90) for (x in 25..75) if (x < 29 || x > 71 || y > 86) px[y * w + x] = rgb(190, 100, 45)   // cobre: matiz ≈ 24°
+        val b = CrestCut.goldBox(px, w, h, 55)!!
+        assertEquals(25, b[0]); assertEquals(75, b[2]); assertEquals(90, b[3])
+    }
+
+    @Test fun scoreTextIsNeverACrest() {
+        val w = 110; val h = 100
+        val px = IntArray(w * h) { rgb(20, 38, 90) }
+        for (y in 40..60) for (x in 20..90) if ((x / 6) % 2 == 0) px[y * w + x] = rgb(250, 250, 250)   // "0-3" em branco sobre o card azul
+        assertNull(CrestCut.goldBox(px, w, h, 55))
+        assertNull(CrestCut.contrastBox(px, w, h, 55, 60))                                          // largo e baixo: não tem proporção de escudo
+        assertFalse(CrestCut.looksLikeCrest(px))
+    }
+
+    @Test fun silverCrestFoundByContrast() {
+        val w = 110; val h = 100
+        val px = IntArray(w * h) { rgb(15, 30, 70) }
+        for (y in 20..80) for (x in 25..80) px[y * w + x] = rgb(230, 230, 235)
+        val b = CrestCut.contrastBox(px, w, h, 56, 61)!!
+        assertEquals(25, b[0]); assertEquals(80, b[2]); assertEquals(20, b[1]); assertEquals(80, b[3])
+    }
 }

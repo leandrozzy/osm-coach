@@ -588,9 +588,7 @@ private fun Crest(slot: Int, size: Dp, team: String? = null) {
     val bmp = remember(raw) { raw?.asImageBitmap() }
     if (bmp != null && isCut) {
         Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size))
-    } else if (bmp != null) {
-        Image(bmp, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(size).clip(RoundedCornerShape(14.dp)))
-    } else {
+    } else {   // recorte antigo quadrado (com números/fundo) não é mais mostrado: espera o escudo certo
         Box(Modifier.size(size).clip(RoundedCornerShape(14.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) {
             Text("S$slot", fontWeight = FontWeight.Bold, color = C.MUTED, fontSize = 18.sp)
         }
@@ -738,15 +736,10 @@ private fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
     val ctx = LocalContext.current
     val ver = UiBus.version
     // escudo REAL do rival (recorte do Pré-jogo), só enquanto for o mesmo rival do recorte
-    val real = remember(slot, name, ver) {
+    val real = remember(name, ver) {
         if (name == null) null else runCatching {
-            // 1º o arquivo global por nome do time (calendário/pré-jogo: o escudo de um clube não muda), 2º o recorte do pré-jogo deste slot
-            val tf = CrestCut.find(ctx.filesDir, name)
-            if (tf != null && tf.exists()) BitmapFactory.decodeFile(tf.absolutePath)?.asImageBitmap()
-            else if (slot != null) {
-                val f = File(ctx.filesDir, "crests/r$slot.png"); val t = File(ctx.filesDir, "crests/r$slot.txt")
-                if (f.exists() && t.exists() && t.readText() == Txt.key(name)) BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap() else null
-            } else null
+            // arquivo global por nome do time (calendário/pré-jogo/central: o escudo de um clube não muda)
+            CrestCut.find(ctx.filesDir, name)?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() }
         }.getOrNull()
     }
     if (real != null) { Image(real, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); return }
@@ -1424,7 +1417,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     )
     Director.resolveTacticLogs(repo, slot)
     val tplan = dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
-    val imgMap = runCatching { repo.dao.plan(slot, "natimg2")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
+    val imgMap = runCatching { repo.dao.plan(slot, "natimg3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val countriesMap = runCatching { SlotRules.playerCountries(repo, slot) }.getOrDefault(emptyMap())
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
