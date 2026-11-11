@@ -242,6 +242,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         var maxRound = 0
         var lastSet: Set<String> = emptySet()
         var moved = false
+        var still = 0
         /** Dono da lista (plantel): quadros rolados sem o título continuam a mesma leitura. */
         var owner: String? = null
     }
@@ -286,14 +287,16 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         pd.offFrames = 0
         // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
-        // quadro "igual" = ≥85% dos mesmos itens (o OCR oscila de um quadro parado para o outro)
-        val names = (ex.players.map { Txt.key(it.name) } + ex.listings.map { Txt.key(it.name) } + ex.matches.map { "${it.round}" }).toSet()
-        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.85f
+        // quadro "igual" = as MESMAS linhas nas MESMAS alturas (texto + altura em faixas de 0,02): rolar uma linha desloca todas as alturas,
+        // então um quadro que só ganhou 1 jogador novo embaixo NÃO é igual (antes valia ≥85% dos nomes e o plantel "terminava" no 1º goleiro)
+        val names = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) + "@" + Math.round(it.yc * 50f) }.toSet()
+        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.75f
         if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
+        pd.still = if (same) pd.still + 1 else 0
         // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
         // Plantel e Mercado vão até os goleiros e a última linha cola no rodapé: não dá para exigir folga embaixo.
         val hasGk = ex.players.any { it.cat == "GOL" } || ex.listings.any { it.cat == "GOL" }
-        val stalled = pd.moved && same
+        val stalled = pd.moved && same && pd.still >= 2   // 2 quadros iguais seguidos: a lista parou mesmo
         pd.lastSet = names
         if (stalled && ((type == ScreenType.SQUAD || type == ScreenType.MARKET) && hasGk || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
         if (hasGk) pd.cats.add("GOL")
@@ -604,7 +607,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             val f = File(dir, "s$slot.png")
             val tag = File(dir, "s$slot.txt")
             val team = Txt.key(card.team)
-            val sameTeam = team.isNotEmpty() && tag.exists() && runCatching { tag.readText() }.getOrNull() == team
+            // "|v2" = recorte com a silhueta e o topo certos: escudos antigos (quadrados) são refeitos mesmo do mesmo time
+            val sameTeam = team.isNotEmpty() && tag.exists() && runCatching { tag.readText() }.getOrNull() == "$team|v2"
             if (f.exists() && sameTeam && System.currentTimeMillis() - f.lastModified() < 6L * 3600L * 1000L) continue
             val cx = (if (slot % 2 == 1) 0.5867f else 0.7953f) + card.dx
             val cy = (if (slot <= 2) 0.263f else 0.711f) + card.dy
@@ -619,7 +623,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 FileOutputStream(f).use { (cut ?: crop).compress(Bitmap.CompressFormat.PNG, 100, it) }
                 if (cut != null) CrestCut.file(ctx.filesDir, card.team)?.let { tf -> if (!tf.exists()) { tf.parentFile?.mkdirs(); FileOutputStream(tf).use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) } } }
                 cut?.recycle(); crop.recycle()
-                if (team.isNotEmpty()) tag.writeText(team)
+                if (team.isNotEmpty()) tag.writeText("$team|v2")
             } catch (e: Exception) {
                 Diag.lastError = "Escudo: " + (e.message ?: "erro")
             }
@@ -652,17 +656,17 @@ class FramePipeline private constructor(private val ctx: Context) {
 
     /** Bandeira de cada jogador do Plantel, recortada da captura em resolução cheia (plano `natimg`: nameKey -> WebP base64). */
     private suspend fun saveFlagThumbs(bmp: Bitmap, slot: Int, players: List<PlayerRead>) {
-        val cur = repo.dao.plan(slot, "natimg")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val cur = repo.dao.plan(slot, "natimg2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
         var n = 0
         for (p in players) {
             val x = p.natX ?: continue; val y = p.natY ?: continue
             val key = Txt.key(p.name)
             if (key.isBlank()) continue
             val old = Flags.imgQuality(cur.optString(key))
-            val t = thumb(bmp, x, y, 0.026f, 0.040f, 48, 32) ?: continue
+            val t = thumb(bmp, x, y, 0.031f, 0.047f, 48, 32) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
             if (old == null || t.first > old * 1.08f + 1f) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
         }
-        if (n > 0) repo.dao.putPlan(PlanEntity(slot, "natimg", cur.toString(), System.currentTimeMillis()))
+        if (n > 0) repo.dao.putPlan(PlanEntity(slot, "natimg2", cur.toString(), System.currentTimeMillis()))
     }
 
     private fun saveCalendarCrests(bmp: Bitmap, matches: List<MatchRead>) {
@@ -691,12 +695,12 @@ class FramePipeline private constructor(private val ctx: Context) {
             val tag = File(dir, "r$slot.txt")
             val key = Txt.key(rival)
             val f = File(dir, "r$slot.png")
-            if (f.exists() && tag.exists() && runCatching { tag.readText() }.getOrNull() == key && System.currentTimeMillis() - f.lastModified() < 6L * 3600L * 1000L) return
+            if (f.exists() && tag.exists() && runCatching { tag.readText() }.getOrNull() == "$key|v2" && System.currentTimeMillis() - f.lastModified() < 6L * 3600L * 1000L) return
             val crop = Bitmap.createBitmap(bmp, x, y, w, hh)
             val cut = CrestCut.cut(crop)
             FileOutputStream(f).use { (cut ?: crop).compress(Bitmap.CompressFormat.PNG, 100, it) }
             cut?.recycle(); crop.recycle()
-            tag.writeText(key)
+            tag.writeText("$key|v2")
             // os dois escudos do Pré-jogo também entram no arquivo global por nome do time (escudo não muda)
             CrestCut.save(ctx.filesDir, bmp, rival, cx, 0.255f, 0.08f, 0.20f)
             ex.fields[K.TEAM]?.value?.let { mine -> CrestCut.save(ctx.filesDir, bmp, mine, if (mineLeft) 0.232f else 0.768f, 0.255f, 0.08f, 0.20f) }

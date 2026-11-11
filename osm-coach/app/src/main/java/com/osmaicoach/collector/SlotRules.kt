@@ -95,7 +95,7 @@ object SlotRules {
     suspend fun flagInfo(repo: Repo, slot: Int): Map<String, FlagInfo> {
         val nat = repo.dao.plan(slot, "nations")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyMap()
         val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val imgs = repo.dao.plan(slot, "natimg")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val imgs = repo.dao.plan(slot, "natimg2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val sampleImg = HashMap<String, String>()
         val countries = playerCountries(repo, slot)
         val votes = HashMap<String, HashMap<String, Int>>()

@@ -247,7 +247,18 @@ class Repo(private val ctx: Context) {
             val rows = dao.fieldsOf(c.slot).associateBy { it.fkey }
             val prev = rows[K.SLOT_STATE]?.fvalue
             // pré-época na central, mas o pré-jogo da competição nova já foi lido (jornada 1-2): o slot está ativo
-            if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 99) <= 2) continue
+            if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 99) <= 2) {
+                // o slot segue "ativo", mas o card da central mostra o NOME da competição nova ("Brasileirão UZM"): sem isto o app mostrava
+                // para sempre a liga anterior ("Superliga Uzbeque", lida em 01/11). Total de rodadas da liga antiga sai (o novo vem com o "x/y").
+                if (c.team.isNotBlank()) changed += hubPut(c.slot, K.HUB_TITLE, Txt.titleCase(c.team), now)
+                if (c.subtitle.isNotBlank()) {
+                    val oldComp = rows[K.COMPETITION]?.fvalue
+                    val newComp = Txt.titleCase(c.subtitle)
+                    if (oldComp != null && Txt.sim(Txt.key(oldComp), Txt.key(newComp)) < 0.6) { dao.deleteField(c.slot, K.ROUND_TOTAL); dao.deleteField(c.slot, K.COMP_TYPE) }
+                    changed += hubPut(c.slot, K.COMPETITION, newComp, now)
+                }
+                continue
+            }
             if (c.state != null) {
                 // Slot livre, procurando adversário ou pré-época: a competição anterior acabou. Só arquiva quando DUAS
                 // leituras da central (com 15 s ou mais entre elas) mostram o mesmo estado; nunca apaga os campos
@@ -331,6 +342,10 @@ class Repo(private val ctx: Context) {
     /** O slot passou a ter o meu time novo: troca o time guardado e o slot volta a "ativo". */
     suspend fun startCompetition(slot: Int, team: String, now: Long) {
         val old = dao.fieldsOf(slot).firstOrNull { it.fkey == K.TEAM }
+        // competição nova no slot livre: o que era da anterior (liga, total, rodada, regras, elenco do clube antigo) é arquivado/apagado;
+        // só o aprendizado (tlog/relatórios arquivados, lições) fica
+        if (old != null && Txt.sim(Txt.key(old.fvalue), Txt.key(team)) < 0.85) runCatching { archiveSeason(slot, now, true) }
+        else runCatching { archiveSeason(slot, now, false) }
         if (old != null && Txt.sim(Txt.key(old.fvalue), Txt.key(team)) < 0.85) dao.deleteField(slot, K.TEAM)
         dao.putField(FieldEntity(slot, K.SLOT_STATE, "ativo", 0.9, now, "pregame"))
         dao.deleteField(slot, K.SLOT_PENDING)
@@ -462,7 +477,9 @@ class Repo(private val ctx: Context) {
             dao.putPlan(PlanEntity(slot, "old_" + tag + "_league", it.json, it.at))
             dao.deletePlan(slot, "league")
         }
-        for (k in listOf(K.ROUND, K.ROUND_DONE, K.MATCH_AT)) dao.deleteField(slot, k)
+        for (k in listOf(K.ROUND, K.ROUND_DONE, K.MATCH_AT, K.COMPETITION, K.COMP_TYPE, K.ROUND_TOTAL)) dao.deleteField(slot, k)
+        // regras coladas, bandeira da liga e valor-base da meta eram DA liga que acabou: a nova tem as suas
+        for (k in listOf("rules", "leagueflag", "valuebase")) dao.deletePlan(slot, k)
         if (clearClub) {
             dao.deleteFieldsOf(slot)
             dao.deletePlayersOf(slot)

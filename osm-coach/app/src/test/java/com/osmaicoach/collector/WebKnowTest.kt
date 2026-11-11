@@ -72,7 +72,7 @@ class WebKnowTest {
     @Test fun flags() {
         assertEquals("🇧🇷", Flags.emojiOf("Brasileiro")); assertEquals("🇩🇪", Flags.emojiOf("Alemão")); assertEquals("🇩🇪", Flags.emojiOfCompetition("Alemanha, 3ª Divisão"))
         assertEquals("🇦🇹", Flags.emojiOfCompetition("Áustria 2ª Div")); assertEquals("🇪🇸", Flags.emojiOf("Espanhol ou Português"))
-        assertEquals("🇬🇼", Flags.emojiOfCompetition("Guiné-Bissau, Liga")); assertNull(Flags.emojiOf("Marciano")); assertNull(Flags.emojiOfCompetition("Liga Mundial")); assertEquals("🇺🇿", Flags.emojiOfCompetition("Superliga Uzbeque Uzm")); assertNull(Flags.emojiOfCompetition("Premier League"))
+        assertEquals("🇬🇼", Flags.emojiOfCompetition("Guiné-Bissau, Liga")); assertNull(Flags.emojiOf("Marciano")); assertNull(Flags.emojiOfCompetition("Liga Mundial")); assertEquals("🇺🇿", Flags.emojiOfCompetition("Superliga Uzbeque Uzm")); assertNotNull(Flags.emojiOfCompetition("Premier League"))
         assertEquals("🇨🇭", Flags.emojiOf("Suíço")); assertTrue(Flags.emojiOf("Inglês")!!.length > 4)
     }
 }

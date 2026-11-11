@@ -9,13 +9,15 @@ class CrestFlagTest {
     @Test fun goldBoxFindsShieldFrame() {
         val w = 120; val h = 130
         val px = IntArray(w * h) { rgb(20, 40, 90) }             // cenário azul
-        for (y in 20..100) for (x in 30..90) {                    // moldura dourada (borda de 4 px)
-            val edge = x < 34 || x > 86 || y < 24 || y > 96
+        for (y in 40..100) for (x in 30..90) {                    // moldura: dourada nos lados e na base; o TOPO tem realce branco (não conta)
+            val edge = x < 34 || x > 86 || y > 96
             if (edge) px[y * w + x] = rgb(212, 160, 30)
         }
+        for (x in 34..86) for (y in 22..26) px[y * w + x] = rgb(245, 240, 230)   // realce branco do topo
         for (i in 0 until 40) px[(5 + i % 3) * w + 100 + i % 10] = rgb(230, 200, 150) // brilho de baixa saturação: não conta
         val b = CrestCut.goldBox(px, w, h)!!
-        assertEquals(30, b[0]); assertEquals(20, b[1]); assertEquals(90, b[2]); assertEquals(100, b[3])
+        assertEquals(30, b[0]); assertEquals(90, b[2]); assertEquals(100, b[3])
+        assertEquals(100 - Math.round(61 * 1.06f), b[1])        // topo = base − 1,06 × largura (inclui o realce que não é dourado)
     }
 
     @Test fun goldBoxRejectsNonShield() {
@@ -32,5 +34,10 @@ class CrestFlagTest {
         assertEquals("AAAA", Flags.imgPayload("AAAA"))          // formato antigo continua valendo
         assertEquals(0f, Flags.imgQuality("AAAA")!!, 0.01f)
         assertNull(Flags.imgQuality(null))
+    }
+
+    @Test fun leagueNamesWithoutCountry() {
+        assertEquals("🇧🇷", Flags.emojiOfCompetition("Brasileirão Uzm"))
+        assertEquals("🇺🇿", Flags.emojiOfCompetition("Superliga Uzbeque Uzm"))
     }
 }

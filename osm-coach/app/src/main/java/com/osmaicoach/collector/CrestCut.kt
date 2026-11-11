@@ -30,9 +30,12 @@ object CrestCut {
         val ey = ext(rows, 3) ?: return null
         val bw = ex.second - ex.first + 1; val bh = ey.second - ey.first + 1
         if (bw < 24 || bh < 24) return null
-        val ratio = bw.toFloat() / bh
-        if (ratio < 0.75f || ratio > 1.15f) return null
-        return intArrayOf(ex.first, ey.first, ex.second, ey.second)
+        // o topo da moldura tem um realce BRANCO (não dourado): a parte dourada é mais baixa que o escudo (≈0,84 da largura em vez de 1,04).
+        // Largura e base vêm do dourado; a altura real = 1,06 × largura, para cima a partir da base.
+        val ratio = bh.toFloat() / bw
+        if (ratio < 0.70f || ratio > 1.12f) return null
+        val top = (ey.second - Math.round(bw * 1.06f)).coerceAtLeast(0)
+        return intArrayOf(ex.first, top, ex.second, ey.second)
     }
 
     private fun isGold(c: Int): Boolean {
@@ -59,8 +62,8 @@ object CrestCut {
         val w = crop.width; val h = crop.height
         val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
         val box = goldBox(px, w, h) ?: return null
-        val x0 = (box[0] - 1).coerceAtLeast(0); val y0 = (box[1] - 1).coerceAtLeast(0)
-        val x1 = (box[2] + 2).coerceAtMost(w); val y1 = (box[3] + 2).coerceAtMost(h)
+        val x0 = (box[0] - 2).coerceAtLeast(0); val y0 = (box[1] - 2).coerceAtLeast(0)
+        val x1 = (box[2] + 3).coerceAtMost(w); val y1 = (box[3] + 3).coerceAtMost(h)
         val bw = x1 - x0; val bh = y1 - y0
         val src = Bitmap.createBitmap(crop, x0, y0, bw, bh)
         val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
@@ -73,11 +76,11 @@ object CrestCut {
         return out
     }
 
-    fun dir(filesDir: File): File = File(filesDir, "crests/t").apply { mkdirs() }
+    fun dir(filesDir: File): File = File(filesDir, "crests/t2").apply { mkdirs() }
 
     fun file(filesDir: File, team: String?): File? {
         val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
-        return File(File(filesDir, "crests/t"), "$k.png")
+        return File(File(filesDir, "crests/t2"), "$k.png")
     }
 
     /** Recorta a região da captura (frações 0..1), corta o escudo e grava. false se não achou escudo ou já existe. */

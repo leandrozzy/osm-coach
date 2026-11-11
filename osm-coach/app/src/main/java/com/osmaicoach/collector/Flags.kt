@@ -32,6 +32,9 @@ uz:uzbequistao,uzbeque;tj:tadjiquistao,tadjique;kg:quirguistao,quirguiz;tm:turco
 gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galês,gales;gb-nir:irlanda do norte;gb:reino unido,britanico;
 """
 
+    private val LEAGUES = listOf("brasileirao" to "br", "eredivisie" to "nl", "ligue 1" to "fr", "premier league" to "gb-eng",
+        "la liga" to "es", "laliga" to "es", "super lig" to "tr", "primeira liga" to "pt", "serie a brasil" to "br")
+
     private val map: Map<String, String> by lazy {
         val m = HashMap<String, String>()
         for (e in TABLE.replace("\n", "").split(";")) {
@@ -61,6 +64,8 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
         for ((n, iso) in map.entries.sortedByDescending { it.key.length }) {
             if (n.length >= 4 && (t.startsWith("$n ") || t == n)) return iso
         }
+        // nomes de liga que já dizem o país (sem o país no nome)
+        for ((k, iso) in LEAGUES) if (t.contains(k)) return iso
         // "Superliga Uzbeque Uzm": o país/gentílico pode vir depois da 1ª palavra (palavra inteira, nomes de 5+ letras)
         val padded = " $t "
         for ((n, iso) in map.entries.sortedByDescending { it.key.length }) {
