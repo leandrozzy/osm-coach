@@ -162,6 +162,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() {
+        runCatching { WebKnow.refreshIfStale(applicationContext) }
         super.onResume()
         AppVisible.resumed = true
         CaptureService.instance?.refreshOverlay()
@@ -1357,6 +1358,7 @@ private suspend fun buildEve(repo: Repo, slot: Int, f: Map<String, StoredField>,
     val dj = repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
     val mounted = valid && dj != null && (dj.optLong("at") == tp?.at || (dj.optString("sig").isNotBlank() && dj.optString("sig") == Director.mountSig(tplan!!)))
     out.add(Pair(mounted, if (mounted) "Tática montada no OSM e conferida" else "Montar a tática no OSM (Menu → Tática)"))
+    if (at - now <= Reanalysis.WINDOW_MS) out.add(Reanalysis.eveItem(repo.dao.plan(slot, Reanalysis.PLAN)?.json, at, now))
     f[K.PREP_LEVEL]?.value?.let { lv -> out.add(Pair(!PrepLevel.low(lv), "Preparação do jogo: $lv" + if (PrepLevel.low(lv)) " — conclua a lista de afazeres" else "")) }
     val (inj, susp) = repo.outByDoctorOrLawyer(slot)
     if (inj.isNotEmpty()) out.add(Pair(false, "Lesionados: ${inj.size} (Médico, 8 h grátis)"))
@@ -2091,7 +2093,8 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
             Column(Modifier.weight(1f)) {
                 Text(s.title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (s.known) Color.White else C.MUTED)
                 val kind = when (s.compType) { "Batalha" -> "⚔ Batalha"; "Copa" -> "🏆 Copa"; else -> null }
-                val sub = listOfNotNull(kind, s.competition, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
+                val flagE = Flags.emojiOfCompetition(s.competition)
+                val sub = listOfNotNull(kind, s.competition?.let { c -> if (flagE != null) "$flagE $c" else c }, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
                 if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             s.win?.takeIf { at != null }?.let { w ->
@@ -2323,6 +2326,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
         AgendaCard(data)
         data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }
+        LearningCard()
         if (data.work.isNotEmpty()) {
             Fold("⏱", "Treinos e estádio", data.work.size.toString() + " slots") {
                 for (w in data.work) WorkFold(w) { onOpenSlot(w.slot, 5) }
@@ -3014,7 +3018,7 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    data.leagueRich?.let { FlagSwatch(it, null, 18.dp, 18.dp, round = true); Spacer(Modifier.width(6.dp)) }
+                    FlagBadge(Flags.isoFromCompetition(known(data.fields, K.COMPETITION)), data.leagueRich, null, 22.dp, 16.dp)
                     Text("Slot $slot • " + (known(data.fields, K.COMPETITION) ?: if (data.ready) "competição não lida" else ""), color = C.MUTED, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -3065,6 +3069,18 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
     Panel {
         Text(title, color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
         for ((k, v) in rows) KV(k, v)
+    }
+}
+
+/** Bandeira legível: emoji vetorial quando o país é conhecido (nome/gentílico/competição); senão a miniatura desenhada. */
+@Composable
+private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp) {
+    val e = Flags.emoji(iso)
+    if (e != null) {
+        Box(Modifier.size(w, h), contentAlignment = Alignment.Center) { Text(e, fontSize = (h.value * 0.95f).sp, maxLines = 1, softWrap = false) }
+        Spacer(Modifier.width(6.dp))
+    } else if (rich != null || sig != null) {
+        FlagSwatch(rich, sig, w, h); Spacer(Modifier.width(6.dp))
     }
 }
 
@@ -3140,7 +3156,7 @@ private fun FlagPicker(slot: Int) {
             },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FlagSwatch(inf?.rich, sig, 40.dp, 27.dp)
+            FlagBadge(Flags.iso(inf?.name), inf?.rich, sig, 40.dp, 27.dp)
             Column(Modifier.padding(start = 10.dp)) {
                 Text((if (sel) "✓ " else "") + (inf?.name ?: "País não identificado") + (if (sel && chosen == null) " (pela liga)" else ""), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (sel) C.OK else Color.White)
                 Text("${names.size}: " + names.take(4).joinToString(", ") + (if (names.size > 4) "…" else ""), fontSize = 12.5.sp, color = C.MUTED, maxLines = 2)
@@ -3236,8 +3252,10 @@ private fun SlotSummaryTab(slot: Int, d: SlotData) {
         MatchupHero(slot, d)
         if (d.eve.isNotEmpty()) EveCard(d.eve)
         StrengthsAttention(d)
+        CompareCard(d)
         Panel { WinCard(d.win) }
     }
+    LastGameCard(d)
     RulesCard(slot)
     // números da temporada em blocos
     val goalPos = fv(d, K.MY_OBJECTIVE).toIntOrNull()
@@ -3619,7 +3637,7 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            d.flagRich[p.nameKey]?.let { FlagSwatch(it, null, 24.dp, 16.dp); Spacer(Modifier.width(6.dp)) }
+                            FlagBadge(Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 24.dp, 16.dp)
                             Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (d.countries[p.nameKey]?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         val ft = d.fitness[p.nameKey]
@@ -4455,6 +4473,7 @@ private fun SlotTactic(slot: Int, d: SlotData) {
         return
     }
     TacticHero(d)
+    WhyCard(slot, d)
     if (d.rivalChanged.isNotEmpty()) RivalChangedCard(d.rivalChanged) { startGeneration(ctx, "tactic", slot) }
     d.rivalPred?.takeIf { it.guesses.isNotEmpty() }?.let { RivalPredictCard(it, known(d.fields, K.RIVAL_NICK)) }
     // Checklist: o que ainda falta ler e em qual tela do OSM (a tática sai melhor com tudo lido).
@@ -5776,6 +5795,7 @@ private fun SettingsTab() {
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }
         var metaMsg by remember { mutableStateOf("") }
+        KnowledgeFold(exportScope)
         Fold("🌐", "Táticas da comunidade (avançado)", startOpen = false) {
             val metaTick = rememberTick(5000L)
             val mv = rememberLoaded<MetaRefresh.View?>(null, metaTick, metaMsg) { MetaRefresh.view(Repo(ctx)) }
@@ -6217,3 +6237,135 @@ private fun RivalPredictCard(v: RivalPredict.View, nick: String?) {
     }
 }
 
+
+/** Ajustes: base de conhecimento da web (o que foi lido, quando, o que mudou) e botão de atualizar agora. */
+@Composable
+private fun KnowledgeFold(scope: kotlinx.coroutines.CoroutineScope) {
+    val ctx = LocalContext.current
+    val tick = rememberTick(4000L)
+    var msg by remember { mutableStateOf("") }
+    val st = rememberLoaded<org.json.JSONObject?>(null, tick, msg + UiBus.version) { WebKnow.status(Repo(ctx)) }
+    val at = st?.optLong("at") ?: 0L
+    val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
+    Fold("📚", "Base de conhecimento da web", if (at > 0) "lida em ${fmt.format(java.util.Date(at))}" else "ainda não lida") {
+        Text("O app lê sozinho, 1× por semana, as páginas de táticas do OSM (osmcoach.com, osmnextlevel.com, osmtacticsapp.com, osmhelper.com), transforma as tabelas em regras e guarda as faixas de pressão/estilo/ritmo por formação. Onde as fontes discordam, vale a que o SEU histórico real sustenta. Nada disso é regra oficial do jogo.", fontSize = 13.sp, color = C.MUTED)
+        if (st != null) {
+            val pages = st.optJSONArray("pages")
+            val n = pages?.length() ?: 0
+            var ok = 0; var changed = 0; var withData = 0
+            for (i in 0 until n) pages?.optJSONObject(i)?.let { p -> if (p.optInt("http") in 200..299) ok++; if (p.optBoolean("changed")) changed++; if (p.optInt("parsed") > 0) withData++ }
+            Text("📄 $ok de $n páginas lidas • $withData com tabela aproveitada • ${st.optInt("rules")} situações • ${st.optInt("bands")} faixas por formação" + if (changed > 0) " • $changed mudaram desde a última leitura" else "", fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp))
+            val failed = (0 until n).mapNotNull { pages?.optJSONObject(it) }.filter { it.optInt("http") !in 200..299 }
+            if (failed.isNotEmpty()) Text("⚠ Sem resposta: " + failed.take(3).joinToString { it.optString("url").substringAfter("//").take(40) } + if (failed.size > 3) " e mais ${failed.size - 3}" else "", fontSize = 12.5.sp, color = C.WARN)
+        }
+        if (msg.isNotBlank()) Text(msg, fontSize = 13.sp, color = C.PRIMARY, modifier = Modifier.padding(top = 4.dp))
+        OutlinedButton(onClick = { msg = ""; scope.launch { msg = withContext(Dispatchers.IO) { WebKnow.refresh(ctx) } } }, enabled = !WebKnow.running, modifier = Modifier.padding(top = 8.dp)) {
+            Text(if (WebKnow.running) "📚 Lendo as páginas…" else "📚 Ler as páginas agora")
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------- Por quê / Lado a lado / Último jogo / Aprendizado
+
+private fun firstNum(s: String?): Double? = s?.let { Regex("\\d+(?:[.,]\\d+)?").find(it)?.value?.replace(',', '.')?.toDoubleOrNull() }
+
+/** "Por quê" da tática do slot: fatores, o que as fontes da web dizem, faixas, plano B, riscos e grau de evidência. */
+@Composable
+private fun WhyCard(slot: Int, d: SlotData) {
+    val ctx = LocalContext.current
+    val v = rememberLoaded<Why.View?>(null, 0, d.tactic?.at ?: 0L) { runCatching { Why.build(Repo(ctx), slot) }.getOrNull() } ?: return
+    Fold("🧭", "Por que esta tática", v.head, startOpen = false) {
+        for (x in v.factors) Text("• $x", fontSize = 13.5.sp, modifier = Modifier.padding(vertical = 1.dp))
+        if (v.web.isNotEmpty()) {
+            Text("O que as fontes da web dizem", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = C.GOLD, modifier = Modifier.padding(top = 8.dp))
+            for ((ok, t) in v.web) Text((if (ok) "✅ " else "↔ ") + t, fontSize = 13.sp, color = if (ok) C.OK else C.MUTED)
+        }
+        if (v.bands.isNotEmpty()) {
+            Text("Faixas das fontes para esta formação", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = C.GOLD, modifier = Modifier.padding(top = 8.dp))
+            for ((ok, t) in v.bands) Text((if (ok) "✅ " else "⚠ ") + t, fontSize = 13.sp, color = if (ok) C.OK else C.WARN)
+        }
+        v.alt?.let { Text("🔁 $it", fontSize = 13.5.sp, modifier = Modifier.padding(top = 8.dp)) }
+        if (v.risks.isNotEmpty()) {
+            Text("Riscos", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
+            for (r in v.risks) Text("⚠ $r", fontSize = 13.sp, color = C.MUTED)
+        }
+        Text(v.evidence, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/** Os dois times lado a lado (quem é melhor em cada item sai em destaque). */
+@Composable
+private fun CompareCard(d: SlotData) {
+    fun n(k: String) = known(d.fields, k)
+    val nums = listOf(
+        Triple("Força", K.MY_STRENGTH, K.RIVAL_STRENGTH), Triple("Goleiro", K.MY_GOL, K.RIVAL_GOL), Triple("Defesa", K.MY_DEF, K.RIVAL_DEF),
+        Triple("Meio-campo", K.MY_MID, K.RIVAL_MID), Triple("Ataque", K.MY_ATK, K.RIVAL_ATK), Triple("Valor do elenco", K.MY_VALUE, K.RIVAL_VALUE),
+        Triple("Bônus %", K.MY_BONUS, K.RIVAL_LOGIN_BONUS)
+    ).filter { n(it.second) != null || n(it.third) != null }
+    val txt = listOf(
+        Triple("Formação", K.MY_FORMATION, K.RIVAL_FORMATION), Triple("Estilo", "", K.RIVAL_PLAN), Triple("Forma", K.MY_FORM, K.RIVAL_FORM)
+    ).filter { (if (it.second.isEmpty()) null else n(it.second)) != null || n(it.third) != null }
+    if (nums.isEmpty() && txt.isEmpty()) return
+    Panel {
+        Text("⚖ Lado a lado", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Text(n(K.TEAM) ?: "Meu time", Modifier.weight(1f), fontSize = 12.5.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("", Modifier.weight(1.1f))
+            Text(n(K.RIVAL_TEAM) ?: "Rival", Modifier.weight(1f), fontSize = 12.5.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+        }
+        for ((label, mk, rk) in nums) {
+            val a = n(mk); val b = n(rk)
+            val fa = firstNum(a); val fb = firstNum(b)
+            val aWin = fa != null && fb != null && fa > fb; val bWin = fa != null && fb != null && fb > fa
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(a ?: "—", Modifier.weight(1f), fontSize = 15.sp, fontWeight = if (aWin) FontWeight.ExtraBold else FontWeight.Normal, color = if (aWin) C.OK else Color.White)
+                Text(label, Modifier.weight(1.1f), fontSize = 12.5.sp, color = C.MUTED, textAlign = TextAlign.Center)
+                Text(b ?: "—", Modifier.weight(1f), fontSize = 15.sp, fontWeight = if (bWin) FontWeight.ExtraBold else FontWeight.Normal, color = if (bWin) C.WARN else Color.White, textAlign = TextAlign.End)
+            }
+        }
+        for ((label, mk, rk) in txt) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text((if (mk.isEmpty()) null else n(mk)) ?: "—", Modifier.weight(1f), fontSize = 13.5.sp)
+                Text(label, Modifier.weight(1.1f), fontSize = 12.5.sp, color = C.MUTED, textAlign = TextAlign.Center)
+                Text(n(rk) ?: "—", Modifier.weight(1f), fontSize = 13.5.sp, textAlign = TextAlign.End)
+            }
+        }
+        Text("Verde = você à frente • laranja = rival à frente. Só entra o que foi lido.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** Revisão do último jogo em duas linhas: o que aconteceu e UMA mudança a testar (sem concluir com 1 jogo só). */
+@Composable
+private fun LastGameCard(d: SlotData) {
+    val games = remember(d.logs, d.reports) {
+        Coach.games(
+            d.logs.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() },
+            d.reports.mapNotNull { p -> runCatching { JSONObject(p.json).also { j -> if (!j.has("round")) p.kind.removePrefix("mr_R").toIntOrNull()?.let { j.put("round", it) } } }.getOrNull() }
+        )
+    }
+    val last = games.filter { it.result != null }.maxByOrNull { it.round } ?: return
+    fun key(g: Coach.Game) = Formations.base(g.formation ?: "") + "|" + (Osm.style(g.style ?: "") ?: g.style)
+    val same = games.count { it.result != null && key(it) == key(last) }
+    val t = PostGame.twoLines(last, same)
+    Panel {
+        Text("📝 Último jogo — ${t.title}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+        Text(t.what, fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp))
+        Text("➡ " + t.next, fontSize = 13.5.sp, color = C.GOLD, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+/** Painel de aprendizado (Hoje): o que seus jogos contra humanos ensinaram, o que está em EVITE e as lições da IA. */
+@Composable
+private fun LearningCard() {
+    val ctx = LocalContext.current
+    val v = rememberLoaded<LearnPanel.View?>(null, 0, UiBus.version) { runCatching { LearnPanel.build(Repo(ctx)) }.getOrNull() } ?: return
+    Fold("🎓", "O que o app aprendeu", "${v.humanGames} jogos contra humanos") {
+        if (v.streak.isNotBlank()) Text("Últimos resultados (mais recente primeiro): ${v.streak}", fontSize = 13.5.sp)
+        if (v.best.isNotEmpty()) { Text("Rende acima do esperado", fontWeight = FontWeight.Bold, color = C.OK, fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp)); for (x in v.best) Text("• $x", fontSize = 13.sp) }
+        if (v.worst.isNotEmpty()) { Text("Rende abaixo do esperado", fontWeight = FontWeight.Bold, color = C.WARN, fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp)); for (x in v.worst) Text("• $x", fontSize = 13.sp) }
+        if (v.avoid.isNotEmpty()) Text("🚫 EVITE: " + v.avoid.joinToString(", "), fontSize = 13.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
+        if (v.lessons.isNotEmpty()) { Text("Lições recentes da IA", fontWeight = FontWeight.Bold, color = C.GOLD, fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp)); for (x in v.lessons) Text("• $x", fontSize = 13.sp) }
+        Text(v.note, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    }
+}

@@ -954,26 +954,41 @@ object Meta {
      */
     fun resolve(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?, logs: List<JSONObject>): Template? {
         val prior = HumanPrior.build(logs, edge)
-        val remoteT = fromRemote(edge, home, rivalFormation, remote)
-            ?.takeIf { !HumanPrior.avoidsFormation(prior, it.formation) && !HumanPrior.avoidsStyle(prior, it.style) }
+        val ok = remoteCandidates(edge, home, rivalFormation, remote)
+            .filter { !HumanPrior.avoidsFormation(prior, it.formation) && !HumanPrior.avoidsStyle(prior, it.style) }
+        // várias fontes da web podem discordar: vale a que o SEU histórico real sustenta (empate = a de maior prioridade)
+        val remoteT = if (prior == null) ok.firstOrNull() else ok.maxByOrNull { HumanPrior.bonus(prior, it.formation, it.style, it.mentality) }
         val base = remoteT ?: template(edge, home, rivalFormation) ?: return null
         return MetaLearner.adapt(base, logs, edge, home, rivalFormation)
     }
 
-    private fun fromRemote(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?): Template? {
-        if (remote == null || System.currentTimeMillis() - remote.optLong("at") > 30L * 86400000L) return null
-        val rules = remote.optJSONObject("rules") ?: return null
+    /** Regra principal + alternativas (outras fontes) da situação; vazio se não há modelo recente. */
+    fun remoteCandidates(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?): List<Template> {
+        if (remote == null || System.currentTimeMillis() - remote.optLong("at") > 30L * 86400000L) return emptyList()
+        val rules = remote.optJSONObject("rules") ?: return emptyList()
         val k = key(edge, rivalFormation)
-        val o = rules.optJSONObject(k) ?: rules.optJSONObject(k.substringBefore('|') + "|?") ?: return null
+        val o = rules.optJSONObject(k) ?: rules.optJSONObject(k.substringBefore('|') + "|?") ?: return emptyList()
+        val list = ArrayList<JSONObject>()
+        list.add(o)
+        o.optJSONArray("alts")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { list.add(it) } }
+        return list.mapNotNull { fromRule(it, edge, home, rivalFormation) }
+    }
+
+    private fun fromRule(o0: JSONObject, edge: Int, home: Boolean?, rivalFormation: String?): Template? {
+        val away = home == false
+        // a fonte trouxe a linha "fora de casa": usa os valores dela em vez de descontar
+        val o = if (away) o0.optJSONObject("away")?.let { aw -> JSONObject(o0.toString()).also { c -> for (n in aw.keys()) c.put(n, aw.get(n)) } } ?: o0 else o0
+        val hasAway = away && o !== o0
         val f = Formations.canonical(o.optString("formation")) ?: return null
         val st = Osm.style(o.optString("style")) ?: return null
         // controle que a pesquisa não trouxe: o do modelo embutido para a mesma situação (senão o meio da escala)
         val t0 = template(edge, null, rivalFormation)
         fun sl(n: String, d: Int) = (if (o.has(n)) o.optInt(n, d) else d).coerceIn(0, 100)
-        val away = home == false
+        val dp = if (away && !hasAway) 5 else 0
+        val dm = if (away && !hasAway) 8 else 0
         return Template(
             "comunidade (internet, ${o.optString("source").take(40).ifBlank { "fóruns" }})", f, st,
-            sl("pressure", t0?.pressure ?: 50) - (if (away) 5 else 0), sl("mentality", t0?.mentality ?: 50) - (if (away) 8 else 0),
+            sl("pressure", t0?.pressure ?: 50) - dp, sl("mentality", t0?.mentality ?: 50) - dm,
             sl("tempo", t0?.tempo ?: 60),
             Osm.attack(o.optString("attack")) ?: "Atacar apenas", Osm.midfield(o.optString("mid")) ?: "Manter posições",
             Osm.defense(o.optString("def")) ?: "Defender atrás", Osm.marking(o.optString("marking")) ?: "À zona",

@@ -880,6 +880,17 @@ object Director {
         val sp = simPlan(res2.tactic, res2.rows)
         val pp = WinModel.predict(base.copy(plan = sp, tacticRecord = record(hist, sp)))
         repo.dao.putPlan(PlanEntity(slot, "tlog_R${round ?: 0}", logJson(res2.tactic, round, rival, inp, pp, base, f[K.RIVAL_NICK]?.value).toString(), now))
+        // plano B para o painel "Por quê": a melhor simulação que difere da escolhida
+        runCatching {
+            val fin = res3.tactic
+            val altC = cands.firstOrNull { it.tactic.formation != fin.formation || it.tactic.playStyle != fin.playStyle }
+            if (altC != null) {
+                val a = altC.tactic
+                repo.dao.putPlan(PlanEntity(slot, "whyalt", JSONObject().put("main", fin.formation + "|" + fin.playStyle)
+                    .put("alt", JSONObject().put("formation", a.formation).put("style", a.playStyle).put("pressure", a.pressure).put("mentality", a.mentality).put("tempo", a.tempo).put("pts", altC.points))
+                    .put("round", round ?: -1).toString(), now))
+            }
+        }
         return Outcome(true, json.toString(), null)
     }
 

@@ -205,11 +205,19 @@ class FramePipeline private constructor(private val ctx: Context) {
                 .put("first", if (fresh) now else firstAt).put("fp", fresh || inFirstPass).toString(), now))
         }
         val head = merged.getOrNull(0).orEmpty() + (merged.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: "")
-        return when {
+        val msg = when {
             diffs.isNotEmpty() -> "⚠ S$slot: o rival MUDOU a tática: " + diffs.take(3).joinToString("; ") + ". Gere a tática de novo."
             old != null -> "✅ S$slot: o rival MANTEVE a tática ($head)."
             else -> "👀 S$slot: tática do rival lida ($head). Passe de novo perto do jogo para ver se ele muda."
         }
+        // reanálise dos 20 min finais: guarda o veredito (a Véspera mostra feito/pendente) e avisa que é a conferência final
+        val mAt = f[K.MATCH_AT]?.value?.toLongOrNull()
+        if (mAt != null && mAt - now in 0..Reanalysis.WINDOW_MS) {
+            val verdict = if (diffs.isNotEmpty()) "mudou" else if (old != null) "manteve" else "lida"
+            repo.dao.putPlan(PlanEntity(slot, Reanalysis.PLAN, JSONObject().put("matchAt", mAt).put("at", now).put("verdict", verdict).put("detail", diffs.take(3).joinToString("; ")).toString(), now))
+            return "🔁 Reanálise (faltam ${(mAt - now) / 60000} min) — " + msg.removePrefix("⚠ ").removePrefix("✅ ").removePrefix("👀 ")
+        }
+        return msg
     }
 
     /** Mesmo valor apesar do ruído do OCR: formação/estilo canônicos, números ±4 (pressão/ritmo), texto por similaridade. */

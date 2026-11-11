@@ -1457,7 +1457,34 @@ object MetaRefresh {
     private const val LAST = "metaremote_last"
     @Volatile var running = false
 
-    suspend fun remote(repo: Repo): JSONObject? = repo.dao.plan(0, KIND)?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+    suspend fun aiRemote(repo: Repo): JSONObject? = repo.dao.plan(0, KIND)?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+
+    /**
+     * Modelo da comunidade em uso: regras lidas das páginas da web (`WebKnow`, semanal) + as da pesquisa por IA (só se recentes).
+     * Onde as duas existem, a da web é a principal e a da IA vira alternativa.
+     */
+    suspend fun remote(repo: Repo): JSONObject? {
+        val ai = aiRemote(repo)
+        val kb = WebKnow.rules(repo)
+        val kbRules = kb?.optJSONObject("rules")
+        if (kbRules == null || kbRules.length() == 0) return ai
+        val now = System.currentTimeMillis()
+        val merged = JSONObject()
+        val aiRules = ai?.takeIf { now - it.optLong("at") <= 30L * 86400000L }?.optJSONObject("rules")
+        if (aiRules != null) for (k in aiRules.keys()) merged.put(k, aiRules.get(k))
+        for (k in kbRules.keys()) {
+            val main = JSONObject(kbRules.getJSONObject(k).toString())
+            aiRules?.optJSONObject(k)?.let { a ->
+                val alts = main.optJSONArray("alts") ?: JSONArray().also { main.put("alts", it) }
+                val key = a.optString("formation") + "|" + a.optString("style")
+                val have = (0 until alts.length()).any { alts.optJSONObject(it)?.let { x -> x.optString("formation") + "|" + x.optString("style") } == key } ||
+                    key == main.optString("formation") + "|" + main.optString("style")
+                if (!have && alts.length() < 4) alts.put(JSONObject(a.toString()).also { it.remove("alts") })
+            }
+            merged.put(k, main)
+        }
+        return JSONObject().put("at", maxOf(kb.optLong("at"), ai?.optLong("at") ?: 0L)).put("rules", merged)
+    }
 
     private val BASES = listOf("4-3-3", "4-4-2", "4-2-3-1", "4-5-1", "5-4-1", "5-3-2", "3-4-3", "5-2-3", "3-5-2")
 
@@ -1583,7 +1610,7 @@ object MetaRefresh {
                     "(a resposta ficou guardada no diagnóstico)"
             }
             // junta com o que já havia: situações novas entram, as repetidas são atualizadas
-            val old = remote(repo)?.optJSONObject("rules")
+            val old = aiRemote(repo)?.optJSONObject("rules")
             val merged = JSONObject()
             if (old != null) for (k in old.keys()) merged.put(k, old.get(k))
             for (k in clean.keys()) merged.put(k, clean.get(k))
@@ -1722,11 +1749,12 @@ object MetaRefresh {
 
     /** Atualiza sozinho uma vez por semana (em segundo plano); depois de uma tentativa, espera 24 h para tentar de novo. */
     fun refreshIfStale(ctx: Context) {
+        WebKnow.refreshIfStale(ctx)
         if (running || !AiClient.hasAnyKey(ctx)) return
         val lastTry = Settings.get(ctx, "meta_try_at", "0").toLongOrNull() ?: 0L
         if (System.currentTimeMillis() - lastTry < 24L * 3600000L) return
         AppScope.scope.launch(Dispatchers.IO) {
-            val r = remote(Repo(ctx))
+            val r = aiRemote(Repo(ctx))
             if (r == null || System.currentTimeMillis() - r.optLong("at") > 7L * 86400000L) {
                 runCatching { Diag.log("Modelo da comunidade: " + refresh(ctx)) }
             }

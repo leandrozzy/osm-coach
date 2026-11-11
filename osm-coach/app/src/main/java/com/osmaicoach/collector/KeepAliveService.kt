@@ -53,6 +53,7 @@ class KeepAliveService : Service() {
             while (isActive) {
                 try { Notifier.reschedule(applicationContext) } catch (e: Exception) { Diag.lastError = "Avisos: " + (e.message ?: e.javaClass.simpleName) }
                 runCatching { Coins.refreshIfStale(applicationContext) }
+                runCatching { WebKnow.refreshIfStale(applicationContext) }
                 delay(60_000L)
             }
         }

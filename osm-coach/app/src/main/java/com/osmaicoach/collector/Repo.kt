@@ -377,7 +377,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -412,7 +412,7 @@ class Repo(private val ctx: Context) {
      */
     /** O que só vale DENTRO de uma competição (suspensões, tática montada, leituras do rival, forma, listas): apaga; o aprendizado (tlog arquivado, lições, histórico de treino) fica. */
     private suspend fun clearCompetitionState(slot: Int) {
-        for (k in listOf("reds", "suspended", "noappeal", "tacticdone", "tacmounted", "autogen", "rivalsnap", "formread", "lineup", "todolist", "watch", "rivalchange", "prep"))
+        for (k in listOf("reds", "suspended", "noappeal", "tacticdone", "tacmounted", "autogen", "rivalsnap", "formread", "lineup", "todolist", "watch", "rivalchange", "prep", "whyalt", "reanalysis"))
             dao.deletePlan(slot, k)
         for (k in listOf(K.MY_FORM, K.RIVAL_FORM)) dao.deleteField(slot, k)
         dao.deleteRivalFields(slot)
