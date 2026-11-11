@@ -170,11 +170,7 @@ class CaptureService : AccessibilityService() {
         fun finish() { if (!finished) { finished = true; done() } }
         // Recentes já ao encerrar; depois uma foto da tela de Recentes acha onde está o cartão do OSM (a posição e a rotação
         // mudam com o launcher) e o arrasto sai dali. ~1 s no total.
-        // 1º traz o OSM para a frente (se o nosso app estiver no topo, os Recentes abrem centrados no NOSSO cartão e o do OSM fica na ponta)
-        try {
-            packageManager.getLaunchIntentForPackage(OSM_PACKAGE)?.let { startActivity(it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        } catch (e: Exception) { Diag.log("Arrastar OSM: não consegui trazer o OSM à frente (${e.message})") }
-        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 600L)
+        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 120L)
         // até 3 rodadas: acha o cartão do OSM, (se estiver na ponta, centraliza), arrasta para cima e confere por foto se sumiu
         fun gesture(p: android.graphics.Path, ms: Long, onDone: (Boolean) -> Unit) {
             val ok = try {
@@ -194,6 +190,7 @@ class CaptureService : AccessibilityService() {
             }
         }
         var scrollTries = 0
+        var reopened = 0
         // Os Recentes deste aparelho (ASUS/ROG) ficam com o layout do jogo (paisagem) mesmo com a tela em retrato: os cartões ficam
         // EMPILHADOS na vertical (o nosso app em cima, o OSM embaixo, "Limpar tudo" girado na lateral). Então a rolagem do carrossel é
         // vertical e "arrastar para cima" do launcher vira arrastar para a ESQUERDA na tela. Como não dá para saber, tenta os dois e confere por foto.
@@ -203,6 +200,7 @@ class CaptureService : AccessibilityService() {
             scope.launch {
                 var hit: OsmThumb.Hit? = null
                 var w = 0f; var hh = 0f
+                var landscapeCount = 0
                 for (attempt in 1..12) {
                     val shot = try { takeShot() } catch (e: Exception) { null }
                     if (shot != null) {
@@ -210,11 +208,18 @@ class CaptureService : AccessibilityService() {
                         val landscape = shot.width > shot.height
                         hit = if (landscape) null else try { OsmThumb.find(shot) } catch (e: Exception) { null }
                         shot.recycle()
-                        if (landscape) { delay(300L); continue }
+                        if (landscape) { landscapeCount++; delay(300L); continue }
                     }
                     if (hit != null) break
                     if (attempt >= 3) break
                     delay(250L)
+                }
+                // a tela ficou em paisagem o tempo todo = o toque abriu o OSM em tela cheia (saímos dos Recentes): abre os Recentes de novo e repete
+                if (landscapeCount >= 10 && reopened < 3) {
+                    reopened++
+                    Diag.log("Arrastar OSM: o OSM abriu em tela cheia (rodada $round), abrindo os Recentes de novo ($reopened)")
+                    withContext(Dispatchers.Main) { performGlobalAction(GLOBAL_ACTION_RECENTS); h.postDelayed({ swipeRound(round) }, 900L) }
+                    return@launch
                 }
                 // da 2ª rodada em diante: miniatura sumiu = OSM fechado
                 if (round >= 2 && hit == null) { Diag.log("Arrastar OSM: miniatura sumiu, OSM fechado (rodada $round)"); withContext(Dispatchers.Main) { finish() }; return@launch }
@@ -263,23 +268,24 @@ class CaptureService : AccessibilityService() {
                         return@withContext
                     }
                     // arrasto de fechar: no layout vertical (girado) é para a esquerda/direita; no normal, para cima. Alterna a cada rodada e confere por foto.
-                    val styles = if (vertical) listOf("esquerda", "direita", "esquerda", "cima") else listOf("cima", "esquerda", "direita", "cima")
+                    // vídeo 10/11 23h05: com o cartão do OSM centrado, arrastar para a ESQUERDA só abriu o cartão (tela cheia); o gesto que o usuário faz é para CIMA
+                    val styles = listOf("cima", "cima", "esquerda", "direita")
                     val st = styles[(round - 1).coerceIn(0, 3)]
                     Diag.log("Arrastar OSM: cartão achado em (${hx.cx.toInt()}, ${hx.cy.toInt()}) score ${"%.2f".format(hx.score)} rodada $round: arrasta p/ $st")
                     val p = android.graphics.Path()
                     when (st) {
-                        "cima" -> { val sy = (hx.cy + hx.cardH * 0.2f).coerceIn(hh * 0.15f, hh * 0.85f); p.moveTo(hx.cx, sy); p.lineTo(hx.cx, hh * 0.02f) }
+                        "cima" -> { val sy = (hx.cy + hx.cardH * (if (round == 1) 0.2f else 0.1f)).coerceIn(hh * 0.2f, hh * 0.9f); p.moveTo(hx.cx, sy); p.lineTo(hx.cx, hh * 0.02f) }
                         "esquerda" -> { p.moveTo((hx.cx + w * 0.25f).coerceAtMost(w * 0.95f), hx.cy); p.lineTo(w * 0.01f, hx.cy) }
                         else -> { p.moveTo((hx.cx - w * 0.25f).coerceAtLeast(w * 0.05f), hx.cy); p.lineTo(w * 0.99f, hx.cy) }
                     }
-                    gesture(p, 150L) { ok ->
+                    gesture(p, if (st == "cima") 220L else 150L) { ok ->
                         Diag.log("Arrastar OSM: gesto ${if (ok) "concluído" else "não concluído"} (rodada $round)")
                         if (round >= 4 || !ok) h.postDelayed({ finish() }, 100L) else h.postDelayed({ swipeRound(round + 1) }, 500L)
                     }
                 }
             }
         }
-        h.postDelayed({ swipeRound(1) }, 1500L)
+        h.postDelayed({ swipeRound(1) }, 900L)
         h.postDelayed({ finish() }, 16000L)
     }
 
