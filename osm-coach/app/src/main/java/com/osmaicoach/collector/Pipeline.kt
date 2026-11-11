@@ -643,7 +643,6 @@ class FramePipeline private constructor(private val ctx: Context) {
                 return
             }
 
-            runCatching { OsmThumb.set(bmp) }   // miniatura do OSM para achar o cartão nos Recentes ao fechar
             val ocr = OcrEngine.read(bmp)
             lastProcessedAt = now
             Diag.ocr.incrementAndGet()

@@ -281,15 +281,16 @@ object Control {
             try { (app.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).killBackgroundProcesses(OSM_PACKAGE) } catch (e: Exception) { }
         }
         val svc = CaptureService.instance
-        if (svc != null && svc.canSwipeAway()) {
-            svc.swipeAwayOsm {
+        if (svc != null && svc.canForceStop()) {
+            svc.forceStopOsm {
                 openApp()
-                AppScope.scope.launch { kotlinx.coroutines.delay(1500L); killBg() }
-                Diag.log("OSM fechado pelos Recentes ao encerrar a leitura")
+                Diag.log("OSM: Forçar parada pelas Configurações ao encerrar a leitura")
             }
         } else {
+            // serviço sem a permissão nova: precisa desligar e ligar a Acessibilidade do OSM AI Coach uma vez
+            android.widget.Toast.makeText(app, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach (uma vez).", android.widget.Toast.LENGTH_LONG).show()
             openApp()
-            AppScope.scope.launch { kotlinx.coroutines.delay(1800L); killBg(); Diag.log("OSM: kill em segundo plano (sem gestos de acessibilidade)") }
+            AppScope.scope.launch { kotlinx.coroutines.delay(1800L); killBg(); Diag.log("OSM: kill em segundo plano (acessibilidade sem a permissão de ler a tela)") }
         }
     }
 

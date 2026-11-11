@@ -160,133 +160,83 @@ class CaptureService : AccessibilityService() {
     /** O serviço foi (re)ligado com a capacidade de gestos (config nova)? */
     fun canSwipeAway(): Boolean = (serviceInfo?.capabilities ?: 0) and android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0
 
+    /** O serviço foi (re)ligado com permissão para ler a janela (config nova)? Sem ela não dá para clicar em "Forçar parada". */
+    fun canForceStop(): Boolean = (serviceInfo?.capabilities ?: 0) and android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_RETRIEVE_WINDOW_CONTENT != 0
+
+    private fun findLabel(root: android.view.accessibility.AccessibilityNodeInfo, labels: List<String>): android.view.accessibility.AccessibilityNodeInfo? {
+        for (l in labels) {
+            val found = root.findAccessibilityNodeInfosByText(l)
+            val n = found?.firstOrNull { it.isVisibleToUser }
+            if (n != null) return n
+        }
+        return null
+    }
+
+    private fun clickNode(n: android.view.accessibility.AccessibilityNodeInfo): Boolean {
+        var cur: android.view.accessibility.AccessibilityNodeInfo? = n
+        var up = 0
+        while (cur != null && up < 6) {
+            if (cur.isClickable && cur.isEnabled && cur.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return true
+            cur = cur.parent; up++
+        }
+        return false
+    }
+
+    private fun dumpTexts(root: android.view.accessibility.AccessibilityNodeInfo?): String {
+        val out = ArrayList<String>()
+        fun walk(n: android.view.accessibility.AccessibilityNodeInfo?, d: Int) {
+            if (n == null || out.size >= 30 || d > 12) return
+            val t = (n.text ?: n.contentDescription)?.toString()?.trim()
+            if (!t.isNullOrEmpty()) out.add(t.take(30))
+            for (k in 0 until n.childCount) walk(n.getChild(k), d + 1)
+        }
+        walk(root, 0)
+        return out.joinToString(" | ")
+    }
+
     /**
-     * Fecha o OSM como na mão: traz o OSM para a frente, abre os Recentes (o cartão do OSM fica no centro) e arrasta
-     * para cima. Chama `done` no fim (o app abre depois). Cada passo tem uma pausa para a animação do Android.
+     * Fecha o OSM de verdade: abre "Informações do app" do OSM nas Configurações e clica em "Forçar parada" + confirma (é o que
+     * você faria à mão; sem gestos de arrastar). Precisa que o serviço de acessibilidade tenha sido religado depois da atualização.
+     * Chama `done` no fim (o app abre depois).
      */
-    fun swipeAwayOsm(done: () -> Unit) {
-        val h = android.os.Handler(mainLooper)
-        var finished = false
-        fun finish() { if (!finished) { finished = true; done() } }
-        // Recentes já ao encerrar; depois uma foto da tela de Recentes acha onde está o cartão do OSM (a posição e a rotação
-        // mudam com o launcher) e o arrasto sai dali. ~1 s no total.
-        h.postDelayed({ performGlobalAction(GLOBAL_ACTION_RECENTS) }, 120L)
-        // até 3 rodadas: acha o cartão do OSM, (se estiver na ponta, centraliza), arrasta para cima e confere por foto se sumiu
-        fun gesture(p: android.graphics.Path, ms: Long, onDone: (Boolean) -> Unit) {
-            val ok = try {
-                dispatchGesture(
-                    android.accessibilityservice.GestureDescription.Builder()
-                        .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0L, ms)).build(),
-                    object : GestureResultCallback() {
-                        override fun onCompleted(g: android.accessibilityservice.GestureDescription?) { onDone(true) }
-                        override fun onCancelled(g: android.accessibilityservice.GestureDescription?) { Diag.log("Arrastar OSM: gesto CANCELADO pelo Android"); onDone(false) }
-                    }, null
-                )
-            } catch (e: Exception) { Diag.log("Arrastar OSM: " + (e.message ?: e.javaClass.simpleName)); false }
-            if (!ok) {
-                Diag.log("Arrastar OSM: o Android recusou o gesto (religue a Acessibilidade do OSM AI Coach)")
-                Toast.makeText(applicationContext, "Para fechar o OSM: desligue e ligue de novo a Acessibilidade do OSM AI Coach.", Toast.LENGTH_LONG).show()
-                finish()
-            }
-        }
-        var scrollTries = 0
-        var reopened = 0
-        // Os Recentes deste aparelho (ASUS/ROG) ficam com o layout do jogo (paisagem) mesmo com a tela em retrato: os cartões ficam
-        // EMPILHADOS na vertical (o nosso app em cima, o OSM embaixo, "Limpar tudo" girado na lateral). Então a rolagem do carrossel é
-        // vertical e "arrastar para cima" do launcher vira arrastar para a ESQUERDA na tela. Como não dá para saber, tenta os dois e confere por foto.
-        var vertical = false
-        fun swipeRound(round: Int) {
-            if (finished) return
-            scope.launch {
-                var hit: OsmThumb.Hit? = null
-                var w = 0f; var hh = 0f
-                var landscapeCount = 0
-                for (attempt in 1..12) {
-                    val shot = try { takeShot() } catch (e: Exception) { null }
-                    if (shot != null) {
-                        w = shot.width.toFloat(); hh = shot.height.toFloat()
-                        val landscape = shot.width > shot.height
-                        hit = if (landscape) null else try { OsmThumb.find(shot) } catch (e: Exception) { null }
-                        shot.recycle()
-                        if (landscape) { landscapeCount++; delay(300L); continue }
-                    }
-                    if (hit != null) break
-                    if (attempt >= 3) break
-                    delay(250L)
-                }
-                // a tela ficou em paisagem o tempo todo = o toque abriu o OSM em tela cheia (saímos dos Recentes): abre os Recentes de novo e repete
-                if (landscapeCount >= 10 && reopened < 3) {
-                    reopened++
-                    Diag.log("Arrastar OSM: o OSM abriu em tela cheia (rodada $round), abrindo os Recentes de novo ($reopened)")
-                    withContext(Dispatchers.Main) { performGlobalAction(GLOBAL_ACTION_RECENTS); h.postDelayed({ swipeRound(round) }, 900L) }
-                    return@launch
-                }
-                // da 2ª rodada em diante: miniatura sumiu = OSM fechado
-                if (round >= 2 && hit == null) { Diag.log("Arrastar OSM: miniatura sumiu, OSM fechado (rodada $round)"); withContext(Dispatchers.Main) { finish() }; return@launch }
+    fun forceStopOsm(done: () -> Unit) {
+        scope.launch {
+            var ok = false
+            try {
                 withContext(Dispatchers.Main) {
-                    val dm = resources.displayMetrics
-                    if (w <= 0f || hh <= 0f) { w = dm.widthPixels.toFloat(); hh = dm.heightPixels.toFloat() }
-                    val hx = hit
-                    if (hx == null) {
-                        // sem achar o OSM: NUNCA arrasta no centro (é o cartão do nosso app); procura rolando o carrossel nos dois eixos
-                        if (scrollTries < 8) {
-                            val step = scrollTries
-                            scrollTries++
-                            // 0: sobe (traz o cartão de baixo) • 1: esquerda • 2: desce • 3: direita • repete
-                            val dirs = listOf("cima", "esquerda", "baixo", "direita")
-                            val d = dirs[step % 4]
-                            Diag.log("Arrastar OSM: cartão do OSM não apareceu, rolando os Recentes ($scrollTries: $d)")
-                            val p = android.graphics.Path()
-                            when (d) {
-                                "cima" -> { p.moveTo(w * 0.5f, hh * 0.75f); p.lineTo(w * 0.5f, hh * 0.25f) }
-                                "baixo" -> { p.moveTo(w * 0.5f, hh * 0.25f); p.lineTo(w * 0.5f, hh * 0.75f) }
-                                "esquerda" -> { p.moveTo(w * 0.78f, hh * 0.5f); p.lineTo(w * 0.22f, hh * 0.5f) }
-                                else -> { p.moveTo(w * 0.22f, hh * 0.5f); p.lineTo(w * 0.78f, hh * 0.5f) }
-                            }
-                            gesture(p, 260L) { h.postDelayed({ swipeRound(round) }, 500L) }
-                        } else { Diag.log("Arrastar OSM: não achei o OSM nos Recentes; nada foi arrastado"); finish() }
-                        return@withContext
-                    }
-                    val offX = hx.cx - w * 0.5f
-                    val offY = hx.cy - hh * 0.5f
-                    if (Math.abs(offY) > hh * 0.22f && Math.abs(offY) > Math.abs(offX)) {
-                        // empilhado na vertical e fora do centro: puxa o cartão para o meio
-                        vertical = true
-                        Diag.log("Arrastar OSM: cartão em (${hx.cx.toInt()}, ${hx.cy.toInt()}) fora do centro na vertical, centralizando (rodada $round)")
-                        val p = android.graphics.Path()
-                        if (offY > 0) { p.moveTo(w * 0.5f, hh * 0.75f); p.lineTo(w * 0.5f, hh * 0.75f - offY.coerceAtMost(hh * 0.45f)) }
-                        else { p.moveTo(w * 0.5f, hh * 0.25f); p.lineTo(w * 0.5f, hh * 0.25f - offY.coerceAtLeast(-hh * 0.45f)) }
-                        gesture(p, 260L) { h.postDelayed({ swipeRound(round) }, 500L) }
-                        return@withContext
-                    }
-                    if (Math.abs(offX) > w * 0.32f) {
-                        Diag.log("Arrastar OSM: cartão na ponta (${hx.cx.toInt()}), centralizando (rodada $round)")
-                        val p = android.graphics.Path()
-                        val y = hh * 0.5f
-                        if (hx.cx > w * 0.5f) { p.moveTo(w * 0.15f, y); p.lineTo(w * 0.85f, y) } else { p.moveTo(w * 0.85f, y); p.lineTo(w * 0.15f, y) }
-                        gesture(p, 220L) { h.postDelayed({ swipeRound(round) }, 450L) }
-                        return@withContext
-                    }
-                    // arrasto de fechar: no layout vertical (girado) é para a esquerda/direita; no normal, para cima. Alterna a cada rodada e confere por foto.
-                    // vídeo 10/11 23h05: com o cartão do OSM centrado, arrastar para a ESQUERDA só abriu o cartão (tela cheia); o gesto que o usuário faz é para CIMA
-                    val styles = listOf("cima", "cima", "esquerda", "direita")
-                    val st = styles[(round - 1).coerceIn(0, 3)]
-                    Diag.log("Arrastar OSM: cartão achado em (${hx.cx.toInt()}, ${hx.cy.toInt()}) score ${"%.2f".format(hx.score)} rodada $round: arrasta p/ $st")
-                    val p = android.graphics.Path()
-                    when (st) {
-                        "cima" -> { val sy = (hx.cy + hx.cardH * (if (round == 1) 0.2f else 0.1f)).coerceIn(hh * 0.2f, hh * 0.9f); p.moveTo(hx.cx, sy); p.lineTo(hx.cx, hh * 0.02f) }
-                        "esquerda" -> { p.moveTo((hx.cx + w * 0.25f).coerceAtMost(w * 0.95f), hx.cy); p.lineTo(w * 0.01f, hx.cy) }
-                        else -> { p.moveTo((hx.cx - w * 0.25f).coerceAtLeast(w * 0.05f), hx.cy); p.lineTo(w * 0.99f, hx.cy) }
-                    }
-                    gesture(p, if (st == "cima") 220L else 150L) { ok ->
-                        Diag.log("Arrastar OSM: gesto ${if (ok) "concluído" else "não concluído"} (rodada $round)")
-                        if (round >= 4 || !ok) h.postDelayed({ finish() }, 100L) else h.postDelayed({ swipeRound(round + 1) }, 500L)
-                    }
+                    startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$OSM_PACKAGE"))
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
                 }
+                val stopLabels = listOf("Forçar parada", "Forçar paragem", "Parar à força", "Force stop", "Forzar detención", "Forzar cierre")
+                var clicked = false
+                for (t in 1..28) {
+                    delay(250L)
+                    val root = rootInActiveWindow ?: continue
+                    val n = findLabel(root, stopLabels) ?: continue
+                    if (!n.isEnabled) { Diag.log("Forçar parada: botão desativado (o OSM já estava parado)"); ok = true; clicked = true; break }
+                    if (clickNode(n)) { clicked = true; Diag.log("Forçar parada: botão clicado"); break }
+                }
+                if (!clicked) {
+                    Diag.log("Forçar parada: não achei o botão. Textos da tela: " + dumpTexts(rootInActiveWindow))
+                } else if (!ok) {
+                    for (t in 1..20) {
+                        delay(250L)
+                        val root = rootInActiveWindow ?: continue
+                        val b = root.findAccessibilityNodeInfosByViewId("android:id/button1")?.firstOrNull { it.isVisibleToUser }
+                            ?: root.findAccessibilityNodeInfosByText("OK")?.firstOrNull { it.isVisibleToUser && it.text?.toString()?.trim().equals("OK", true) }
+                            ?: root.findAccessibilityNodeInfosByText("Sim")?.firstOrNull { it.isVisibleToUser }
+                        if (b != null && clickNode(b)) { ok = true; Diag.log("Forçar parada: confirmado, OSM fechado"); break }
+                    }
+                    if (!ok) Diag.log("Forçar parada: não achei a confirmação. Textos: " + dumpTexts(rootInActiveWindow))
+                }
+            } catch (e: Exception) {
+                Diag.log("Forçar parada: " + (e.message ?: e.javaClass.simpleName))
             }
+            delay(300L)
+            withContext(Dispatchers.Main) { done() }
         }
-        h.postDelayed({ swipeRound(1) }, 900L)
-        h.postDelayed({ finish() }, 16000L)
     }
 
     fun notice(text: String) {
