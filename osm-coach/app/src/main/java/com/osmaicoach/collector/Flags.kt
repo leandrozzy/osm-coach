@@ -119,4 +119,26 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
     fun imgQuality(s: String?): Float? = if (s.isNullOrEmpty()) null else if (s.startsWith("q:")) s.substring(2, s.indexOf('|').coerceAtLeast(2)).toFloatOrNull()?.div(10f) ?: 0f else 0f
     fun imgPayload(s: String): String = if (s.startsWith("q:")) s.substringAfter('|') else s
     fun emojiOfCompetition(title: String?): String? = emoji(isoFromCompetition(title))
+
+    /**
+     * Bandeira borrada (quadro em rolagem) é trocada pela mais nítida de outro jogador com a MESMA bandeira (assinatura 8×5 parecida):
+     * o desfoque quase não muda a cor média, então o casamento vale. Sem par nítido, fica a própria imagem.
+     */
+    fun sharpen(imgs: Map<String, String>, rich: Map<String, String>): Map<String, String> {
+        if (imgs.size < 2) return imgs
+        val out = HashMap(imgs)
+        for ((k, v) in imgs) {
+            val q = imgQuality(v) ?: 0f
+            val r = rich[k] ?: continue
+            var best: String? = null; var bq = q * 1.25f + 1f
+            for ((k2, v2) in imgs) {
+                if (k2 == k) continue
+                val q2 = imgQuality(v2) ?: 0f
+                val r2 = rich[k2] ?: continue
+                if (q2 > bq && PixelProbe.richDist(r, r2) <= 0.045f) { best = v2; bq = q2 }
+            }
+            if (best != null) out[k] = best
+        }
+        return out
+    }
 }

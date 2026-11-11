@@ -12,7 +12,7 @@ import java.io.FileOutputStream
 /**
  * Escudos do OSM: todos têm a MESMA moldura de escudo (dourada, de cobre ou prateada). O recorte acha a caixa do escudo (moldura metálica
  * ou, se for prateada, contraste com o fundo), CONFERE tamanho/proporção/cor e aplica a silhueta como máscara. Nada que não pareça
- * escudo é gravado (antes saía texto de placar, números e fundo azul). Guardado em `crests/t3/<time>.png`, global por nome do time.
+ * escudo é gravado (antes saía texto de placar, números e fundo azul). Guardado em `crests/t4/<time>.png`, global por nome do time.
  */
 object CrestCut {
     /**
@@ -91,11 +91,12 @@ object CrestCut {
 
     /** Silhueta do escudo (frações da caixa 0..1). */
     private fun shield(w: Float, h: Float): Path = Path().apply {
-        moveTo(w * 0.20f, 0f); lineTo(w * 0.80f, 0f)
-        quadTo(w, 0f, w, h * 0.17f); lineTo(w, h * 0.50f)
-        cubicTo(w, h * 0.78f, w * 0.72f, h * 0.93f, w * 0.5f, h)
-        cubicTo(w * 0.28f, h * 0.93f, 0f, h * 0.78f, 0f, h * 0.50f)
-        lineTo(0f, h * 0.17f); quadTo(0f, 0f, w * 0.20f, 0f); close()
+        // cantos de cima bem arredondados e ponta embaixo: o recorte antigo (retângulo com canto leve) deixava o fundo do cenário nos cantos
+        moveTo(w * 0.27f, 0f); lineTo(w * 0.73f, 0f)
+        quadTo(w, 0f, w, h * 0.24f); lineTo(w, h * 0.50f)
+        cubicTo(w, h * 0.76f, w * 0.70f, h * 0.92f, w * 0.5f, h)
+        cubicTo(w * 0.30f, h * 0.92f, 0f, h * 0.76f, 0f, h * 0.50f)
+        lineTo(0f, h * 0.24f); quadTo(0f, 0f, w * 0.27f, 0f); close()
     }
 
     /**
@@ -105,14 +106,18 @@ object CrestCut {
     fun cut(crop: Bitmap, expW: Int = 0, expH: Int = 0): Bitmap? {
         val w = crop.width; val h = crop.height
         val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
-        val box = goldBox(px, w, h, expW) ?: contrastBox(px, w, h, expW, expH) ?: return null
-        val x0 = (box[0] - 2).coerceAtLeast(0); val y0 = (box[1] - 2).coerceAtLeast(0)
-        val x1 = (box[2] + 3).coerceAtMost(w); val y1 = (box[3] + 3).coerceAtMost(h)
+        // moldura de cor com o tamanho esperado; senão contraste (prateada); senão moldura de cor com qualquer tamanho plausível (escudo ampliado/reduzido)
+        var tight = false
+        val box = goldBox(px, w, h, expW) ?: contrastBox(px, w, h, expW, expH)?.also { tight = true } ?: goldBox(px, w, h, 0) ?: run { lastFail = "sem moldura"; return null }
+        val x0 = (box[0] - 1).coerceAtLeast(0); val y0 = (box[1] - 1).coerceAtLeast(0)
+        val x1 = (box[2] + 2).coerceAtMost(w); val y1 = (box[3] + 2).coerceAtMost(h)
         val bw = x1 - x0; val bh = y1 - y0
         if (bw < 16 || bh < 16) return null
         val src = Bitmap.createBitmap(crop, x0, y0, bw, bh)
         val spx = IntArray(bw * bh); src.getPixels(spx, 0, bw, 0, 0, bw, bh)
-        if (!looksLikeCrest(spx)) { src.recycle(); return null }
+        // escudo preto e branco de moldura prateada quase não tem cor viva: aceita se o contraste achou uma caixa de tamanho e proporção de escudo
+        val sizeOk = expW > 0 && expH > 0 && bw >= expW * 0.85f && bw <= expW * 1.2f && bh >= expH * 0.85f && bh <= expH * 1.2f
+        if (!looksLikeCrest(spx) && !(tight && sizeOk)) { src.recycle(); lastFail = "sem cor de escudo"; return null }
         val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
         val cv = Canvas(out)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -123,11 +128,15 @@ object CrestCut {
         return out
     }
 
-    fun dir(filesDir: File): File = File(filesDir, "crests/t3").apply { mkdirs() }
+    /** Motivo da última recusa (vai ao log uma vez por time). */
+    private val failed = HashSet<String>()
+    @Volatile var lastFail: String = ""
+
+    fun dir(filesDir: File): File = File(filesDir, "crests/t4").apply { mkdirs() }
 
     fun file(filesDir: File, team: String?): File? {
         val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
-        return File(File(filesDir, "crests/t3"), "$k.png")
+        return File(File(filesDir, "crests/t4"), "$k.png")
     }
 
     /** Arquivo do escudo do clube: nome exato ou, se faltar, o mais parecido (OCR: "SC"/"5C", acento perdido) com similaridade ≥0,85. */
@@ -135,7 +144,7 @@ object CrestCut {
         val exact = file(filesDir, team) ?: return null
         if (exact.exists()) return exact
         val k = Txt.key(team ?: "")
-        val dir = File(filesDir, "crests/t3")
+        val dir = File(filesDir, "crests/t4")
         val all = dir.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
         return all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
             ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }
@@ -164,7 +173,10 @@ object CrestCut {
             val crop = Bitmap.createBitmap(bmp, x, y, ww, hh)
             val cut = cut(crop, (expW * bmp.width).toInt(), (expH * bmp.height).toInt())
             crop.recycle()
-            if (cut == null) return false
+            if (cut == null) {
+                if (failed.add(Txt.key(team ?: ""))) Diag.log("Escudo de ${team}: não gravado (${lastFail})")
+                return false
+            }
             f.parentFile?.mkdirs()
             FileOutputStream(f).use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) }
             cut.recycle()

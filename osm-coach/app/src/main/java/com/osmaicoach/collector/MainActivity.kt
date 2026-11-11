@@ -1448,7 +1448,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
         logsAll = dao.tacticLogs(slot),
         reports = dao.matchReports(slot),
         fitness = repo.fitness(slot),
-        countries = countriesMap, flagRich = richMap, flagImg = imgMap, leagueRich = leagueRichV, eve = eveList,
+        countries = countriesMap, flagRich = richMap, flagImg = Flags.sharpen(imgMap, richMap), leagueRich = leagueRichV, eve = eveList,
         rivalProfile = repo.rivalProfile(slot),
         board = repo.boardMessages(slot),
         trainScreen = dao.plan(slot, "trainscreen")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
