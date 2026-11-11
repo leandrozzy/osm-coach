@@ -101,4 +101,9 @@ class CrestFlagTest {
         val b = CrestCut.contrastBox(px, w, h, 56, 61)!!
         assertEquals(25, b[0]); assertEquals(80, b[2]); assertEquals(20, b[1]); assertEquals(80, b[3])
     }
+
+    @Test fun nomeCortadoCasaComNomeCompleto() {
+        assertTrue(CrestCut.score(Txt.key("Young Violets"), Txt.key("Young Violets Austria Wien")) >= 0.85)
+        assertTrue(CrestCut.score(Txt.key("SK Sturm"), Txt.key("SK Rapid")) < 0.85)
+    }
 }

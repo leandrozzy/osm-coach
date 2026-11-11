@@ -136,9 +136,16 @@ object CrestCut {
         if (exact.exists()) return exact
         val k = Txt.key(team ?: "")
         val dir = File(filesDir, "crests/t3")
-        return dir.listFiles()?.filter { it.name.endsWith(".png") }
-            ?.maxByOrNull { Txt.sim(Txt.key(it.name.removeSuffix(".png")), k) }
-            ?.takeIf { Txt.sim(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }
+        val all = dir.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
+        return all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
+            ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }
+    }
+
+    /** Parecença de dois nomes de clube: similaridade, ou 0,9 se um é início do outro (nome cortado/quebrado na faixa: "Young Violets" × "Young Violets Austria Wien"). */
+    internal fun score(a: String, b: String): Double {
+        val s = Txt.sim(a, b)
+        val (sh, lg) = if (a.length <= b.length) a to b else b to a
+        return if (sh.length >= 7 && lg.startsWith(sh) && sh.length * 2 >= lg.length) maxOf(s, 0.9) else s
     }
 
     /**

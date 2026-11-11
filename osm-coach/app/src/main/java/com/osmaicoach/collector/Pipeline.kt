@@ -243,6 +243,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         var lastSet: Set<String> = emptySet()
         var moved = false
         var still = 0
+        /** Último quadro mostrava goleiros (última seção do Plantel). */
+        var lastHadGk = false
         /** Dono da lista (plantel): quadros rolados sem o título continuam a mesma leitura. */
         var owner: String? = null
     }
@@ -296,9 +298,16 @@ class FramePipeline private constructor(private val ctx: Context) {
         // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
         // Plantel e Mercado vão até os goleiros e a última linha cola no rodapé: não dá para exigir folga embaixo.
         val hasGk = ex.players.any { it.cat == "GOL" } || ex.listings.any { it.cat == "GOL" }
-        val stalled = pd.moved && same && pd.still >= 2   // 2 quadros iguais seguidos: a lista parou mesmo
+        val stalled = pd.moved && same && pd.still >= 1   // 2 quadros iguais seguidos (mesmas linhas, mesmas alturas): a lista parou mesmo
         pd.lastSet = names
-        if (stalled && ((type == ScreenType.SQUAD || type == ScreenType.MARKET) && hasGk || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
+        pd.lastHadGk = hasGk
+        // Mercado: lista parada (depois de rolar) já é o fim, qualquer que seja a ordem; Plantel: parada mostrando os goleiros (última seção)
+        if (stalled && (type == ScreenType.MARKET || (type == ScreenType.SQUAD && hasGk) || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
+        // Plantel: já li ao menos o elenco guardado (ou o mínimo de 18) com as 4 seções e o quadro atual mostra goleiros no fim = completo
+        if (type == ScreenType.SQUAD && hasGk && pd.moved && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))) {
+            val known = runCatching { repo.dao.playersOf(slot).size }.getOrDefault(0)
+            if (pd.seen.size >= maxOf(18, known) && ocr.lines.any { it.yc > 0.12f && it.yc >= 0.80f }) pd.endSeen = true
+        }
         if (hasGk) pd.cats.add("GOL")
         ex.listings.forEach { l -> l.cat?.let { c -> pd.cats.add(c) } }
         if (!pd.done && complete(pd)) {
@@ -311,7 +320,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val f = repo.fieldMap(pd.slot)
         return when (pd.type) {
             ScreenType.SQUAD -> pd.endSeen && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
-            ScreenType.MARKET -> pd.endSeen && "GOL" in pd.cats
+            ScreenType.MARKET -> pd.endSeen
             ScreenType.CALENDAR -> {
                 // o total do OSM ("43") inclui jogos de copa ainda sem data/rival que o calendário nem lista: vale chegar à última rodada OU ao fim da lista
                 val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
@@ -361,11 +370,37 @@ class FramePipeline private constructor(private val ctx: Context) {
         val pd = pending ?: return
         pending = null
         if (pd.done) return
-        val txt = summary(pd, false)
+        // saiu da tela logo depois de chegar aos goleiros (última seção) com as 4 seções e ≥18 jogadores vistos: a lista foi até o fim
+        val atEnd = pd.type == ScreenType.SQUAD && pd.lastHadGk && pd.moved && pd.seen.size >= 18 && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
+        val txt = summary(pd, atEnd)
         if (txt != null) { Diag.log("Resumo da tela → $txt"); note(pd.slot, txt, System.currentTimeMillis()) }
     }
 
     private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
+
+    /** Pré-jogo/Análise lidos com o jogo longe (fora das 8 h): diz o que foi lido e que a tática só sai nas 8 h antes (cada tela fala; o mesmo texto não repete em 1 min). */
+    private fun farNote(slot: Int, f: Map<String, StoredField>, type: ScreenType?, delta: String?, matchAt: Long, now: Long) {
+        fun v(k: String) = f[k]?.value?.takeIf { FieldMerge.known(it) }
+        val read = when (type) {
+            ScreenType.PREGAME -> {
+                val a = v(K.MY_STRENGTH); val b = v(K.RIVAL_STRENGTH)
+                if (a != null && b != null) "✅ S$slot: Pré-jogo lido — forças $a × $b." else "S$slot: Pré-jogo lido, mas não consegui ler as duas forças."
+            }
+            ScreenType.REPORT -> delta ?: run {
+                val fm = v(K.RIVAL_FORMATION); val pl = v(K.RIVAL_PLAN)
+                when {
+                    fm != null && pl != null -> "✅ S$slot: Análise do rival lida (formação $fm e estilo)."
+                    fm != null -> "S$slot: Análise do rival, tela 1 lida (formação $fm). Falta a 2ª tela (estilo e marcação)."
+                    pl != null -> "S$slot: Análise do rival, tela 2 lida. Falta a 1ª tela (formação)."
+                    else -> "S$slot: Análise do rival: não consegui ler formação nem estilo."
+                }
+            }
+            ScreenType.SQUAD -> "S$slot: Plantel do rival lido."
+            else -> return
+        }
+        val h = ((matchAt - now) / 3_600_000L).coerceAtLeast(0)
+        note(slot, "$read A tática só é gerada nas 8 h antes do jogo (faltam ${h} h).", now)
+    }
 
     private suspend fun autoTactic(slot: Int, now: Long, type: ScreenType? = null) {
         if (Settings.get(ctx, "auto_tactic", "1") != "1") { why(slot, "desligada em Ajustes"); return }
@@ -387,7 +422,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (gaps.isNotEmpty()) {
             why(slot, "faltam leituras: " + gaps.joinToString("; ") { it.first })
             // longe do jogo (fora das 8 h) não há o que fazer agora: sem mensagem ao entrar no slot
-            if (matchAt - now > Director.TACTIC_WINDOW_MS && delta == null) return
+            if (matchAt - now > Director.TACTIC_WINDOW_MS) { farNote(slot, f, type, delta, matchAt, now); return }
             val missing = Director.groups(f, now).filter { !it.ok }
             val read = when (type) { ScreenType.PREGAME -> "Pré-jogo"; ScreenType.REPORT -> "Análise do rival"; ScreenType.SQUAD -> "Plantel do rival"; else -> null }
             note(slot, (delta ?: ("S$slot:" + (read?.let { " $it lido." } ?: ""))) + " Falta ler: " +
@@ -395,7 +430,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             return
         }
         if (matchAt - now > Director.TACTIC_WINDOW_MS) {
-            delta?.let { note(slot, it, now) }
+            farNote(slot, f, type, delta, matchAt, now)
             return
         }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return

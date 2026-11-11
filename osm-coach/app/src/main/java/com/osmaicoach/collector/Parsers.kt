@@ -563,7 +563,7 @@ object Parsers {
                 val group = topLines.filter { abs(it.xc - ln.xc) <= 0.06f }.sortedBy { it.yc }
                 seen.addAll(group)
                 val nm = group[0]
-                if (Txt.key(nm.text).length >= 3 && nm.yc in 0.27f..0.33f) crests.add(CrestSpot(nm.text.trim(), nm.xc, nm.yc - 0.085f))
+                if (Txt.key(nm.text).length >= 3 && nm.yc in 0.27f..0.33f && nm.xc in 0.07f..0.93f) crests.add(CrestSpot(nm.text.trim(), nm.xc, nm.yc - 0.085f))
             }
         }
         return Extraction(
