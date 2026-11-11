@@ -121,24 +121,13 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
     fun emojiOfCompetition(title: String?): String? = emoji(isoFromCompetition(title))
 
     /**
-     * Bandeira borrada (quadro em rolagem) é trocada pela mais nítida de outro jogador com a MESMA bandeira (assinatura 8×5 parecida):
-     * o desfoque quase não muda a cor média, então o casamento vale. Sem par nítido, fica a própria imagem.
+     * Bandeira borrada (quadro em rolagem) não é mostrada: qualidade abaixo de 60% da mais nítida do elenco sai do mapa e a tela usa o
+     * emoji do país (se conhecido) ou a miniatura de cor até uma captura com a lista parada trazer a bandeira nítida.
      */
     fun sharpen(imgs: Map<String, String>, rich: Map<String, String>): Map<String, String> {
         if (imgs.size < 2) return imgs
-        val out = HashMap(imgs)
-        for ((k, v) in imgs) {
-            val q = imgQuality(v) ?: 0f
-            val r = rich[k] ?: continue
-            var best: String? = null; var bq = q * 1.25f + 1f
-            for ((k2, v2) in imgs) {
-                if (k2 == k) continue
-                val q2 = imgQuality(v2) ?: 0f
-                val r2 = rich[k2] ?: continue
-                if (q2 > bq && PixelProbe.richDist(r, r2) <= 0.045f) { best = v2; bq = q2 }
-            }
-            if (best != null) out[k] = best
-        }
-        return out
+        val top = imgs.values.maxOf { imgQuality(it) ?: 0f }
+        if (top <= 0f) return imgs
+        return imgs.filterValues { (imgQuality(it) ?: 0f) >= top * 0.6f }
     }
 }

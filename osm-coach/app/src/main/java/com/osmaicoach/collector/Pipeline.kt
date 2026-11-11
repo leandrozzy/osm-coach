@@ -713,8 +713,18 @@ class FramePipeline private constructor(private val ctx: Context) {
     } catch (e: Exception) { null }
 
     /** Bandeira de cada jogador do Plantel, recortada da captura em resolução cheia (plano `natimg`: nameKey -> WebP base64). */
+    private val lastRowY = HashMap<Int, Map<String, Float>>()
     private suspend fun saveFlagThumbs(bmp: Bitmap, slot: Int, players: List<PlayerRead>) {
+        // lista em movimento (rolagem) = bandeira borrada: compara a altura das linhas com o quadro anterior e só recorta com a lista parada
+        val ys = players.mapNotNull { p -> p.natY?.let { Txt.key(p.name) to it } }.toMap()
+        val prev = lastRowY.put(slot, ys)
+        if (prev != null) {
+            val d = ys.mapNotNull { (k, y) -> prev[k]?.let { Math.abs(it - y) } }
+            if (d.size >= 2 && d.sorted()[d.size / 2] > 0.003f) return
+        }
         val cur = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        var refQ = 0f
+        for (k in cur.keys()) refQ = maxOf(refQ, Flags.imgQuality(cur.optString(k)) ?: 0f)
         var n = 0
         for (p in players) {
             val x = p.natX ?: continue; val y = p.natY ?: continue
@@ -722,7 +732,9 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (key.isBlank()) continue
             val old = Flags.imgQuality(cur.optString(key))
             val t = thumb(bmp, x, y, 0.040f, 0.062f, 48, 32, refine = true) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
-            if (old == null || t.first > old * 1.08f + 1f) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
+            // sem imagem boa ainda: só entra se não for bem mais borrada que as já guardadas; depois só troca por uma mais nítida
+            val ok = if (old == null) (refQ <= 0f || t.first >= refQ * 0.6f) else t.first > old * 1.08f + 1f
+            if (ok) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
         }
         if (n > 0) { repo.dao.putPlan(PlanEntity(slot, "natimg3", cur.toString(), System.currentTimeMillis())); UiBus.bump() }
     }
@@ -914,7 +926,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
             var changed = repo.apply(asg.slot, ex, "ocr", now)
             if (changed > 0) UiBus.bump()   // tudo o que a captura gravou aparece no app sozinho
-            if (asgSlot != null && type == ScreenType.SQUAD && ex.ownerTeam != null && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
+            if (asgSlot != null && type == ScreenType.SQUAD && (ex.ownerTeam != null || pending?.let { it.slot == asgSlot && it.type == ScreenType.SQUAD } == true) && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
             if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, ex)
             // o Calendário mostra o escudo de cada rival: guarda uma vez por clube (só grava o que ainda não tem)
             if (type == ScreenType.CALENDAR) { saveCalendarCrests(bmp, ex.matches); saveStripCrests(bmp, ex.crests) }

@@ -12,7 +12,7 @@ import java.io.FileOutputStream
 /**
  * Escudos do OSM: todos têm a MESMA moldura de escudo (dourada, de cobre ou prateada). O recorte acha a caixa do escudo (moldura metálica
  * ou, se for prateada, contraste com o fundo), CONFERE tamanho/proporção/cor e aplica a silhueta como máscara. Nada que não pareça
- * escudo é gravado (antes saía texto de placar, números e fundo azul). Guardado em `crests/t4/<time>.png`, global por nome do time.
+ * escudo é gravado (antes saía texto de placar, números e fundo azul). Guardado em `crests/t5/<time>.png`, global por nome do time.
  */
 object CrestCut {
     /**
@@ -39,6 +39,54 @@ object CrestCut {
         if (expW > 0 && (bw < expW * 0.7f || bw > expW * 1.3f)) return null
         val top = (ey.second - Math.round(bw * 1.06f)).coerceAtLeast(0)
         return intArrayOf(ex.first, top, ex.second, ey.second)
+    }
+
+    /**
+     * Caixa do escudo pelo ANEL AZUL-MARINHO escuro que TODO escudo do OSM tem por dentro da moldura (dourada, cobre, prateada ou branca):
+     * é o único traço igual em todos, então o recorte fica do mesmo tamanho para qualquer clube (a moldura prateada sumia no fundo claro e a
+     * ponta de baixo era cortada). Acha o componente conexo do anel mais próximo do centro do recorte com largura ≈ 0,88×[expW] e proporção
+     * de escudo; a caixa completa = anel + 7% de lado, 10% em cima e 9% embaixo (medido em quadros reais: anel 60×63 px → escudo 68×75).
+     */
+    fun ringBox(px: IntArray, w: Int, h: Int, expW: Int): IntArray? {
+        if (w < 24 || h < 24 || expW <= 0) return null
+        val m = BooleanArray(w * h)
+        for (i in 0 until w * h) {
+            val c = px[i]; val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
+            val mx = maxOf(r, g, b); val mn = minOf(r, g, b)
+            m[i] = mx <= 75 && b >= r + 8 && b >= g && mx - mn >= 18
+        }
+        val seen = BooleanArray(w * h)
+        val stack = IntArray(w * h)
+        var best: IntArray? = null; var bestD = Float.MAX_VALUE
+        val ew = expW * 0.88f
+        for (s0 in 0 until w * h) {
+            if (!m[s0] || seen[s0]) continue
+            var sp = 0; stack[sp++] = s0; seen[s0] = true
+            var x0 = w; var x1 = 0; var y0 = h; var y1 = 0; var n = 0
+            while (sp > 0) {
+                val i = stack[--sp]; val x = i % w; val y = i / w; n++
+                if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y
+                for (dy in -1..1) for (dx in -1..1) {
+                    val xx = x + dx; val yy = y + dy
+                    if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue
+                    val j = yy * w + xx
+                    if (m[j] && !seen[j]) { seen[j] = true; stack[sp++] = j }
+                }
+            }
+            val bw = x1 - x0 + 1; val bh = y1 - y0 + 1
+            if (n < ew * 4f || bw < ew * 0.7f || bw > ew * 1.3f) continue
+            val asp = bh.toFloat() / bw
+            if (asp < 0.9f || asp > 1.3f) continue
+            // anel de verdade é fino e vazado: preenchimento baixo (descarta manchas escuras)
+            if (n > bw * bh * 0.45f) continue
+            val d = Math.abs((x0 + x1) / 2f - w / 2f) + Math.abs((y0 + y1) / 2f - h / 2f)
+            if (d < bestD) { bestD = d; best = intArrayOf(x0, y0, x1, y1) }
+        }
+        val r = best ?: return null
+        val rw = r[2] - r[0] + 1
+        val x0 = (r[0] - rw * 0.07f).toInt().coerceAtLeast(0); val x1 = (r[2] + rw * 0.07f).toInt().coerceAtMost(w - 1)
+        val y0 = (r[1] - rw * 0.10f).toInt().coerceAtLeast(0); val y1 = (r[3] + rw * 0.09f).toInt().coerceAtMost(h - 1)
+        return intArrayOf(x0, y0, x1, y1)
     }
 
     private fun isRim(c: Int): Boolean {
@@ -108,7 +156,9 @@ object CrestCut {
         val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
         // moldura de cor com o tamanho esperado; senão contraste (prateada); senão moldura de cor com qualquer tamanho plausível (escudo ampliado/reduzido)
         var tight = false
-        val box = goldBox(px, w, h, expW) ?: contrastBox(px, w, h, expW, expH)?.also { tight = true } ?: goldBox(px, w, h, 0) ?: run { lastFail = "sem moldura"; return null }
+        val ring = ringBox(px, w, h, expW)
+        if (ring != null) tight = true
+        val box = ring ?: goldBox(px, w, h, expW)?.also { it[3] += 3 } ?: contrastBox(px, w, h, expW, expH)?.also { tight = true; it[3] += 5 } ?: goldBox(px, w, h, 0) ?: run { lastFail = "sem moldura"; return null }
         val x0 = (box[0] - 1).coerceAtLeast(0); val y0 = (box[1] - 1).coerceAtLeast(0)
         val x1 = (box[2] + 2).coerceAtMost(w); val y1 = (box[3] + 2).coerceAtMost(h)
         val bw = x1 - x0; val bh = y1 - y0
@@ -132,11 +182,11 @@ object CrestCut {
     private val failed = HashSet<String>()
     @Volatile var lastFail: String = ""
 
-    fun dir(filesDir: File): File = File(filesDir, "crests/t4").apply { mkdirs() }
+    fun dir(filesDir: File): File = File(filesDir, "crests/t5").apply { mkdirs() }
 
     fun file(filesDir: File, team: String?): File? {
         val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
-        return File(File(filesDir, "crests/t4"), "$k.png")
+        return File(File(filesDir, "crests/t5"), "$k.png")
     }
 
     /** Arquivo do escudo do clube: nome exato ou, se faltar, o mais parecido (OCR: "SC"/"5C", acento perdido) com similaridade ≥0,85. */
@@ -144,7 +194,7 @@ object CrestCut {
         val exact = file(filesDir, team) ?: return null
         if (exact.exists()) return exact
         val k = Txt.key(team ?: "")
-        val dir = File(filesDir, "crests/t4")
+        val dir = File(filesDir, "crests/t5")
         val all = dir.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
         return all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
             ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }

@@ -106,4 +106,15 @@ class CrestFlagTest {
         assertTrue(CrestCut.score(Txt.key("Young Violets"), Txt.key("Young Violets Austria Wien")) >= 0.85)
         assertTrue(CrestCut.score(Txt.key("SK Sturm"), Txt.key("SK Rapid")) < 0.85)
     }
+
+    @Test fun anelAzulMarinhoAchaEscudoDeQualquerMoldura() {
+        val w = 120; val h = 120
+        val px = IntArray(w * h) { (0xFF shl 24) or (60 shl 16) or (110 shl 8) or 140 }
+        val navy = (0xFF shl 24) or (15 shl 16) or (25 shl 8) or 60
+        // anel 61x64 (como o quadro real do hub: 60x63), moldura PRATEADA por fora (sem cor) e mancha escura no canto (HUD)
+        for (y in 25..88) for (x in 30..90) if (x < 34 || x > 86 || y < 29 || y > 84) px[y * w + x] = navy
+        for (y in 0..12) for (x in 0..9) px[y * w + x] = navy
+        val b = CrestCut.ringBox(px, w, h, 68)!!
+        assertEquals(26.0, b[0].toDouble(), 1.0); assertEquals(94.0, b[2].toDouble(), 1.5); assertEquals(19.0, b[1].toDouble(), 1.5); assertEquals(94.0, b[3].toDouble(), 1.5)
+    }
 }
