@@ -83,6 +83,17 @@ object CrestCut {
         return File(File(filesDir, "crests/t2"), "$k.png")
     }
 
+    /** Arquivo do escudo do clube: nome exato ou, se faltar, o mais parecido (OCR: "SC"/"5C", acento perdido) com similaridade ≥0,85. */
+    fun find(filesDir: File, team: String?): File? {
+        val exact = file(filesDir, team) ?: return null
+        if (exact.exists()) return exact
+        val k = Txt.key(team ?: "")
+        val dir = File(filesDir, "crests/t2")
+        return dir.listFiles()?.filter { it.name.endsWith(".png") }
+            ?.maxByOrNull { Txt.sim(Txt.key(it.name.removeSuffix(".png")), k) }
+            ?.takeIf { Txt.sim(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }
+    }
+
     /** Recorta a região da captura (frações 0..1), corta o escudo e grava. false se não achou escudo ou já existe. */
     fun save(filesDir: File, bmp: Bitmap, team: String?, cx: Float, cy: Float, w: Float, h: Float, overwrite: Boolean = false): Boolean {
         val f = file(filesDir, team) ?: return false

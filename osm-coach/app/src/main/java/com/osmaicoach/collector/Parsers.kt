@@ -400,7 +400,7 @@ object Parsers {
                     injured = img?.let { PixelProbe.redBox(it, 0.852f, 0.880f, a.yc - 0.03f, a.yc + 0.03f) >= 0.10f },
                     nat = img?.let { PixelProbe.flagSig(it, (ageX + posX) / 2f, a.yc) },
                     natRich = img?.let { PixelProbe.flagRich(it, (ageX + posX) / 2f, a.yc, 0.026f, 0.040f) },
-                    natX = (ageX + posX) / 2f, natY = a.yc
+                    natX = FLAG_X, natY = a.yc
                 )
             )
         }
@@ -446,6 +446,9 @@ object Parsers {
             }
         }
     }
+
+    /** Centro da bandeira na coluna "Nac." do Plantel: constante do layout do OSM (medido: 740–774 de 1280 = 0,5914), igual em todas as linhas. */
+    const val FLAG_X = 0.5914f
 
     fun calendar(o: OcrResult, img: PixelProbe.Img?): Extraction {
         data class Anchor(val line: OcrLine, val round: Int?, val label: String)
@@ -551,11 +554,24 @@ object Parsers {
             val nk = group.getOrNull(1)?.text?.trim()
             if (Txt.key(nm).length >= 3) humans[Txt.key(nm)] = nk
         }
+        // faixa do topo (só com a lista no início): escudo ~0,085 acima do nome do clube; funciona com jogos já jogados (os cards mostram placar, sem escudo)
+        val crests = ArrayList<CrestSpot>()
+        if (hasStrip) {
+            val seen = HashSet<OcrLine>()
+            for (ln in topLines) {
+                if (ln in seen) continue
+                val group = topLines.filter { abs(it.xc - ln.xc) <= 0.06f }.sortedBy { it.yc }
+                seen.addAll(group)
+                val nm = group[0]
+                if (Txt.key(nm.text).length >= 3 && nm.yc in 0.27f..0.33f) crests.add(CrestSpot(nm.text.trim(), nm.xc, nm.yc - 0.085f))
+            }
+        }
         return Extraction(
             ScreenType.CALENDAR,
             matches = matches,
             humans = humans,
-            ownerTeam = ownerLine?.text?.trim()
+            ownerTeam = ownerLine?.text?.trim(),
+            crests = crests
         )
     }
 

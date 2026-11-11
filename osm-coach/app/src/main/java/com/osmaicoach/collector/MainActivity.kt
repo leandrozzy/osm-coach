@@ -566,9 +566,11 @@ private fun Pill(text: String, ok: Boolean? = null) {
 }
 
 @Composable
-private fun Crest(slot: Int, size: Dp) {
+private fun Crest(slot: Int, size: Dp, team: String? = null) {
     val ctx = LocalContext.current
-    val f = File(ctx.filesDir, "crests/s$slot.png")
+    val ver = UiBus.version
+    // o escudo guardado por NOME do time (recorte novo do Pré-jogo/Calendário) vale mais que o recorte antigo do slot
+    val f = remember(slot, team, ver) { CrestCut.find(ctx.filesDir, team) ?: File(ctx.filesDir, "crests/s$slot.png") }
     val stamp = if (f.exists()) f.lastModified() else 0L
     val raw = remember(stamp) { if (stamp > 0L) BitmapFactory.decodeFile(f.absolutePath) else null }
     // escudo já recortado na silhueta (fundo transparente): mostra inteiro, sem o retângulo; recorte antigo quadrado segue como antes
@@ -729,7 +731,7 @@ private fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
     val real = remember(slot, name, ver) {
         if (name == null) null else runCatching {
             // 1º o arquivo global por nome do time (calendário/pré-jogo: o escudo de um clube não muda), 2º o recorte do pré-jogo deste slot
-            val tf = CrestCut.file(ctx.filesDir, name)
+            val tf = CrestCut.find(ctx.filesDir, name)
             if (tf != null && tf.exists()) BitmapFactory.decodeFile(tf.absolutePath)?.asImageBitmap()
             else if (slot != null) {
                 val f = File(ctx.filesDir, "crests/r$slot.png"); val t = File(ctx.filesDir, "crests/r$slot.txt")
@@ -838,7 +840,7 @@ private fun MatchupHero(slot: Int, d: SlotData) {
         if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { Crest(slot, 64.dp); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(myStr, 30.dp, true) } }
+                Box(contentAlignment = Alignment.BottomEnd) { Crest(slot, 64.dp, known(d.fields, K.TEAM)); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(myStr, 30.dp, true) } }
                 Text(known(d.fields, K.TEAM) ?: "Meu time", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp))
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2143,7 +2145,7 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
         // quem joga contra quem
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { Crest(s.slot, 48.dp); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
+                Box(contentAlignment = Alignment.BottomEnd) { Crest(s.slot, 48.dp, s.title); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
                 Text(s.title, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2910,7 +2912,7 @@ private fun DirectorTab(onOpen: (Int, Int) -> Unit) {
         Title("📋 O que fazer agora")
         for (d in list.filter { it.tips.isNotEmpty() && it !in fresh }) {
             Row(Modifier.padding(top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Crest(d.s.slot, 26.dp)
+                Crest(d.s.slot, 26.dp, d.s.title)
                 Spacer(Modifier.width(8.dp))
                 Text("S${d.s.slot} • ${d.s.title}", fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -2945,7 +2947,7 @@ private fun DirectorTab(onOpen: (Int, Int) -> Unit) {
         for (d in list) {
             Fold("S${d.s.slot}", d.s.title, if (d.alerts.isNotEmpty()) "${d.alerts.size} alerta(s)" else null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Crest(d.s.slot, 44.dp)
+                    Crest(d.s.slot, 44.dp, d.s.title)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text("S${d.s.slot} • ${d.s.title}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -3037,7 +3039,7 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clip(RoundedCornerShape(50)).clickable { onBack() }, contentAlignment = Alignment.Center) { Text("‹", fontSize = 30.sp, color = Color.White) }
-            Crest(slot, 44.dp)
+            Crest(slot, 44.dp, known(data.fields, K.TEAM))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -4627,7 +4629,7 @@ private fun SlotTactic(slot: Int, d: SlotData) {
     Column(Modifier.fillMaxWidth().padding(top = 10.dp).osmPanel().padding(12.dp)) {
         Text("Próximo jogo", fontSize = 12.5.sp, color = OsmColors.CAPTION, modifier = Modifier.align(Alignment.CenterHorizontally))
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Crest(slot, 46.dp)
+            Crest(slot, 46.dp, known(d.fields, K.TEAM))
             Column(Modifier.weight(1f).padding(start = 6.dp)) {
                 Text(known(d.fields, K.TEAM) ?: "Meu time", fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(known(d.fields, K.HOME)?.let { if (it == "Casa") "em casa" else "fora" } ?: "", fontSize = 12.5.sp, color = OsmColors.CAPTION)
@@ -6434,7 +6436,7 @@ private fun TeamCrest(name: String?, size: Dp) {
     val ctx = LocalContext.current
     val ver = UiBus.version
     val bmp = remember(name, ver) {
-        runCatching { CrestCut.file(ctx.filesDir, name)?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } }.getOrNull()
+        runCatching { CrestCut.find(ctx.filesDir, name)?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } }.getOrNull()
     }
     if (bmp != null) { Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); Spacer(Modifier.width(4.dp)) }
 }

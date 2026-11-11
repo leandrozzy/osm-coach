@@ -40,4 +40,24 @@ class CrestFlagTest {
         assertEquals("🇧🇷", Flags.emojiOfCompetition("Brasileirão Uzm"))
         assertEquals("🇺🇿", Flags.emojiOfCompetition("Superliga Uzbeque Uzm"))
     }
+
+    @Test fun calendarStripGivesCrestSpotsEvenWithPlayedGames() {
+        // frame real 7/11 (S1): faixa dos clubes em y 0,30/0,34 e cards com PLACAR (sem escudo) a partir de y 0,60
+        val o = Fx.ocr(
+            Fx.line("Fortuna Düsseldorf", 0.08f, 0.30f, 0.12f, 0.04f), Fx.line("leandrozzy", 0.08f, 0.34f, 0.08f),
+            Fx.line("Rot-Weiss Essen", 0.22f, 0.30f, 0.12f, 0.04f), Fx.line("aldek_1", 0.22f, 0.34f, 0.06f),
+            Fx.line("MSV Duisburg", 0.50f, 0.30f, 0.12f, 0.04f), Fx.line("Daniisz31", 0.50f, 0.34f, 0.07f),
+            Fx.line("Fortuna Düsseldorf", 0.50f, 0.50f, 0.25f, 0.06f),
+            Fx.line("Jornada 1", 0.09f, 0.60f, 0.08f), Fx.line("18-10-26", 0.09f, 0.69f, 0.08f), Fx.line("0-0", 0.09f, 0.77f, 0.05f),
+            Fx.line("Waldhof Mannheim", 0.09f, 0.89f, 0.12f), Fx.line("Josep 2007", 0.09f, 0.94f, 0.08f)
+        )
+        val ex = Parsers.calendar(o, null)
+        assertEquals(3, ex.crests.size)
+        val c = ex.crests.first { it.team.startsWith("Rot-Weiss") }
+        assertEquals(0.22f, c.x, 0.001f); assertEquals(0.215f, c.y, 0.001f)       // escudo = 0,085 acima do nome
+    }
+
+    @Test fun flagColumnIsAFixedLayoutConstant() {
+        assertEquals(0.5914f, Parsers.FLAG_X, 0.0001f)
+    }
 }

@@ -669,12 +669,19 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (n > 0) repo.dao.putPlan(PlanEntity(slot, "natimg2", cur.toString(), System.currentTimeMillis()))
     }
 
+    /** Faixa de clubes do topo do Calendário: escudo + nome de cada clube da liga (um por clube; só grava o que ainda não existe). */
+    private fun saveStripCrests(bmp: Bitmap, spots: List<CrestSpot>) {
+        for (s in spots) {
+            if (CrestCut.find(ctx.filesDir, s.team) != null) continue
+            try { CrestCut.save(ctx.filesDir, bmp, s.team, s.x, s.y, 0.065f, 0.16f) } catch (e: Exception) { Diag.lastError = "Escudo da liga: " + (e.message ?: "erro") }
+        }
+    }
+
     private fun saveCalendarCrests(bmp: Bitmap, matches: List<MatchRead>) {
         for (m in matches) {
             val cx = m.crestX ?: continue; val cy = m.crestY ?: continue
             val team = m.opponent ?: continue
-            val f = CrestCut.file(ctx.filesDir, team) ?: continue
-            if (f.exists()) continue
+            if (CrestCut.find(ctx.filesDir, team) != null) continue
             try { CrestCut.save(ctx.filesDir, bmp, team, cx, cy, 0.075f, 0.18f) } catch (e: Exception) { Diag.lastError = "Escudo do calendário: " + (e.message ?: "erro") }
         }
     }
@@ -862,7 +869,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (asgSlot != null && type == ScreenType.SQUAD && ex.ownerTeam != null && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
             if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, asgSlot, ex)
             // o Calendário mostra o escudo de cada rival: guarda uma vez por clube (só grava o que ainda não tem)
-            if (type == ScreenType.CALENDAR) saveCalendarCrests(bmp, ex.matches)
+            if (type == ScreenType.CALENDAR) { saveCalendarCrests(bmp, ex.matches); saveStripCrests(bmp, ex.crests) }
             runCatching { Parsers.bossCoins(ocr)?.let { Coins.saveBalance(repo, it, now) } }
             runCatching { repo.smartReads(asg.slot, type, ocr, now) }
             // Fim da competição / diretoria: não é tela de adversário. Vai para o aprendizado do slot (reconhecido pela
