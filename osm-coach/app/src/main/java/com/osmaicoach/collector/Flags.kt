@@ -141,7 +141,9 @@ gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galês,gales;gb-nir:irlanda do
      */
     fun sharpen(imgs: Map<String, String>, rich: Map<String, String>): Map<String, String> {
         if (imgs.size < 2) return imgs
-        val top = imgs.values.maxOf { imgQuality(it) ?: 0f }
+        // referência = mediana (com o máximo, a bandeira dos EUA, q≈78, escondia todas as outras, q≈20–31)
+        val qs = imgs.values.map { imgQuality(it) ?: 0f }.sorted()
+        val top = qs[qs.size / 2]
         if (top <= 0f) return imgs
         return imgs.filterValues { (imgQuality(it) ?: 0f) >= top * 0.6f }
     }

@@ -731,8 +731,10 @@ class FramePipeline private constructor(private val ctx: Context) {
                 ?: mine.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
         }
         val cur = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
-        var refQ = 0f
-        for (k in cur.keys()) refQ = maxOf(refQ, Flags.imgQuality(cur.optString(k)) ?: 0f)
+        // referência de nitidez = a MEDIANA das guardadas (com o máximo, uma bandeira de alto contraste como a dos EUA, q≈78, fazia recusar todas as
+        // novas, q≈20–31: o Fabinho II ficou sem recorte nenhum e só tinha a miniatura de 8×5 células)
+        val qs = cur.keys().asSequence().mapNotNull { Flags.imgQuality(cur.optString(it)) }.sorted().toList()
+        val refQ = if (qs.isEmpty()) 0f else qs[qs.size / 2]
         var n = 0
         for (p in players) {
             val x = p.natX ?: continue; val y = p.natY ?: continue

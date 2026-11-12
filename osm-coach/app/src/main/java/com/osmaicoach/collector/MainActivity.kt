@@ -3113,7 +3113,7 @@ private fun Section(title: String, rows: List<Pair<String, String>>) {
 
 /** Bandeira legível: emoji vetorial quando o país é conhecido (nome/gentílico/competição); senão a miniatura desenhada. */
 @Composable
-private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp, img: String? = null) {
+private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp, img: String? = null, soft: Boolean = false) {
     val e = Flags.emoji(iso)
     val fctx = LocalContext.current
     androidx.compose.runtime.LaunchedEffect(iso) { FlagWeb.request(fctx, iso) }   // bandeira nítida do Flagpedia (domínio público) quando o país é conhecido
@@ -3129,6 +3129,10 @@ private fun FlagBadge(iso: String?, rich: String?, sig: String?, w: androidx.com
         Spacer(Modifier.width(6.dp))
     } else if (e != null) {
         Box(Modifier.size(w, h), contentAlignment = Alignment.Center) { Text(e, fontSize = (h.value * 0.95f).sp, maxLines = 1, softWrap = false) }
+        Spacer(Modifier.width(6.dp))
+    } else if (soft) {
+        // país ainda não identificado e sem recorte nítido: caixa neutra em vez da miniatura de 8×5 células (que aparece borrada)
+        Box(Modifier.size(w, h).clip(RoundedCornerShape(3.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) { Text("🏳", fontSize = (h.value * 0.7f).sp) }
         Spacer(Modifier.width(6.dp))
     } else if (rich != null || sig != null) {
         FlagSwatch(rich, sig, w, h); Spacer(Modifier.width(6.dp))
@@ -3688,7 +3692,7 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            FlagBadge(d.isos[p.nameKey] ?: Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey])
+                            FlagBadge(d.isos[p.nameKey] ?: Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey], soft = true)
                             Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (Flags.countryLabel(d.countries[p.nameKey])?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         val ft = d.fitness[p.nameKey]
@@ -5878,9 +5882,10 @@ private fun SettingsTab() {
             if (missingClubs.isNotEmpty()) {
                 Text("Sem escudo real (toque para procurar por outro nome):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
                 for (c in missingClubs.take(20)) {
-                    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(c + (CrestWeb.aliasOf(ctx.filesDir, c)?.let { "  → $it" } ?: ""), fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        GhostButton("Outro nome") { aliasFor = c }
+                    // o botão ocupa a linha toda: o nome do clube vem ACIMA dele (antes ficava espremido a largura zero e só aparecia "Outro nome")
+                    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Text(c + (CrestWeb.aliasOf(ctx.filesDir, c)?.let { "  → procurando como \"$it\"" } ?: ""), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.padding(bottom = 4.dp))
+                        GhostButton("Procurar por outro nome") { aliasFor = c }
                     }
                 }
             }
