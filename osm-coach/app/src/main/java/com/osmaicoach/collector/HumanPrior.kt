@@ -4,65 +4,157 @@ import org.json.JSONObject
 
 /**
  * O que os SEUS jogos reais contra humanos (nos 4 slots) mostram: pontos por jogo por formação, estilo e mentalidade,
- * na mesma faixa de força (mais fraco / parelho / mais forte). Vira um bônus pequeno na nota da simulação, para a
- * tática não repetir o que perdeu sempre (ex.: recuar demais contra humano mais forte) nem deixar de repetir o que ganha.
+ * já DESCONTADO o efeito da diferença de força (jogar bem contra um time mais fraco não prova que a tática é boa).
+ * Vira um peso forte na nota da simulação e uma lista de "evitar" (formação/estilo que perdeu mais do que a força explica).
+ * Diagnóstico de 04/11: 67 jogos contra humanos, 18V 15E 34D; 4-2-3-1, 4-5-1 e Contra-ataque ficaram ~0,5-0,7 pts/jogo
+ * abaixo do esperado pela força; 4-3-3 (A/B) e "Jogar pelas alas" acima.
  */
 object HumanPrior {
-    data class G(val n: Int, val ppg: Double)
-    class Prior(val ref: Double, val n: Int, val bucket: String, val form: Map<String, G>, val style: Map<String, G>, val ment: Map<String, G>)
+    /** n jogos, pts/jogo bruto, e o resíduo (pts/jogo acima do esperado pela diferença de força, já encolhido). */
+    data class G(val n: Int, val ppg: Double, val adj: Double = 0.0)
+    class Prior(
+        val ref: Double, val n: Int, val bucket: String,
+        val form: Map<String, G>, val style: Map<String, G>, val ment: Map<String, G>,
+        val avoidForm: Set<String> = emptySet(), val avoidStyle: Set<String> = emptySet(),
+        /** Últimos resultados, do mais recente ao mais antigo (ex.: D D D V). */
+        val streak: String = "",
+        /** Lição da IA depois do último jogo (vale por poucos jogos): formação/estilo a evitar e a repetir. */
+        val lessonAvoid: List<Pair<String?, String?>> = emptyList(), val lessonPrefer: List<Pair<String?, String?>> = emptyList(),
+        val lessonText: String = ""
+    ) {
+        fun withLesson(l: Lesson?): Prior = if (l == null) this else Prior(ref, n, bucket, form, style, ment, avoidForm, avoidStyle, streak, l.avoid, l.prefer, l.text)
+    }
 
-    private const val SHRINK = 8.0
+    /** Lição guardada pelo app depois de um jogo (IA ou regra): vale por [LESSON_GAMES] jogos. */
+    class Lesson(val round: Int, val avoid: List<Pair<String?, String?>>, val prefer: List<Pair<String?, String?>>, val text: String)
+
+    const val LESSON_GAMES = 3
+
+    fun lessonFromJson(j: JSONObject?, currentRound: Int?): Lesson? {
+        if (j == null) return null
+        val r = j.optInt("round", -1)
+        if (r < 0 || (currentRound != null && currentRound - r > LESSON_GAMES)) return null
+        fun list(k: String): List<Pair<String?, String?>> {
+            val a = j.optJSONArray(k) ?: return emptyList()
+            return (0 until minOf(a.length(), 3)).mapNotNull { i ->
+                val o = a.optJSONObject(i) ?: return@mapNotNull null
+                val f = o.optString("formation").takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }?.let { Formations.base(it) }
+                val st = o.optString("style").takeIf { it.isNotBlank() }?.let { Osm.style(it) }
+                if (f == null && st == null) null else Pair(f, st)
+            }
+        }
+        return Lesson(r, list("avoid"), list("prefer"), j.optString("text").take(400))
+    }
+
+    private const val SHRINK = 5.0
     private const val MIN_GAMES = 3
-    private const val WEIGHT = 0.35
-    private const val CAP = 0.5
+    private const val AVOID_MIN_GAMES = 3
+    private const val AVOID_ADJ = -0.30
+    private const val WEIGHT = 1.0
+    private const val CAP = 1.2
 
     private fun band(m: Int) = if (m >= 60) "ofensiva" else if (m >= 45) "média" else "defensiva"
 
-    private fun bucketOf(diff: Int?): String? = diff?.let { if (it <= -3) "mais fraco" else if (it < 3) "parelho" else "mais forte" }
-
     private fun pts(r: String) = if (r == "V") 3.0 else if (r == "E") 1.0 else 0.0
 
-    private fun groups(rows: List<JSONObject>, key: (JSONObject) -> String): Map<String, G> =
-        rows.groupBy(key).mapValues { (_, v) -> G(v.size, v.sumOf { pts(it.optString("result")) } / v.size) }
+    private fun diffOf(j: JSONObject): Int? {
+        val m = j.optInt("myStrength", 0); val r = j.optInt("rivalStrength", 0)
+        return if (m > 0 && r > 0) m - r else null
+    }
+
+    /** Reta pts = a + b * diferença de força, ajustada nos jogos reais (b limitado a valores plausíveis). */
+    private fun fit(rows: List<JSONObject>): Pair<Double, Double> {
+        val pts = rows.mapNotNull { j -> diffOf(j)?.let { Pair(it.toDouble(), pts(j.optString("result"))) } }
+        val ref = rows.sumOf { pts(it.optString("result")) } / rows.size
+        if (pts.size < 8) return Pair(ref, 0.0)
+        val mx = pts.sumOf { it.first } / pts.size
+        val my = pts.sumOf { it.second } / pts.size
+        val vx = pts.sumOf { (it.first - mx) * (it.first - mx) }
+        if (vx < 1e-6) return Pair(my, 0.0)
+        val b = (pts.sumOf { (it.first - mx) * (it.second - my) } / vx).coerceIn(0.02, 0.15)
+        return Pair(my - b * mx, b)
+    }
+
+    /** Peso pela idade: o jogo mais recente vale 1; a cada 8 jogos para trás o peso cai pela metade. */
+    private fun recency(i: Int) = Math.pow(0.5, i / 8.0)
 
     fun build(logs: List<JSONObject>, diff: Int?): Prior? {
+        // do mais recente ao mais antigo (genAt = quando a tática foi gerada; sem data, a ordem da lista)
         val all = logs.filter { it.optBoolean("human", false) && it.optString("result") in listOf("V", "E", "D") }
+            .sortedByDescending { it.optLong("genAt", 0L) }
         if (all.size < 6) return null
-        val b = bucketOf(diff)
-        fun same(j: JSONObject): Boolean {
-            val m = j.optInt("myStrength", 0); val r = j.optInt("rivalStrength", 0)
-            return m > 0 && r > 0 && bucketOf(m - r) == b
+        val (a, b) = fit(all)
+        val ref = all.sumOf { pts(it.optString("result")) } / all.size
+        val w = all.indices.associate { all[it] to recency(it) }
+        // Erro do PRÓPRIO modelo: pontos reais menos os que a simulação previu para a tática usada (predPts). O erro médio
+        // geral (o simulador é otimista) sai; sobra onde ele erra MAIS por formação/estilo, que é o que corrige a escolha.
+        val withPred = all.filter { it.has("predPts") && !it.isNull("predPts") }
+        val globalErr = if (withPred.size >= 6) withPred.sumOf { pts(it.optString("result")) - it.optDouble("predPts") } / withPred.size else 0.0
+        fun residual(j: JSONObject): Double =
+            if (withPred.size >= 6 && j.has("predPts") && !j.isNull("predPts")) pts(j.optString("result")) - j.optDouble("predPts") - globalErr
+            else pts(j.optString("result")) - (a + b * (diffOf(j) ?: 0))
+        fun groups(key: (JSONObject) -> String): Map<String, G> = all.groupBy(key).mapValues { (_, v) ->
+            val raw = v.sumOf { pts(it.optString("result")) } / v.size
+            val ws = v.sumOf { w[it] ?: 1.0 }
+            val res = v.sumOf { j -> (w[j] ?: 1.0) * residual(j) } / (ws + SHRINK)
+            G(v.size, raw, res)
         }
-        val inBucket = if (b != null) all.filter { same(it) } else emptyList()
-        val rows = if (inBucket.size >= 8) inBucket else all
-        val label = if (rows === inBucket) b!! else "todas as faixas"
-        val ref = rows.sumOf { pts(it.optString("result")) } / rows.size
+        val form = groups { Formations.base(it.optString("formation")) }
+        val style = groups { Osm.style(it.optString("playStyle")) ?: it.optString("playStyle") }
+        val ment = groups { band(it.optInt("mentality", 50)) }
+        // freio de emergência: escolha usada 2+ vezes nos últimos 6 jogos que só perdeu sai já, sem esperar 4 jogos
+        val last = all.take(6)
+        fun hot(key: (JSONObject) -> String) = last.groupBy(key).filter { (_, v) -> v.size >= 2 && v.all { it.optString("result") == "D" } }.keys
+        val hotForm = hot { Formations.base(it.optString("formation")) }
+        val hotStyle = hot { Osm.style(it.optString("playStyle")) ?: it.optString("playStyle") }
         return Prior(
-            ref, rows.size, label,
-            groups(rows) { Formations.base(it.optString("formation")) },
-            groups(rows) { Osm.style(it.optString("playStyle")) ?: it.optString("playStyle") },
-            groups(rows) { band(it.optInt("mentality", 50)) }
+            ref, all.size, "todas as faixas, ajustado pela diferença de força e pelo momento", form, style, ment,
+            avoidForm = form.filter { it.value.n >= AVOID_MIN_GAMES && it.value.adj <= AVOID_ADJ }.keys + hotForm,
+            avoidStyle = style.filter { it.value.n >= AVOID_MIN_GAMES && it.value.adj <= AVOID_ADJ }.keys + hotStyle,
+            streak = all.take(6).joinToString(" ") { it.optString("result") }
         )
     }
 
-    private fun delta(g: G?, ref: Double): Double =
-        if (g == null || g.n < MIN_GAMES) 0.0 else (g.ppg - ref) * g.n / (g.n + SHRINK)
+    private fun adj(g: G?): Double = if (g == null || g.n < MIN_GAMES) 0.0 else g.adj
 
     /** Pontos esperados a somar (ou tirar) da nota da tática. */
     fun bonus(p: Prior, formation: String, style: String, mentality: Int): Double {
-        val d = delta(p.form[Formations.base(formation)], p.ref) + delta(p.style[Osm.style(style) ?: style], p.ref) + delta(p.ment[band(mentality)], p.ref)
-        return (WEIGHT * d).coerceIn(-CAP, CAP)
+        val d = adj(p.form[Formations.base(formation)]) + adj(p.style[Osm.style(style) ?: style]) + 0.5 * adj(p.ment[band(mentality)])
+        fun m(l: List<Pair<String?, String?>>) = l.count { (f, st) ->
+            (f == null || f == Formations.base(formation)) && (st == null || st == (Osm.style(style) ?: style))
+        }
+        val lesson = 0.4 * m(p.lessonPrefer).coerceAtMost(1) - 0.5 * m(p.lessonAvoid).coerceAtMost(1)
+        return (WEIGHT * d + lesson).coerceIn(-CAP, CAP)
     }
+
+    fun avoidsFormation(p: Prior?, formation: String) = p != null && (Formations.base(formation) in p.avoidForm ||
+        p.lessonAvoid.any { (f, st) -> f == Formations.base(formation) && st == null })
+    fun avoidsStyle(p: Prior?, style: String) = p != null && ((Osm.style(style) ?: style) in p.avoidStyle ||
+        p.lessonAvoid.any { (f, st) -> f == null && st == (Osm.style(style) ?: style) })
 
     /** Frase curta com os números reais que pesaram na escolha. */
     fun note(p: Prior, formation: String, style: String, mentality: Int): String? {
-        fun f(g: G?) = g?.takeIf { it.n >= MIN_GAMES }?.let { "${"%.1f".format(it.ppg).replace('.', ',')} pts/jogo em ${it.n}" }
+        fun f(g: G?) = g?.takeIf { it.n >= MIN_GAMES }?.let { "${"%.1f".format(it.ppg).replace('.', ',')} pts/jogo em ${it.n} (${"%+.1f".format(it.adj).replace('.', ',')} vs o esperado pela força)" }
         val parts = listOfNotNull(
             f(p.form[Formations.base(formation)])?.let { "${Formations.base(formation)}: $it" },
-            f(p.style[Osm.style(style) ?: style])?.let { "${Osm.style(style) ?: style}: $it" },
-            f(p.ment[band(mentality)])?.let { "mentalidade ${band(mentality)}: $it" }
+            f(p.style[Osm.style(style) ?: style])?.let { "${Osm.style(style) ?: style}: $it" }
         )
         if (parts.isEmpty()) return null
-        return "Seus jogos reais contra humanos (${p.bucket}, ${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo) — " + parts.joinToString("; ") + "."
+        return "Seus jogos reais contra humanos (${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo) — " + parts.joinToString("; ") + "."
+    }
+
+    /** Texto para a IA: o que evitar e o que repetir, com os números já descontada a força. */
+    fun promptText(p: Prior): String {
+        fun line(m: Map<String, G>, title: String) = m.filter { it.value.n >= MIN_GAMES }.entries.sortedByDescending { it.value.adj }
+            .joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} pts/jogo em ${it.value.n} (${"%+.2f".format(it.value.adj)} vs esperado pela força)" }
+            .takeIf { it.isNotBlank() }?.let { "$title — $it" }
+        return listOfNotNull(
+            "Seus jogos reais contra humanos (${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo). Os números JÁ descontam a diferença de força e o erro que a simulação costuma cometer:",
+            line(p.form, "formação"), line(p.style, "estilo"),
+            if (p.streak.isNotBlank()) "Últimos resultados contra humanos (do mais recente): ${p.streak}. Em sequência de derrotas NÃO repita as táticas que perderam." else null,
+            if (p.lessonText.isNotBlank()) "Lição do último jogo: ${p.lessonText}" else null,
+            if (p.avoidForm.isNotEmpty() || p.avoidStyle.isNotEmpty())
+                "EVITE (perderam bem mais do que a força explica): " + (p.avoidForm.map { "formação $it" } + p.avoidStyle.map { "estilo $it" }).joinToString(", ") else null
+        ).joinToString("\n")
     }
 }

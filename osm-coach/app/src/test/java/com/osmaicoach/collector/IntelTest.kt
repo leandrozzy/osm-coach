@@ -322,13 +322,14 @@ class IntelTest {
 
     @Test fun communityModelLearnsFromRealResults() {
         val t = Meta.template(-10, true, "4-3-3 A")!!
-        assertEquals("5-3-2", t.formation)
+        assertEquals("4-3-3", Formations.base(t.formation))
+        assertEquals("Jogar pelas alas", t.style)
         fun g(f: String, st: String, res: String, mentality: Int = 30) = JSONObject().put("formation", f).put("playStyle", st)
             .put("result", res).put("myStrength", 70).put("rivalStrength", 80).put("home", true).put("rivalFormationRead", "4-3-3 A")
             .put("pressure", 40).put("mentality", mentality).put("tempo", 60)
         // o modelo perdeu 3 vezes e o 4-5-1 Remate à vista ganhou 4: passa a ser o 4-5-1
         val logs = listOf(
-            g("5-3-2", "Contra-ataque", "D"), g("5-3-2", "Contra-ataque", "D"), g("5-3-2", "Contra-ataque", "D"),
+            g("4-3-3 A", "Jogar pelas alas", "D"), g("4-3-3 A", "Jogar pelas alas", "D"), g("4-3-3 A", "Jogar pelas alas", "D"),
             g("4-5-1", "Remate à vista", "V"), g("4-5-1", "Remate à vista", "V"), g("4-5-1", "Remate à vista", "V"), g("4-5-1", "Remate à vista", "V")
         )
         val a = MetaLearner.adapt(t, logs, -10, true, "4-3-3 A")
@@ -337,9 +338,9 @@ class IntelTest {
         // sem jogos parecidos (favorito), o modelo fica como está
         assertEquals(t, MetaLearner.adapt(t, logs.map { it.put("myStrength", 90) }, -10, true, "4-3-3 A"))
         // vitórias com o próprio modelo puxam os controles para os valores que venceram
-        val wins = (1..4).map { g("5-3-2", "Contra-ataque", "V", mentality = 60) }
+        val wins = (1..4).map { g("4-3-3 A", "Jogar pelas alas", "V", mentality = 70) }
         val b = MetaLearner.adapt(t, wins, -10, true, "4-3-3 A")
-        assertEquals("5-3-2", b.formation)
+        assertEquals("4-3-3", Formations.base(b.formation))
         assertTrue(b.mentality > t.mentality)
     }
 }
@@ -349,13 +350,61 @@ class HumanPriorTest {
         org.json.JSONObject().put("formation", f).put("playStyle", st).put("mentality", m).put("result", res).put("human", true).put("myStrength", my).put("rivalStrength", rv)
 
     @org.junit.Test fun learnsWhatWinsAndLosesAgainstHumans() {
-        val logs = List(6) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) } +
-            List(6) { g("5-4-1 A", "Contra-ataque", 38, "D", 70, 78) } + List(3) { g("5-3-2", "Contra-ataque", 40, "E", 74, 78) }
+        // sem data, o primeiro da lista é o mais recente: as derrotas vêm por último no tempo (o freio de sequência também vale)
+        val logs = List(6) { g("5-4-1 A", "Contra-ataque", 38, "D", 70, 78) } + List(3) { g("5-3-2", "Contra-ataque", 40, "E", 74, 78) } +
+            List(6) { g("4-3-3 A", "Jogar pelas alas", 70, "V", 80, 78) }
         val p = HumanPrior.build(logs, null)!!
         val good = HumanPrior.bonus(p, "4-3-3 B", "Jogar pelas alas", 70)
         val bad = HumanPrior.bonus(p, "5-4-1 A", "Contra-ataque", 38)
-        org.junit.Assert.assertTrue(good > 0.1 && bad < -0.1 && good <= 0.5 && bad >= -0.5)
+        org.junit.Assert.assertTrue(good > 0.1 && bad < -0.1 && good <= 1.2 && bad >= -1.2)
+        // o que perdeu bem mais do que a força explica entra na lista EVITE (formação e estilo)
+        org.junit.Assert.assertTrue(HumanPrior.avoidsFormation(p, "5-4-1 B"))
+        org.junit.Assert.assertTrue(HumanPrior.avoidsStyle(p, "Contra-ataque"))
+        org.junit.Assert.assertFalse(HumanPrior.avoidsFormation(p, "4-3-3 A"))
+        org.junit.Assert.assertTrue(HumanPrior.promptText(p).contains("EVITE"))
         org.junit.Assert.assertNotNull(HumanPrior.note(p, "4-3-3 A", "Jogar pelas alas", 70))
+    }
+
+    @org.junit.Test fun streakOfLossesCutsTheChoiceImmediately() {
+        // 2 derrotas seguidas com o mesmo estilo nos últimos jogos: sai já, sem esperar 4 jogos
+        val older = List(6) { g("4-3-3 A", "Jogar pelas alas", 60, "V", 80, 76).put("genAt", 100L + it) }
+        val recent = listOf(
+            g("5-3-2", "Remate à vista", 40, "D", 72, 80).put("genAt", 1000L),
+            g("5-3-2", "Remate à vista", 40, "D", 72, 80).put("genAt", 1001L)
+        )
+        val p = HumanPrior.build(older + recent, null)!!
+        org.junit.Assert.assertTrue(p.streak.startsWith("D D"))
+        org.junit.Assert.assertTrue(HumanPrior.avoidsFormation(p, "5-3-2"))
+        org.junit.Assert.assertTrue(HumanPrior.avoidsStyle(p, "Remate à vista"))
+        org.junit.Assert.assertFalse(HumanPrior.avoidsFormation(p, "4-3-3 A"))
+    }
+
+    @org.junit.Test fun aiLessonAddsWeightAndExpires() {
+        val older = List(8) { g("4-3-3 A", "Jogar pelas alas", 60, "E", 75, 75).put("genAt", 100L + it) }
+        val base = HumanPrior.build(older, null)!!
+        val j = org.json.JSONObject().put("round", 5).put("text", "Recuar não funcionou")
+            .put("avoid", org.json.JSONArray().put(org.json.JSONObject().put("formation", "5-4-1").put("style", "")))
+            .put("prefer", org.json.JSONArray().put(org.json.JSONObject().put("formation", "4-3-3").put("style", "Jogar pelas alas")))
+        val l = HumanPrior.lessonFromJson(j, 6)
+        org.junit.Assert.assertNotNull(l)
+        val p = base.withLesson(l)
+        org.junit.Assert.assertTrue(HumanPrior.avoidsFormation(p, "5-4-1 A"))
+        org.junit.Assert.assertTrue(HumanPrior.bonus(p, "4-3-3 B", "Jogar pelas alas", 60) > HumanPrior.bonus(base, "4-3-3 B", "Jogar pelas alas", 60))
+        // passados mais de 3 jogos a lição vence; lição inventada (formação inexistente) não vale
+        org.junit.Assert.assertNull(HumanPrior.lessonFromJson(j, 10))
+        org.junit.Assert.assertNull(HumanPrior.lessonFromJson(org.json.JSONObject().put("round", 5)
+            .put("avoid", org.json.JSONArray().put(org.json.JSONObject().put("formation", "9-9-9"))), 6)?.takeIf { it.avoid.isNotEmpty() })
+    }
+
+    @org.junit.Test fun learnsWhereTheSimulationIsWrong() {
+        // a simulação previu 1,5 pt para as duas escolhas; Contra-ataque rendeu 0 e Jogar pelas alas 3: o erro do modelo é o que corrige
+        fun gp(f: String, st: String, res: String, g: Int) = g(f, st, 50, res, 75, 75).put("predPts", 1.5).put("genAt", g.toLong())
+        val logs = (1..8).map { gp("5-3-2", "Contra-ataque", "D", it) } + (9..16).map { gp("4-3-3 A", "Jogar pelas alas", "V", it) }
+        val p = HumanPrior.build(logs, null)!!
+        val bad = HumanPrior.bonus(p, "5-3-2", "Contra-ataque", 50)
+        val good = HumanPrior.bonus(p, "4-3-3 A", "Jogar pelas alas", 50)
+        org.junit.Assert.assertTrue("bad=$bad good=$good", good > 0.3 && bad < -0.3)
+        org.junit.Assert.assertTrue(HumanPrior.avoidsStyle(p, "Contra-ataque"))
     }
 
     @org.junit.Test fun fewGamesGiveNoPrior() {

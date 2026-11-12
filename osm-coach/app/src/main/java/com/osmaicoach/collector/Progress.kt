@@ -258,6 +258,9 @@ object Weekly {
 
     /** Atualiza a semana atual (vale a leitura mais recente da semana). */
     fun upsert(list: MutableList<Week>, w: Week) {
+        // o valor do elenco não cai de um jeito brusco (compra/venda mexe pouco): queda >30% sobre o maior valor anterior = outro clube/competição ou leitura errada; recomeça daí
+        val prevMax = list.filter { it.id < w.id }.mapNotNull { it.value }.maxOrNull()
+        if (w.value != null && prevMax != null && w.value < prevMax * 0.7) list.removeAll { it.id < w.id }
         val i = list.indexOfFirst { it.id == w.id }
         if (i >= 0) list[i] = w.copy(
             value = w.value ?: list[i].value, cash = w.cash ?: list[i].cash, xi = w.xi ?: list[i].xi
@@ -353,8 +356,8 @@ object Accuracy {
         if (n < 10) tips.add("Só $n jogo(s) conferidos: o percentual ainda oscila. Quanto mais resultados você passa pelo app, mais a IA aprende.")
         if (n >= 8 && avgFav - pct >= 8) tips.add("A IA tem sido confiante demais: aponta ~$avgFav% no favorito e acerta $pct%. As próximas previsões vão ser mais cautelosas (correção automática).")
         if (n >= 8 && pct - avgFav >= 8) tips.add("A IA tem sido cautelosa demais: aponta ~$avgFav% no favorito e acerta $pct%. Dá para confiar um pouco mais nas previsões altas.")
-        if (favV.second >= 5 && favV.first * 100 < favV.second * 50) tips.add("Quando prevê vitória acerta só ${favV.first} de ${favV.second}: contra rivais fortes, prefira a tática mais segura e trate empate como bom resultado.")
-        if (favD.second >= 5 && favD.first * 100 >= favD.second * 70) tips.add("Previsão de derrota acerta ${favD.first} de ${favD.second}: quando aparecer, vale segurar o jogo (defender e punir) em vez de atacar tudo.")
+        if (favV.second >= 5 && favV.first * 100 < favV.second * 50) tips.add("Quando prevê vitória acerta só ${favV.first} de ${favV.second}: o simulador foi otimista com você. As próximas escolhas já são corrigidas pelo erro dele nos seus jogos.")
+        if (favD.second >= 5 && favD.first * 100 >= favD.second * 70) tips.add("Previsão de derrota acerta ${favD.first} de ${favD.second}: são jogos contra rival mais forte. Veja em \"Resultados das táticas\" o que realmente pontuou nesses jogos.")
         if (n >= 8 && favE.second == 0 && draws * 100 >= n * 20) tips.add("Houve $draws empate(s) em $n jogos e a IA nunca aponta empate como mais provável: em jogo equilibrado, o empate é resultado frequente.")
         if (tips.isEmpty()) tips.add("Previsões e resultados estão alinhados. O app continua aprendendo com cada resultado que você passa.")
         val recent = all.sortedByDescending { it.round }.take(6)
@@ -371,5 +374,108 @@ object Accuracy {
             tips.add("Onde mais erra: ${worst.first} (${worst.second} de ${worst.third}). Nesses jogos a previsão merece menos confiança.")
         }
         return Summary(n, hits, brier, avgFav, avgReal, favV, favE, favD, draws, recent, tips, splits)
+    }
+}
+
+
+/**
+ * Resultado REAL das táticas (o que aconteceu em campo): vitórias, empates, derrotas, aproveitamento e gols, contra
+ * humano e contra CPU, em casa e fora, e quais combinações formação • estilo mais e menos pontuaram.
+ */
+object Results {
+    class Line(val label: String, val v: Int, val e: Int, val d: Int, val gf: Int, val ga: Int) {
+        val n: Int get() = v + e + d
+        val pts: Int get() = 3 * v + e
+        val ppg: Double get() = if (n == 0) 0.0 else pts.toDouble() / n
+        val winPct: Int get() = if (n == 0) 0 else Math.round(100f * v / n)
+        val aprov: Int get() = if (n == 0) 0 else Math.round(100f * pts / (3 * n))
+        fun text(): String = "${v}V ${e}E ${d}D • $winPct% vitórias • ${"%.1f".format(ppg).replace('.', ',')} pts/jogo • gols $gf×$ga"
+    }
+
+    class Summary(
+        val total: Line, val human: Line?, val cpu: Line?, val home: Line?, val away: Line?,
+        val streak: String, val best: List<Line>, val worst: List<Line>
+    )
+
+    private fun line(label: String, g: List<JSONObject>) = Line(
+        label, g.count { it.optString("result") == "V" }, g.count { it.optString("result") == "E" }, g.count { it.optString("result") == "D" },
+        g.sumOf { if (it.isNull("scoreMine")) 0 else it.optInt("scoreMine") }, g.sumOf { if (it.isNull("scoreOpp")) 0 else it.optInt("scoreOpp") }
+    )
+
+    /** Logs de tática com resultado (`genAt` = quando a tática foi gerada, usado para a sequência recente). */
+    fun of(logs: List<JSONObject>): Summary? {
+        val all = logs.filter { it.optString("result") in listOf("V", "E", "D") }
+        if (all.isEmpty()) return null
+        fun sub(label: String, f: (JSONObject) -> Boolean): Line? = all.filter(f).takeIf { it.isNotEmpty() }?.let { line(label, it) }
+        val total = line("Todos", all)
+        val byTactic = all.filter { it.optString("formation").isNotBlank() }.groupBy {
+            Formations.base(it.optString("formation")) + " • " + (Osm.style(it.optString("playStyle")) ?: it.optString("playStyle").ifBlank { "?" })
+        }.map { (k, v) -> line(k, v) }.filter { it.n >= 3 }
+        val best = byTactic.filter { it.ppg > total.ppg }.sortedWith(compareByDescending<Line> { it.ppg }.thenByDescending { it.n }).take(3)
+        val worst = byTactic.filter { it.ppg < total.ppg }.sortedWith(compareBy<Line> { it.ppg }.thenByDescending { it.n }).take(3)
+        val streak = all.sortedByDescending { it.optLong("genAt", 0L) }.take(8).joinToString(" ") { it.optString("result") }
+        return Summary(
+            total, sub("Contra humano") { it.optBoolean("human", false) && !it.isNull("human") },
+            sub("Contra CPU") { !it.isNull("human") && !it.optBoolean("human", true) },
+            sub("Em casa") { !it.isNull("home") && it.optBoolean("home", false) }, sub("Fora") { !it.isNull("home") && !it.optBoolean("home", true) },
+            streak, best, worst
+        )
+    }
+}
+
+/**
+ * Calibra a "chance de vitória" com os jogos reais contra HUMANOS (diagnóstico de 06/11: favorito +3 ou mais ganhou 14 de 16;
+ * de igual a azarão, 5 de 54 — enquanto a simulação mostrava até 66% para o S4 com 74 × 84). Regressão logística da vitória e da
+ * derrota pela diferença de força; mistura com a simulação (peso cresce com o nº de jogos, máx. 70%).
+ */
+object Calibration {
+    class Model(val aV: Double, val bV: Double, val aD: Double, val bD: Double, val n: Int) {
+        fun predict(diff: Double): Triple<Double, Double, Double> {
+            val d = diff.coerceIn(-25.0, 25.0)
+            var v = sig(aV + bV * d)
+            var l = sig(aD + bD * d)
+            v = v.coerceIn(0.01, 0.97); l = l.coerceIn(0.01, 0.97)
+            if (v + l > 0.99) { val k = 0.99 / (v + l); v *= k; l *= k }
+            return Triple(v, 1.0 - v - l, l)
+        }
+        val weight: Double get() = minOf(0.7, n / 80.0)
+    }
+
+    private fun sig(x: Double) = 1.0 / (1.0 + Math.exp(-x))
+
+    private fun fit1(x: List<Double>, y: List<Int>): Pair<Double, Double> {
+        var a = 0.0; var b = 0.0
+        repeat(60) {
+            var g0 = 0.0; var g1 = 0.0; var h00 = 0.02; var h01 = 0.0; var h11 = 0.02
+            for (i in x.indices) {
+                val p = sig(a + b * x[i]); val e = p - y[i]; val w = p * (1 - p)
+                g0 += e; g1 += e * x[i]; h00 += w; h01 += w * x[i]; h11 += w * x[i] * x[i]
+            }
+            g0 += 0.02 * a; g1 += 0.02 * b
+            val det = h00 * h11 - h01 * h01
+            if (kotlin.math.abs(det) < 1e-9) return a to b
+            a -= (h11 * g0 - h01 * g1) / det
+            b -= (-h01 * g0 + h00 * g1) / det
+        }
+        return a to b
+    }
+
+    /** null com menos de 20 jogos humanos finalizados (sem base para calibrar). */
+    fun fit(logs: List<JSONObject>): Model? {
+        val rows = logs.filter { it.optBoolean("human", false) && it.optString("result") in listOf("V", "E", "D") && it.has("myStrength") && it.has("rivalStrength") &&
+            !it.isNull("myStrength") && !it.isNull("rivalStrength") }
+        if (rows.size < 20) return null
+        val x = rows.map { (it.optInt("myStrength") - it.optInt("rivalStrength")).toDouble().coerceIn(-25.0, 25.0) }
+        val (aV, bV) = fit1(x, rows.map { if (it.optString("result") == "V") 1 else 0 })
+        val (aD, bD) = fit1(x, rows.map { if (it.optString("result") == "D") 1 else 0 })
+        return Model(aV, bV, aD, bD, rows.size)
+    }
+
+    fun blend(p: WinModel.Prob, diff: Int, m: Model): WinModel.Prob {
+        val (v, e, l) = m.predict(diff.toDouble())
+        val w = m.weight
+        val win = ((1 - w) * p.win + w * v * 100).toInt().coerceIn(1, 97)
+        val loss = ((1 - w) * p.loss + w * l * 100).toInt().coerceIn(1, 98 - win)
+        return p.copy(win = win, draw = 100 - win - loss, loss = loss)
     }
 }

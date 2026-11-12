@@ -66,7 +66,7 @@ object RivalWatch {
         else -> "dado do rival mudou"
     }
 
-    /** O que mudou entre o retrato da tática e os dados de agora (força só conta a partir de 3 pontos). */
+    /** O que mudou entre o retrato da tática e os dados de agora (força só conta a partir de 6 pontos (o círculo alterna força/bônus e o OCR oscila)). */
     fun diff(basis: JSONObject?, f: Map<String, StoredField>): List<Change> {
         if (basis == null) return emptyList()
         val out = ArrayList<Change>()
@@ -80,7 +80,7 @@ object RivalWatch {
                 K.RIVAL_MARKING -> Osm.marking(a) == Osm.marking(b)
                 K.RIVAL_TACKLE -> Osm.tackle(a) == Osm.tackle(b)
                 K.REFEREE -> Referee.norm(a) == Referee.norm(b)
-                K.RIVAL_STRENGTH -> Math.abs((a.toIntOrNull() ?: 0) - (b.toIntOrNull() ?: 0)) < 3
+                K.RIVAL_STRENGTH -> Math.abs((a.toIntOrNull() ?: 0) - (b.toIntOrNull() ?: 0)) < 6
                 else -> a == b
             }
             if (!same) out.add(Change(k, LABEL[k] ?: k, a, b, why(k, a, b)))

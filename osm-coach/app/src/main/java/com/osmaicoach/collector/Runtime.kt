@@ -109,6 +109,8 @@ object Diag {
     fun resetCounters() {
         valid.set(0); discarded.set(0); dedup.set(0); ocr.set(0)
         parsed.set(0); extracted.set(0); unassigned.set(0); aiCalls.set(0)
+        // nova captura: o slot/tela da anterior não valem (antes a bolha mostrava dicas do S1 na tela de abertura do OSM)
+        currentSlot = 0; currentType = "—"
     }
 }
 
@@ -169,7 +171,7 @@ object GenState {
     }
 }
 
-fun startGeneration(ctx: Context, kind: String, slot: Int) {
+fun startGeneration(ctx: Context, kind: String, slot: Int, force: Boolean = false) {
     val app = ctx.applicationContext
     if (!GenState.begin(kind, slot)) return
     if (kind == "tactic" || kind == "tactic_ai") MetaRefresh.refreshIfStale(app)
@@ -178,6 +180,10 @@ fun startGeneration(ctx: Context, kind: String, slot: Int) {
         val r = try {
             when (kind) {
                 "tactic" -> {
+                    val gaps = if (force) emptyList() else Director.tacticGaps(Repo(app).fieldMap(slot), System.currentTimeMillis())
+                    if (gaps.isNotEmpty()) Director.Outcome(false, null, "Antes de gerar, leia: " + gaps.joinToString("; ") { it.first } + ".") else {
+                    // aprende com o último jogo (IA): a lição entra na nota das táticas deste jogo (até 45 s)
+                    runCatching { Director.learnFromLastGames(app, Repo(app), slot) }
                     // Um toque: tática pela simulação e, se houver IA configurada, a IA revisa na sequência
                     // (Gemini, Groq… o que tiver cota); se a IA falhar, fica a da simulação.
                     val local = Director.generateTacticLocal(Repo(app), slot)
@@ -187,6 +193,7 @@ fun startGeneration(ctx: Context, kind: String, slot: Int) {
                         AiStatus.set("")
                         if (ai != null && ai.ok) ai else local
                     } else local
+                    }
                 }
                 "tactic_ai" -> Director.refineTactic(app, Repo(app), slot)
                 else -> Director.marketNote(app, Repo(app), slot)
@@ -256,12 +263,23 @@ object Control {
     }
 
     /** Encerra a captura imediatamente e processa o que ficou pendente em segundo plano. */
+    /** Ao encerrar a leitura: abre este app (o OSM continua aberto em segundo plano; fechar o OSM por gesto/Forçar parada não funcionou no aparelho e foi retirado). Ajuste "close_osm" = abrir o app (padrão ligado). */
+    private fun openAppAfterEnd(ctx: Context) {
+        if (Settings.get(ctx, "close_osm", "1") != "1") return
+        val app = ctx.applicationContext
+        try {
+            app.startActivity(android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        } catch (e: Exception) { Diag.log("Encerrar: não consegui abrir o app (${e.message})") }
+    }
+
     suspend fun end(ctx: Context) {
         val id = activeSession(ctx) ?: return
         val dao = CoachDb.get(ctx).dao()
         prefs(ctx).edit().remove("active_session").apply()
         val s = dao.session(id)
         if (s != null) dao.putSession(s.copy(endedAt = System.currentTimeMillis(), state = "processing"))
+        runCatching { FramePipeline.get(ctx.applicationContext).flushPending() }
+        runCatching { openAppAfterEnd(ctx) }
         AppScope.scope.launch {
             try {
                 Processor.run(ctx.applicationContext, id)

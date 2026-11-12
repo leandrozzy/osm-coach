@@ -11,11 +11,14 @@ import org.json.JSONObject
 object Fixtures {
     private val STAGE = Regex(
         "^(oitavos|quartos|meias? ?finais|meia ?final|semi ?finais?|semifinal|finais|final|fase de grupos|" +
-            "grupo [a-h]|eliminatoria|pre ?eliminatoria|ronda|1/\\d+|play ?off)\\b"
+            "grupo [a-h]|eliminatoria|pre ?eliminatoria|fase preliminar|fase|ronda|1/\\d+|play ?off)\\b"
     )
 
     /** Texto do card é o nome de uma fase de copa (não é um time). */
     fun isStage(text: String?): Boolean = text != null && STAGE.containsMatchIn(Txt.norm(text))
+
+    /** Não é um clube: fase de copa ("Oitavos-de-final", "Fase preliminar") ou vaga ainda não decidida ("ASD"). Vira clube quando a liga avança. */
+    fun notAClub(text: String?): Boolean = text.isNullOrBlank() || isStage(text) || undecidedName(text)
 
     fun isCup(m: MatchEntity): Boolean = m.label.startsWith("Copa") || isStage(m.opponent)
 
@@ -29,7 +32,7 @@ object Fixtures {
     fun undecidedName(text: String?): Boolean {
         val n = Txt.norm(text ?: return true)
         return n.isBlank() || n == "asd" || n == "a s d" || n.contains("a definir") || n == "tbd" ||
-            n.endsWith("sary") || n.contains("anniv") || n.contains("annyea")
+            n.endsWith("sary") || n.contains("anniv") || n.contains("annyea") || n.startsWith("anny") || (n.startsWith("anni") && n.length <= 7)
     }
 
     /** Rival de verdade do card (null quando o card só mostra a fase da copa ou o rival ainda não foi definido). */
@@ -367,6 +370,8 @@ object WinModel {
         val rivalBonus: Int? = null,
         /** Últimos resultados (mais recente primeiro): "V", "E", "D". */
         val recent: List<String> = emptyList(),
+        /** Forma recente do rival lida no pré-jogo (bolinhas V/E/D), qualquer ordem. */
+        val rivalRecent: List<String> = emptyList(),
         /** Resultados anteriores contra este mesmo rival. */
         val headToHead: List<String> = emptyList(),
         /** Resultados já obtidos com esta formação/estilo. */
@@ -380,7 +385,12 @@ object WinModel {
         /** Pesos corrigidos pelos gols reais dos seus jogos (Learned.fit); null = só o modelo de partida. */
         val learned: Learned.Model? = null,
         /** Gols por jogo (os dois times) na liga do slot, lidos da tela de Estatísticas: calibra o nível de gols. */
-        val leagueGoals: Double? = null
+        val leagueGoals: Double? = null,
+        /** Gols marcados/sofridos por jogo na campanha (tabela da liga): meu time e o rival. */
+        val myRates: League.Rates? = null,
+        val rivalRates: League.Rates? = null,
+        /** Média de gols marcados por time por jogo na liga (tabela de classificação). */
+        val leagueTeamGoals: Double? = null
     )
 
     /** Efeito de um fator: no log dos meus gols esperados, no log dos gols do rival e na imprevisibilidade. */
@@ -411,6 +421,16 @@ object WinModel {
         // forças (com o XI escolhido, quando há tática)
         val atkGap = atk - (0.8 * rDef + 0.2 * rGk)
         val defGap = rAtk - (0.8 * def + 0.2 * gk)
+        // campanha na liga: o que cada time realmente marca e sofre (peso pequeno: a força já pesa acima)
+        val lAvg = i.leagueTeamGoals?.takeIf { it in 0.7..3.0 } ?: levelGoals(i)
+        val mr = i.myRates
+        val rr = i.rivalRates
+        if (mr != null && rr != null && lAvg > 0.5) {
+            val w = minOf(1.0, minOf(mr.games, rr.games) / 24.0) * 0.30
+            val myExp = ((mr.gf + rr.ga) / 2.0).coerceAtLeast(0.2)
+            val oppExp = ((rr.gf + mr.ga) / 2.0).coerceAtLeast(0.2)
+            t.add(Term("Campanha na liga (gols marcados e sofridos)", (w * kotlin.math.ln(myExp / lAvg)).coerceIn(-0.25, 0.25), (w * kotlin.math.ln(oppExp / lAvg)).coerceIn(-0.25, 0.25)))
+        }
         t.add(Term("Meu ataque × defesa rival", atkGap / 28.0, 0.0))
         t.add(Term("Ataque rival × minha defesa", 0.0, defGap / 28.0))
         val midGap = mid - rMid
@@ -577,6 +597,11 @@ object WinModel {
             val f = i.recent.take(5).map { score(it) }.average()
             t.add(Term("Forma recente " + i.recent.take(5).joinToString(""), 0.06 * f, -0.03 * f))
         }
+        if (i.rivalRecent.isNotEmpty()) {
+            val rf = i.rivalRecent.take(5).map { score(it) }.average()
+            // rival embalado faz um pouco mais de gol e sofre um pouco menos (efeito pequeno: 5 jogos dizem pouco)
+            t.add(Term("Forma recente do rival " + i.rivalRecent.take(5).joinToString(""), -0.03 * rf, 0.05 * rf))
+        }
         if (i.headToHead.isNotEmpty()) t.add(Term("Confronto anterior", 0.05 * i.headToHead.map { score(it) }.average(), 0.0))
         if (i.tacticRecord.size >= 2) {
             val wr = i.tacticRecord.count { it == "V" }.toDouble() / i.tacticRecord.size
@@ -674,7 +699,11 @@ object Coach {
     data class Game(
         val round: Int, val rival: String, val result: String?, val gf: Int?, val ga: Int?,
         val formation: String?, val style: String?, val poss: Int?, val shots: Int?, val oppShots: Int?, val fouls: Int?,
-        val oppFormation: String?, val advice: String?
+        val oppFormation: String?, val advice: String?,
+        /** Força do meu time e do rival naquele jogo (círculos do pré-jogo). */
+        val myStr: Int? = null, val rivalStr: Int? = null,
+        /** Nota média (1-10) dos meus jogadores por setor no jogo, lida da tela de Resultado. */
+        val defRate: Double? = null, val midRate: Double? = null, val atkRate: Double? = null
     )
 
     data class Review(val game: Game, val wrong: List<String>, val right: List<String>)
@@ -724,7 +753,9 @@ object Coach {
                     if (gf > ga) "V" else if (gf == ga) "E" else "D", gf, ga,
                     log?.let { opt(it, "formation") }, log?.let { opt(it, "playStyle") },
                     num(side("posse de bola", true), true), num(side("remates", true)), num(side("remates", false)),
-                    num(side("faltas", true)), side("formacao", false), opt(r, "advice")
+                    num(side("faltas", true)), side("formacao", false), opt(r, "advice"),
+                    log?.takeIf { it.has("myStrength") }?.optInt("myStrength")?.takeIf { it > 0 }, log?.takeIf { it.has("rivalStrength") }?.optInt("rivalStrength")?.takeIf { it > 0 },
+                    secRate(log, "DEF"), secRate(log, "MEI"), secRate(log, "ATA")
                 )
             )
         }
@@ -739,12 +770,16 @@ object Coach {
                     opt(l, "formation"), opt(l, "playStyle"),
                     if (l.has("myPossession")) num(l.optString("myPossession"), true) else null,
                     if (l.has("myShots")) l.optInt("myShots") else null, if (l.has("oppShots")) l.optInt("oppShots") else null,
-                    if (l.has("myFouls")) l.optInt("myFouls") else null, opt(l, "oppFormation"), null
+                    if (l.has("myFouls")) l.optInt("myFouls") else null, opt(l, "oppFormation"), null,
+                    if (l.has("myStrength")) l.optInt("myStrength").takeIf { it > 0 } else null, if (l.has("rivalStrength")) l.optInt("rivalStrength").takeIf { it > 0 } else null,
+                    secRate(l, "DEF"), secRate(l, "MEI"), secRate(l, "ATA")
                 )
             )
         }
         return out.sortedByDescending { it.round }
     }
+
+    private fun secRate(l: JSONObject?, k: String): Double? = l?.optJSONObject("secRate")?.takeIf { it.has(k) }?.optDouble(k)
 
     private fun mids(f: String?): Int? = f?.let { Formations.lines(it) }?.takeIf { it.isNotEmpty() }?.let { 10 - it.first() - it.last() }
 
@@ -769,6 +804,9 @@ object Coach {
         if ((os != null && os >= 10) || (g.ga ?: 0) >= 2) {
             wrong.add("Defesa exposta: " + listOfNotNull(os?.let { "$it remates" }, g.ga?.let { "$it gol(s)" }).joinToString(" e ") + " do rival.")
         } else if (g.ga == 0) right.add("Defesa segura (não sofreu gol).")
+        g.defRate?.takeIf { it <= 5.2 }?.let { wrong.add("Defesa com nota média ${"%.1f".format(it).replace('.', ',')}: errou muito (notas dos meus jogadores na tela de Resultado).") }
+        g.midRate?.takeIf { it <= 5.2 }?.let { wrong.add("Meio-campo com nota média ${"%.1f".format(it).replace('.', ',')}.") }
+        g.atkRate?.takeIf { it <= 5.2 }?.let { wrong.add("Ataque com nota média ${"%.1f".format(it).replace('.', ',')}.") }
         val f = g.fouls
         if (f != null && f >= 16) wrong.add("Muitas faltas ($f): risco de cartão e expulsão.")
         if (g.result == "V" && g.formation != null) right.add("${g.formation} • ${g.style ?: "?"} funcionou.")
@@ -793,6 +831,10 @@ object Coach {
             val p = g.poss
             if (bad && p != null && p < 42) mid += w
             if (bad && ((g.oppShots ?: 0) >= 10 || (g.ga ?: 0) >= 2)) def += w
+            // as notas dos jogadores confirmam onde o time falhou (ou desmentem: defesa com nota boa não pede reforço)
+            if (bad && (g.defRate ?: 9.0) <= 5.2) def += 0.5 * w
+            if (bad && (g.midRate ?: 9.0) <= 5.2) mid += 0.5 * w
+            if (bad && (g.atkRate ?: 9.0) <= 5.2 && (g.gf ?: 0) <= 1) atk += 0.5 * w
             if (bad && (g.gf == 0 || (g.shots != null && g.oppShots != null && g.shots * 10 < g.oppShots * 6))) atk += w
             if (i < 3 && (g.fouls ?: 0) >= 16) discipline = true
             val key = g.formation?.let { Formations.base(it) + "|" + (Osm.style(g.style) ?: "") }
@@ -914,24 +956,42 @@ object Meta {
      * embutido; depois ajustado pelos resultados reais dos 4 slots em jogos parecidos (MetaLearner).
      */
     fun resolve(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?, logs: List<JSONObject>): Template? {
-        val base = fromRemote(edge, home, rivalFormation, remote) ?: template(edge, home, rivalFormation) ?: return null
+        val prior = HumanPrior.build(logs, edge)
+        val ok = remoteCandidates(edge, home, rivalFormation, remote)
+            .filter { !HumanPrior.avoidsFormation(prior, it.formation) && !HumanPrior.avoidsStyle(prior, it.style) }
+        // várias fontes da web podem discordar: vale a que o SEU histórico real sustenta (empate = a de maior prioridade)
+        val remoteT = if (prior == null) ok.firstOrNull() else ok.maxByOrNull { HumanPrior.bonus(prior, it.formation, it.style, it.mentality) }
+        val base = remoteT ?: template(edge, home, rivalFormation) ?: return null
         return MetaLearner.adapt(base, logs, edge, home, rivalFormation)
     }
 
-    private fun fromRemote(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?): Template? {
-        if (remote == null || System.currentTimeMillis() - remote.optLong("at") > 30L * 86400000L) return null
-        val rules = remote.optJSONObject("rules") ?: return null
+    /** Regra principal + alternativas (outras fontes) da situação; vazio se não há modelo recente. */
+    fun remoteCandidates(edge: Int, home: Boolean?, rivalFormation: String?, remote: JSONObject?): List<Template> {
+        if (remote == null || System.currentTimeMillis() - remote.optLong("at") > 30L * 86400000L) return emptyList()
+        val rules = remote.optJSONObject("rules") ?: return emptyList()
         val k = key(edge, rivalFormation)
-        val o = rules.optJSONObject(k) ?: rules.optJSONObject(k.substringBefore('|') + "|?") ?: return null
+        val o = rules.optJSONObject(k) ?: rules.optJSONObject(k.substringBefore('|') + "|?") ?: return emptyList()
+        val list = ArrayList<JSONObject>()
+        list.add(o)
+        o.optJSONArray("alts")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { list.add(it) } }
+        return list.mapNotNull { fromRule(it, edge, home, rivalFormation) }
+    }
+
+    private fun fromRule(o0: JSONObject, edge: Int, home: Boolean?, rivalFormation: String?): Template? {
+        val away = home == false
+        // a fonte trouxe a linha "fora de casa": usa os valores dela em vez de descontar
+        val o = if (away) o0.optJSONObject("away")?.let { aw -> JSONObject(o0.toString()).also { c -> for (n in aw.keys()) c.put(n, aw.get(n)) } } ?: o0 else o0
+        val hasAway = away && o !== o0
         val f = Formations.canonical(o.optString("formation")) ?: return null
         val st = Osm.style(o.optString("style")) ?: return null
         // controle que a pesquisa não trouxe: o do modelo embutido para a mesma situação (senão o meio da escala)
         val t0 = template(edge, null, rivalFormation)
         fun sl(n: String, d: Int) = (if (o.has(n)) o.optInt(n, d) else d).coerceIn(0, 100)
-        val away = home == false
+        val dp = if (away && !hasAway) 5 else 0
+        val dm = if (away && !hasAway) 8 else 0
         return Template(
             "comunidade (internet, ${o.optString("source").take(40).ifBlank { "fóruns" }})", f, st,
-            sl("pressure", t0?.pressure ?: 50) - (if (away) 5 else 0), sl("mentality", t0?.mentality ?: 50) - (if (away) 8 else 0),
+            sl("pressure", t0?.pressure ?: 50) - dp, sl("mentality", t0?.mentality ?: 50) - dm,
             sl("tempo", t0?.tempo ?: 60),
             Osm.attack(o.optString("attack")) ?: "Atacar apenas", Osm.midfield(o.optString("mid")) ?: "Manter posições",
             Osm.defense(o.optString("def")) ?: "Defender atrás", Osm.marking(o.optString("marking")) ?: "À zona",
@@ -944,14 +1004,14 @@ object Meta {
         val rl = rf?.let { Formations.lines(it) }?.takeIf { it.isNotEmpty() }
         val away = home == false
         if (edge <= -5) {
-            // azarão: bloco compacto e saída rápida com DOIS atacantes que ficam na frente (5-3-2 em contra-ataque).
-            // O antigo 5-4-1 com estilo 18-25 e atacante "ajudando a defender" deixava o time sem ataque:
-            // 7 jogos seguidos sem gol contra humanos mais fortes (diagnóstico de 19/10).
+            // azarão: o histórico real (04/11, 67 jogos contra humanos) mostra que recuar (5-3-2/5-4-1/4-5-1 + Contra-ataque,
+            // estilo ~36-42) perdeu mais do que a diferença de força explica e quase não fez gol. 4-3-3 com "Jogar pelas
+            // alas", barras no meio da escala e avançados na frente foi o que mais pontuou nos 4 slots.
             val deep = edge <= -12
             return Template(
-                "rival mais forte", "5-3-2", "Contra-ataque",
-                (if (deep) 36 else 40) - (if (away) 2 else 0), (if (deep) 36 else 42) - (if (away) 3 else 0), if (deep) 70 else 68,
-                "Atacar apenas", if (deep) "Ajudar a defesa" else "Manter posições", "Defender atrás"
+                "rival mais forte", "4-3-3 A", "Jogar pelas alas",
+                (if (deep) 52 else 56) - (if (away) 2 else 0), (if (deep) 50 else 55) - (if (away) 3 else 0), if (deep) 64 else 62,
+                "Atacar apenas", "Manter posições", "Defender atrás"
             )
         }
         if (edge >= 5) {
@@ -996,6 +1056,8 @@ object MetaLearner {
     /** Jogos com resultado na mesma situação, com peso pela semelhança. */
     fun similar(logs: List<JSONObject>, edge: Int, home: Boolean?, rivalFormation: String?): List<Pair<JSONObject, Double>> {
         val rb = rivalFormation?.let { Formations.canonical(it) }?.let { Formations.base(it) }
+        // jogos recentes pesam mais (metade a cada 8 jogos para trás): o modelo acompanha o momento do time
+        val order = logs.filter { it.optString("result") in setOf("V", "E", "D") }.sortedByDescending { it.optLong("genAt", 0L) }
         return logs.mapNotNull { j ->
             val r = j.optString("result")
             if (j.isNull("result") || r !in setOf("V", "E", "D")) return@mapNotNull null
@@ -1004,6 +1066,7 @@ object MetaLearner {
             if (rel(e) != rel(edge)) return@mapNotNull null
             val lrb = j.optString("rivalFormationRead").takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }?.let { Formations.base(it) }
             var w = if (rb == null || lrb == null) 1.0 else if (rb == lrb) 2.0 else 0.6
+            if (j.has("genAt")) w *= Math.pow(0.5, order.indexOf(j).coerceAtLeast(0) / 8.0)
             val lh = if (j.has("home") && !j.isNull("home")) j.optBoolean("home") else null
             if (home != null && lh != null && home == lh) w *= 1.3
             Pair(j, w)
@@ -1030,7 +1093,8 @@ object MetaLearner {
             val (pw, pp) = if (k == tKey) Pair(3.0, 1.9) else Pair(2.0, 1.2)
             return (g.second + pw * pp) / (g.first + pw)
         }
-        val bestKey = (groups.keys + tKey).maxByOrNull { score(it) } ?: tKey
+        // só troca o modelo por uma opção que já tem pelo menos 3 jogos de peso (1 ou 2 jogos não provam nada)
+        val bestKey = (groups.filter { it.value.first >= 3.0 }.keys + tKey).maxByOrNull { score(it) } ?: tKey
         val baseF = bestKey.substringBefore('|')
         val style = bestKey.substringAfter('|')
         val formation = if (baseF == Formations.base(t.formation)) t.formation else Formations.variant(baseF, style)

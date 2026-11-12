@@ -24,8 +24,18 @@ object Parsers {
     private val RX_SELLING = Regex("vender jogadores\\s*(\\d)\\s*/\\s*(\\d)")
 
     private fun intTok(t: OcrToken): Int? {
-        val s = t.text.trim()
+        // o anel do círculo de força às vezes vira parênteses no OCR ("(104)", log de 06/11): não é parte do número
+        val s = t.text.trim().trim('(', ')', '[', ']', '{', '}', '|', ' ')
         return if (s.isNotEmpty() && s.length <= 3 && s.all { it.isDigit() }) s.toIntOrNull() else null
+    }
+
+    /** Saldo de Boss Coins: número solto no topo do OSM, entre o dinheiro ("7,8M") e o botão FREE (dos logs: x 0.22–0.27, y 0.04). */
+    fun bossCoins(o: OcrResult): Int? {
+        val c = o.tokens.filter { it.yc < 0.075f && it.xc in 0.17f..0.31f }.mapNotNull { t ->
+            val s = t.text.trim().trim('(', ')', ' ')
+            if (s.length in 1..5 && s.all { it.isDigit() }) s.toIntOrNull() else null
+        }
+        return c.singleOrNull()
     }
 
     private fun isNick(s: String): Boolean {
@@ -195,6 +205,15 @@ object Parsers {
             if (rivalBonus != null) f[K.RIVAL_LOGIN_BONUS] = Reading("+$rivalBonus%", 0.85)
             val mineStr = if (mineLeft) left else right
             val rivalStr = if (mineLeft) right else left
+            // Forma recente: bolinhas V/E/D sob cada time (letras sozinhas, coloridas), no meio da tela
+            fun formOf(left: Boolean): String? = o.tokens.filter { (it.xc < 0.5f) == left && it.yc in 0.45f..0.58f && it.xc in 0.12f..0.88f }
+                .mapNotNull { t -> t.text.trim().uppercase().takeIf { it.length == 1 && it[0] in "VED" }?.let { Pair(t.xc, it) } }
+                .sortedBy { it.first }.map { it.second }.joinToString("").takeIf { it.length in 3..6 }
+            // pela cor das bolinhas (confiável); o OCR da letra solta só entra se a imagem não estiver disponível
+            val myF = img?.let { PixelProbe.formDots(it, mineLeft) } ?: formOf(mineLeft)
+            val rvF = img?.let { PixelProbe.formDots(it, !mineLeft) } ?: formOf(!mineLeft)
+            myF?.let { f[K.MY_FORM] = Reading(it, 0.85) }
+            rvF?.let { f[K.RIVAL_FORM] = Reading(it, 0.85) }
             if (mineStr != null) f[K.MY_STRENGTH] = Reading(mineStr.toString(), 0.85)
             if (rivalStr != null) f[K.RIVAL_STRENGTH] = Reading(rivalStr.toString(), 0.8)
             // Os círculos alternam força <-> bônus ao mesmo tempo. Se o meu mostra o bônus e o do rival continua
@@ -202,6 +221,8 @@ object Parsers {
             if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick == null) {
                 f[K.RIVAL_HUMAN] = Reading("Não", 0.95)
             }
+            // Sem usuário embaixo do nome do rival e com a força dele à vista: é CPU (se depois aparecer o apelido, "Sim" vence).
+            if (rivalNick == null && rivalStr != null && f[K.RIVAL_HUMAN] == null) f[K.RIVAL_HUMAN] = Reading("Não", 0.7)
             // Humano (nome de usuário embaixo) sem bônus de login hoje: o círculo dele fica na força -> bônus 0%.
             if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick != null) {
                 f[K.RIVAL_LOGIN_BONUS] = Reading("+0%", 0.8)
@@ -233,6 +254,11 @@ object Parsers {
                     if (pts != null) f[K.POINTS] = Reading(pts.text.trim(), 0.8)
                 }
             }
+        }
+        // Preparação para o jogo: a barra mostra o nível em texto (CRÍTICO, FRACO, BOM, BOA…)
+        o.lines.firstOrNull { Txt.norm(it.text).startsWith("preparacao para o jogo") && it.yc > 0.45f }?.let { lab ->
+            o.lines.filter { it.yc in (lab.yc + 0.02f)..(lab.yc + 0.16f) && it.xc in (lab.xc - 0.22f)..(lab.xc + 0.30f) }
+                .firstNotNullOfOrNull { PrepLevel.canon(it.text) }?.let { f[K.PREP_LEVEL] = Reading(it, 0.8) }
         }
         if (img != null) {
             // termômetro ancorado no texto "Árbitro" quando o OCR o acha (a posição muda um pouco entre telas)
@@ -368,8 +394,13 @@ object Parsers {
                     forSale = null,
                     cond = img?.let { PixelProbe.barFill(it, 0.757f, 0.800f, a.yc) },
                     morale = img?.let { PixelProbe.barFill(it, 0.808f, 0.850f, a.yc) },
-                    yellow = img?.let { PixelProbe.goldBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
-                    red = img?.let { PixelProbe.redBox(it, 0.875f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f }
+                    yellow = img?.let { PixelProbe.goldBox(it, 0.883f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
+                    // a cruz de lesão fica um pouco à esquerda do cartão (0,856–0,876): a caixa do vermelho começa depois dela
+                    red = img?.let { PixelProbe.redBox(it, 0.883f, 0.915f, a.yc - 0.03f, a.yc + 0.03f) >= 0.06f },
+                    injured = img?.let { PixelProbe.redBox(it, 0.852f, 0.880f, a.yc - 0.03f, a.yc + 0.03f) >= 0.10f },
+                    nat = img?.let { PixelProbe.flagSig(it, (ageX + posX) / 2f, a.yc) },
+                    natRich = img?.let { PixelProbe.flagRich(it, (ageX + posX) / 2f, a.yc, 0.026f, 0.040f) },
+                    natX = FLAG_X, natY = a.yc
                 )
             )
         }
@@ -415,6 +446,9 @@ object Parsers {
             }
         }
     }
+
+    /** Centro da bandeira na coluna "Nac." do Plantel: constante do layout do OSM (medido: 740–774 de 1280 = 0,5914), igual em todas as linhas. */
+    const val FLAG_X = 0.5914f
 
     fun calendar(o: OcrResult, img: PixelProbe.Img?): Extraction {
         data class Anchor(val line: OcrLine, val round: Int?, val label: String)
@@ -491,7 +525,9 @@ object Parsers {
                 MatchRead(
                     key = key, label = if (stage != null) "Copa • $stage" else a.label, round = a.round, date = date, time = time,
                     home = finalHome, scoreMine = mine, scoreOpp = opp, result = result,
-                    opponent = opponent, opponentNick = nick
+                    opponent = opponent, opponentNick = nick,
+                    // escudo do rival: ~0,168 da altura abaixo do "Jornada N" (frame real 2448×1080 de 10/11), na mesma coluna
+                    crestX = if (opponent != null) a.line.xc else null, crestY = if (opponent != null) a.line.yc + 0.168f else null
                 )
             )
         }
@@ -518,11 +554,24 @@ object Parsers {
             val nk = group.getOrNull(1)?.text?.trim()
             if (Txt.key(nm).length >= 3) humans[Txt.key(nm)] = nk
         }
+        // faixa do topo (só com a lista no início): escudo ~0,085 acima do nome do clube; funciona com jogos já jogados (os cards mostram placar, sem escudo)
+        val crests = ArrayList<CrestSpot>()
+        if (hasStrip) {
+            val seen = HashSet<OcrLine>()
+            for (ln in topLines) {
+                if (ln in seen) continue
+                val group = topLines.filter { abs(it.xc - ln.xc) <= 0.06f }.sortedBy { it.yc }
+                seen.addAll(group)
+                val nm = group[0]
+                if (Txt.key(nm.text).length >= 3 && nm.yc in 0.27f..0.33f && nm.xc in 0.07f..0.93f) crests.add(CrestSpot(nm.text.trim(), nm.xc, nm.yc - 0.085f))
+            }
+        }
         return Extraction(
             ScreenType.CALENDAR,
             matches = matches,
             humans = humans,
-            ownerTeam = ownerLine?.text?.trim()
+            ownerTeam = ownerLine?.text?.trim(),
+            crests = crests
         )
     }
 
@@ -547,6 +596,43 @@ object Parsers {
      * Confere a tela de tática do OSM (a que você está montando) com a tática gerada. Conservador: só reclama
      * de um item quando a tela mostra UM valor daquele tipo (lista aberta com todas as opções não conta).
      */
+    /** O que está MONTADO na tela de Tática do OSM agora (só o que aparece de forma inequívoca): formação, estilo, desarme, marcação. */
+    fun tacticRead(o: OcrResult): JSONObject {
+        val texts = o.lines.map { it.text.trim() }
+        fun only(options: List<String>): String? = options.filter { opt -> texts.any { Txt.norm(it) == Txt.norm(opt) } }.singleOrNull()
+        val forms = texts.mapNotNull { t -> RX_FORMATION.find(t)?.let { m ->
+            val v = m.groupValues[2].uppercase()
+            Formations.canonical(m.groupValues[1] + if (v.isNotEmpty()) " $v" else "")
+        } }.distinct()
+        val j = JSONObject()
+        forms.singleOrNull()?.let { j.put("formation", it) }
+        only(Osm.STYLES)?.let { j.put("playStyle", it) }
+        only(Osm.TACKLES)?.let { j.put("tackle", it) }
+        only(Osm.MARKING)?.let { j.put("marking", it) }
+        return j
+    }
+
+    /** Diferenças entre o que está montado (`tacmounted`) e a tática gerada. */
+    fun tacticDiff(m: JSONObject, plan: JSONObject, referee: String?): List<String> {
+        val out = ArrayList<String>()
+        val wantF = Formations.canonical(plan.optString("formation"))
+        val gotF = m.optString("formation").takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }
+        if (gotF != null && wantF != null && gotF != wantF) out.add("Formação $gotF — a gerada é $wantF")
+        val st = m.optString("playStyle").takeIf { it.isNotBlank() }?.let { Osm.style(it) }
+        val wantSt = Osm.style(plan.optString("playStyle"))
+        if (st != null && wantSt != null && st != wantSt) out.add("Estilo $st — a gerada é $wantSt")
+        val tk = m.optString("tackle").takeIf { it.isNotBlank() }?.let { Osm.tackle(it) }
+        val wantTk = Osm.tackle(plan.optString("tackle"))
+        if (tk != null) {
+            if (tk !in Osm.allowedTackles(referee)) out.add("Desarme $tk com árbitro ${referee ?: "não lido"}: risco de expulsão")
+            else if (wantTk != null && tk != wantTk) out.add("Desarme $tk — a gerada é $wantTk")
+        }
+        val mk = m.optString("marking").takeIf { it.isNotBlank() }?.let { Osm.marking(it) }
+        val wantMk = Osm.marking(plan.optString("marking"))
+        if (mk != null && wantMk != null && mk != wantMk) out.add("Marcação $mk — a gerada é $wantMk")
+        return out
+    }
+
     fun tacticCheck(o: OcrResult, plan: JSONObject, referee: String?): List<String> {
         val out = ArrayList<String>()
         val texts = o.lines.map { it.text.trim() }
@@ -738,7 +824,7 @@ object Parsers {
     private val RX_MINUTE = Regex("^(\\d{1,3})\\s*['’′]$")
     private val RX_SHIRT = Regex("^\\d{1,2}\\.\\s*")
 
-    fun matchResult(o: OcrResult): Extraction {
+    fun matchResult(o: OcrResult, img: PixelProbe.Img? = null): Extraction {
         var round: Int? = null
         for (ln in o.lines) {
             if (ln.yc < 0.2f && ln.xc in 0.4f..0.6f) {
@@ -801,22 +887,44 @@ object Parsers {
                 if (lv != null && rv != null) stats[lab] = Pair(lv, rv)
             }
         }
-        val zones = o.lines.filter { it.yc in 0.72f..0.88f && it.xc in 0.25f..0.75f && it.text.contains("%") }
-            .sortedBy { it.xc }.mapNotNull { Regex("(\\d{1,3})\\s*%").find(it.text)?.groupValues?.get(1)?.toIntOrNull() }
+        // Zonas de ação: ancoradas no título "Zonas de ação" (a posição na tela muda com a rolagem); sem título, a faixa antiga.
+        val zonesHeader = o.lines.firstOrNull { Txt.norm(it.text) == "zonas de acao" }
+        val zones = o.lines.filter {
+            it.xc in 0.25f..0.75f && it.text.contains("%") &&
+                (if (zonesHeader != null) it.yc > zonesHeader.yc && it.yc - zonesHeader.yc <= 0.45f else it.yc in 0.72f..0.88f)
+        }.sortedBy { it.xc }.mapNotNull { Regex("(\\d{1,3})\\s*%").find(it.text)?.groupValues?.get(1)?.toIntOrNull() }
         val momHeader = o.lines.firstOrNull { Txt.norm(it.text) == "homem do jogo" }
         val mom = if (momHeader == null) null else o.lines.filter {
             it.yc > momHeader.yc && it.yc - momHeader.yc <= 0.16f && Txt.letters(it.text) >= 3 && !Overlay.isChip(it.text)
         }.minByOrNull { it.yc }?.text?.trim()
 
-        // Eventos (minuto no centro; jogador e descrição do lado do time).
+        // Eventos (minuto no centro; jogador e descrição do lado do time). O OSM corta o texto ("Assistênci…", "Cu…"):
+        // gol = linha com "Assistência"; substituição = duas linhas com camisa (1ª entra, 2ª sai); o resto fica como lance.
         val events = ArrayList<String>()
         for (mn in o.lines) {
             val mm = RX_MINUTE.find(mn.text.trim()) ?: continue
             if (mn.xc !in 0.42f..0.58f) continue
-            val band = o.lines.filter { it !== mn && abs(it.yc - mn.yc) <= 0.07f && it.xc !in 0.42f..0.58f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
+            val band = o.lines.filter { it !== mn && abs(it.yc - mn.yc) <= 0.045f && it.xc !in 0.42f..0.58f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
             if (band.isEmpty()) continue
             val side = if (band[0].xc < 0.5f) "casa" else "visitante"
-            events.add("${mm.groupValues[1]}' ($side) " + band.joinToString(" — ") { it.text.trim().replace(RX_SHIRT, "") })
+            val l1 = band[0].text.trim()
+            val l2 = band.getOrNull(1)?.text?.trim()
+            val p1 = l1.replace(RX_SHIRT, "")
+            val icon = img?.let { PixelProbe.eventIcon(it, band[0].xc < 0.5f, mn.yc) }
+            val injuryText = Txt.norm(l2 ?: "").let { it.startsWith("rotura") || it.startsWith("estiramento") || it.startsWith("lesao") || it.startsWith("entorse") || it.startsWith("fratura") || it.startsWith("contusao") }
+            val desc = when {
+                icon == "lesao" || (icon == null && injuryText) -> "lesão de $p1" + (l2?.let { " (${it.trim('.', '…')})" } ?: "")
+                icon == "amarelo" -> "cartão amarelo de $p1"
+                icon == "vermelho" -> "cartão vermelho de $p1"
+                l2 != null && Txt.norm(l2).startsWith("assist") -> {
+                    val a = l2.substringAfter(':', "").trim().trim('.', '…').trim()
+                    "gol de $p1" + (if (a.length >= 3) " (assistência: $a)" else " (com assistência)")
+                }
+                l2 != null && RX_SHIRT.containsMatchIn(l2) && RX_SHIRT.containsMatchIn(l1) -> "substituição: entra $p1, sai ${l2.replace(RX_SHIRT, "").trim('.', '…')}"
+                l2 == null -> if (icon == "bola" || icon == null) "lance de $p1 (gol sem assistência ou cartão)" else "lance de $p1"
+                else -> band.joinToString(" — ") { it.text.trim().replace(RX_SHIRT, "") }
+            }
+            events.add("${mm.groupValues[1]}' ($side) $desc")
         }
 
         // Notas dos jogadores: bolinhas à esquerda (time da casa) e à direita (visitante).

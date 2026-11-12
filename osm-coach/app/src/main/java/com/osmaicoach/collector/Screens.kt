@@ -15,12 +15,15 @@ object Screens {
         t.contains("novas missoes dentro de") || (t.contains("a semana reinicia") && t.contains("missoes")) -> ScreenType.MISSIONS
         t.contains("lista de afazeres") && t.contains("preparacao para o jogo") &&
             PREP_DEFS.count { d -> t.contains(d.prefix) } >= 1 -> ScreenType.PREP
+        // aba "Lista de Afazeres" (ao lado de "Preparação para o jogo"): Onze inicial incompleto, Patrocinador à espera, Jogador vendido…
+        t.contains("lista de afazeres") && TODO_DEFS.count { d -> t.contains(d.second) } >= 2 -> ScreenType.PREP
         t.contains("especialistas") && (t.contains("grandes penalidades") || t.contains("capitao")) &&
             (t.contains("substituir jogador") || t.contains("livres")) -> ScreenType.SPECIALISTS
         // o menu lateral lista os dois; a tela de cada um tem só o seu nome e o aviso de "ninguém"/a lista
         t.contains("medico") && !t.contains("advogado") &&
             (t.contains("lesion") || t.contains("lesao") || t.contains("nao tens") || t.contains("tratamento") || t.contains("tratar")) -> ScreenType.DOCTOR
-        t.contains("tratamento em curso") && t.contains("tratar imediatamente") -> ScreenType.DOCTOR
+        // tratamento em curso: a lista ("Tratar imediatamente") ou o cartão do jogador com o cronômetro ("Não autorizado" + gemas)
+        t.contains("tratamento em curso") && (t.contains("tratar imediatamente") || t.contains("nao autorizado") || t.contains("idade")) -> ScreenType.DOCTOR
         t.contains("advogado") && !t.contains("medico") &&
             (t.contains("suspens") || t.contains("expuls") || t.contains("castig") || t.contains("nao tens") || t.contains("recurso") || t.contains("recorr")) -> ScreenType.LAWYER
         Regex("acordo de patrocinio").findAll(t).count() >= 2 -> ScreenType.SPONSORS
@@ -51,8 +54,17 @@ object Screens {
         PrepDef("forma", "alinha jogadores em boa", "Alinhe jogadores em boa forma", "a qualidade do jogador diminui conforme a condição física cai", 4)
     )
 
-    /** Itens visíveis: polegar verde = feito, cinza = falta. */
+    /** Itens da aba "Lista de Afazeres" do OSM (chave, texto normalizado do título): o que o jogo está pedindo agora. */
+    val TODO_DEFS = listOf(
+        "onze" to "onze inicial incompleto", "patroc" to "patrocinador a espera", "vendido" to "jogador vendido",
+        "amigavel" to "amigavel disponivel", "bc" to "boss coins gratis", "treinador" to "disponibilidade do treinador"
+    )
+
+    /** Itens visíveis: polegar verde = feito, cinza = falta. A aba "Lista de Afazeres" vem em "todo" (o que o jogo pede). */
     fun prep(o: OcrResult, img: PixelProbe.Img?): JSONObject {
+        val tn = Txt.norm(o.fullText)
+        val todo = JSONArray()
+        for ((k, p) in TODO_DEFS) if (tn.contains(p)) todo.put(k)
         val items = JSONArray()
         if (img != null) {
             for (ln in o.lines) {
@@ -62,7 +74,10 @@ object Screens {
                 items.put(JSONObject().put("k", d.key).put("done", done))
             }
         }
-        return JSONObject().put("items", items)
+        val out = JSONObject().put("items", items)
+        // a aba da lista só vale quando o texto dela está na tela (≥2 títulos): sem isso o plano anterior não é apagado
+        if (tn.contains("lista de afazeres") && TODO_DEFS.count { tn.contains(it.second) } >= 2) out.put("todo", todo).put("todoSeen", true)
+        return out
     }
 
     // ------------------------------------------------------------ médico e advogado
@@ -71,7 +86,8 @@ object Screens {
     fun roster(o: OcrResult): JSONObject {
         val t = Txt.norm(o.fullText)
         val empty = t.contains("nao tens qualquer jogador") || t.contains("nao tens nenhum jogador") || t.contains("nao tens jogadores") ||
-            t.contains("nenhum jogador")
+            t.contains("nenhum jogador") ||
+            t.contains("nao tem qualquer jogador") || t.contains("nao tem nenhum jogador") || t.contains("nao tem jogadores") || t.contains("sem jogadores suspensos")
         val lines = JSONArray()
         for (ln in o.lines.take(80)) {
             val s = ln.text.trim()
@@ -83,7 +99,11 @@ object Screens {
         // o advogado avisa que não dá para recorrer (ex.: "não posso apresentar recurso!"): sem dica de mandar ao advogado
         val noAppeal = t.contains("nao posso apresentar recurso") || t.contains("nao ha recurso") || t.contains("nao e possivel recorrer") ||
             t.contains("nao podes recorrer") || t.contains("nao pode recorrer")
-        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
+        // cartão de UM jogador em tratamento (nome, idade, lesão, cronômetro): não é a lista toda
+        val card = t.contains("tratamento em curso") && t.contains("idade") && !t.contains("tratar imediatamente")
+        // o número dentro da cruz vermelha = tratamentos que ainda faltam para esse jogador (ex.: 3)
+        val cross = if (card) o.tokens.firstOrNull { t -> t.xc in 0.66f..0.84f && t.yc in 0.40f..0.60f && t.text.trim().length == 1 && t.text.trim()[0] in '1'..'9' }?.text?.trim()?.toIntOrNull() else null
+        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("card", card).put("cross", cross ?: JSONObject.NULL).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
     }
 
     // ------------------------------------------------------------ especialistas

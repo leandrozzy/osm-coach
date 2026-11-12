@@ -67,6 +67,11 @@ class ScreensTest {
         assertEquals(5 * 3600L + 40 * 60 + 23, r.getLong("endsIn"))
     }
 
+    @Test fun lawyerNobodySuspendedIsEmpty() {
+        val o = Fx.ocr(Fx.line("Advogado", 0.9f, 0.9f), Fx.line("Não tem qualquer jogador suspenso neste momento", 0.5f, 0.5f))
+        assertEquals(true, Screens.roster(o).getBoolean("empty"))
+    }
+
     @Test fun lawyerSaysNoAppealIsRead() {
         val o = Fx.ocr(Fx.line("Advogado", 0.9f, 0.9f), Fx.line("Lawrence Bailey", 0.9f, 0.95f), Fx.line("Sinto muito, não posso apresentar recurso!", 0.5f, 0.5f))
         assertEquals(true, Screens.roster(o).getBoolean("noAppeal"))
@@ -140,7 +145,7 @@ class ScreensTest {
         val byType = needs.associateBy { it.type }
         assertEquals(2, byType[ScreenType.TRAINING]!!.urgency)       // terminou
         assertEquals(2, byType[ScreenType.PREGAME]!!.urgency)        // jogo em 30 min, lido há 5 h
-        assertEquals(2, byType[ScreenType.DOCTOR]!!.urgency)         // jogo hoje, nunca li
+        assertNull(byType[ScreenType.DOCTOR])                         // plantel sem lesionado: não pede o médico
         assertNull(byType[ScreenType.SQUAD])                          // lido há 2 h
         assertTrue(needs.first().urgency >= needs.last().urgency)
         assertTrue(Fresh.needs(Fresh.In(2, seen, emptyList(), null, false, now, active = false)).isEmpty())
@@ -224,7 +229,7 @@ class ScreensTest {
         val now = 100 * h
         fun need(seen: Map<String, Long>, last: Long?) = Fresh.needs(
             Fresh.In(1, seen + mapOf("SQUAD" to now, "MARKET" to now, "TRAINING" to now, "PREGAME" to now, "CALENDAR" to now, "SPONSORS" to now, "SPECIALISTS" to now, "STADIUM" to now, "STATS" to now, "DEALS" to now),
-                emptyList(), now + 5 * h, false, now, true, last)
+                emptyList(), now + 5 * h, false, now, true, last, injured = 1)
         ).filter { it.type == ScreenType.DOCTOR }
         // lido depois do último jogo: tudo certo, sem cobrar de novo (mesmo "hoje")
         assertTrue(need(mapOf("DOCTOR" to now - 30 * h, "LAWYER" to now - 30 * h), now - 40 * h).isEmpty())
@@ -257,5 +262,20 @@ class ScreensTest {
         // sem jogo conhecido: o calendário é pedido
         val old = seen + mapOf("CALENDAR" to now - 30 * h)
         assertTrue(Fresh.needs(Fresh.In(1, old, listOf(running), null, false, now, true, now - 30 * h)).any { it.type == ScreenType.CALENDAR })
+    }
+
+    @Test fun doctorPlayerCardInTreatmentIsRecognisedAndTimed() {
+        // print real: cartão do jogador (14 ERIC MEZA, IDADE: 27) com "Tratamento em curso..." e 7h 57m 22s
+        val txt = Txt.norm("Tratamento em curso... 7h 57m 22s Não autorizado 40 14 ERIC MEZA IDADE: 27 AVA 32 MED 51 DEF 71 80% Estiramento do ligamento do joelho")
+        assertEquals(ScreenType.DOCTOR, Screens.classify(txt))
+        val o = Fx.ocr(
+            Fx.line("14 ERIC MEZA", 0.25f, 0.29f, 0.12f), Fx.line("IDADE: 27", 0.25f, 0.32f, 0.08f),
+            Fx.line("Tratamento em curso...", 0.75f, 0.30f, 0.14f), Fx.line("7h 57m 22s", 0.75f, 0.67f, 0.08f),
+            Fx.line("Não autorizado", 0.75f, 0.76f, 0.1f), Fx.line("Estiramento do ligamento do joelho", 0.25f, 0.84f, 0.2f)
+        )
+        val r = Screens.roster(o)
+        assertTrue(r.optBoolean("busy"))
+        assertTrue(r.optBoolean("card"))
+        assertEquals(7L * 3600 + 57 * 60 + 22, r.optLong("endsIn"))
     }
 }

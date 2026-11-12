@@ -18,7 +18,16 @@ object Fresh {
         /** Slot com competição em andamento (sem isso não há jogo para preparar). */
         val active: Boolean = true,
         /** Quando começou o último jogo já disputado (lesão/suspensão só mudam depois de uma partida). */
-        val lastMatchAt: Long? = null
+        val lastMatchAt: Long? = null,
+        /** Jogadores do plantel com cartão vermelho (suspensos) e lesionados conhecidos (lidos no Médico). */
+        val reds: Int = 0,
+        val injured: Int = 0,
+        /** O advogado disse "não posso apresentar recurso" nesta rodada. */
+        val noAppeal: Boolean = false,
+        /** Nível da barra "Preparação para o jogo" lida no pré-jogo (CRÍTICO, FRACO, BOM…); null = não lido. */
+        val prepLevel: String? = null,
+        /** Rodadas jogadas que o Calendário lido ainda não mostra (leitura que não rolou até o fim). */
+        val calLag: Int = 0
     )
 
     val NAME = mapOf(
@@ -52,15 +61,15 @@ object Fresh {
 
     /** Guia fixo: o que cada tela alimenta e de quanto em quanto tempo vale passar por ela. */
     val GUIDE = listOf(
-        Triple(ScreenType.SQUAD, "Elenco, forças, condição, moral e cartões → 11 ideal, treino, vendas", "1x ao dia e depois de contratar ou vender"),
-        Triple(ScreenType.PREGAME, "Rival, forças, bônus e árbitro → a tática do jogo", "até 20 min antes de cada jogo"),
-        Triple(ScreenType.REPORT, "Formação e estilo do rival → contra-tática", "antes do jogo (rival humano muda)"),
-        Triple(ScreenType.DOCTOR, "Lesionados → saem do 11", "no dia do jogo"),
-        Triple(ScreenType.LAWYER, "Suspensos → saem do 11", "no dia do jogo"),
+        Triple(ScreenType.SQUAD, "Elenco, forças, condição, moral e cartões → 11 ideal, treino, vendas", "1x por semana (e antes do jogo se passou de 12 h) e depois de contratar ou vender"),
+        Triple(ScreenType.PREGAME, "Rival, forças, bônus e árbitro → a tática do jogo", "obrigatório para gerar a tática: vale por 3 h (e relido perto do jogo)"),
+        Triple(ScreenType.REPORT, "Formação e estilo do rival → contra-tática", "obrigatório para gerar a tática: vale por 3 h (rival humano muda)"),
+        Triple(ScreenType.DOCTOR, "Lesionados → saem do 11", "só se o plantel mostrar lesionado sem tratamento"),
+        Triple(ScreenType.LAWYER, "Suspensos → saem do 11", "só se o plantel mostrar vermelho e o advogado não estiver cuidando"),
         Triple(ScreenType.TRAINING, "Quem treina e quando termina → avisos e quem treinar", "a cada sessão (o app avisa quando acaba)"),
         Triple(ScreenType.MARKET, "Vagas na lista, vendas e mercado → dicas de venda/compra", "1x ao dia e depois de vender"),
         Triple(ScreenType.STADIUM, "Níveis e obra em andamento → aviso de fim de obra", "a cada obra"),
-        Triple(ScreenType.CALENDAR, "Rodadas, rivais e horários → próximo jogo e alarmes", "a cada 3 dias"),
+        Triple(ScreenType.CALENDAR, "Rodadas, rivais e horários → próximo jogo e alarmes", "1x por semana"),
         Triple(ScreenType.SPONSORS, "Contratos e valores → hora de renovar", "a cada 2–3 dias ou quando um contrato acabar"),
         Triple(ScreenType.SPECIALISTS, "Capitão, pênaltis, faltas, escanteios → sugestão", "quando mudar o time"),
         Triple(ScreenType.PREP, "Itens da preparação do jogo → o que falta fazer", "no dia do jogo"),
@@ -115,7 +124,8 @@ object Fresh {
             q == null -> add(ScreenType.SQUAD, 2, "ainda não li o plantel do seu time")
             // forma, lesões e cartões mudam depois de cada jogo: reler antes de montar a tática
             soon && q > 12 * H -> add(ScreenType.SQUAD, 1, "última leitura ${ago(q)}: forma e cartões antes do jogo")
-            q > 72 * H -> add(ScreenType.SQUAD, 0, "última leitura ${ago(q)}")
+            // leitura semanal: o comparativo de evolução (força, valor, idades) precisa de um ponto por semana
+            q > 7 * 24 * H -> add(ScreenType.SQUAD, 1, "leitura semanal (última ${ago(q)}): compara a evolução do elenco")
         }
         val p = age(ScreenType.PREGAME)
         if (gameIn != null && gameIn in 0L..(90 * 60000L) && (p == null || p > 60 * 60000L)) {
@@ -130,6 +140,8 @@ object Fresh {
         when {
             c == null && i.matchAt == null -> add(ScreenType.CALENDAR, 1, "ainda não sei quando é o próximo jogo")
             i.matchAt == null && c != null && c > 24 * H -> add(ScreenType.CALENDAR, 1, "não sei o próximo jogo (leitura ${ago(c)})")
+            c != null && i.calLag >= 2 -> add(ScreenType.CALENDAR, 1, "o calendário lido não chega às últimas rodadas (faltam ${i.calLag}): role até o fim para eu ter os resultados")
+            c != null && c > 7 * 24 * H -> add(ScreenType.CALENDAR, 1, "leitura semanal (última ${ago(c)}): confere rodadas, rivais e horários")
         }
         val sp = age(ScreenType.SPONSORS)
         when {
@@ -137,24 +149,30 @@ object Fresh {
             i.sponsorEnding && sp > 2 * 24 * H -> add(ScreenType.SPONSORS, 1, "contrato acabando: veja se já dá para renovar")
             sp > 3 * 24 * H -> add(ScreenType.SPONSORS, 0, "última leitura ${ago(sp)}: a comunidade revê os patrocínios a cada 2–3 dias")
         }
-        for ((t, why) in listOf(ScreenType.DOCTOR to "lesões", ScreenType.LAWYER to "suspensões")) {
-            val x = age(t)
-            val readAt = i.seen[t.name]
-            when {
-                soon && x == null -> add(t, 2, "o jogo é hoje e ainda não li ($why mudam o 11)")
-                x == null -> add(t, 1, "ainda não li ($why tiram jogadores do 11)")
-                // só muda depois de uma partida: se a leitura é de antes do último jogo, vale reler
-                i.lastMatchAt != null && readAt != null && readAt < i.lastMatchAt -> add(t, if (soon) 2 else 1, "teve jogo depois da última leitura: $why podem ter mudado")
-            }
-        }
+        // Médico/Advogado só quando o plantel mostra o problema (vermelho/lesionado) e ninguém está cuidando ainda
+        val lawyerBusy = i.timers.any { it.lawyer && it.at > i.now }
+        val doctorBusy = i.timers.any { it.doctor && it.at > i.now }
+        val lw = i.seen[ScreenType.LAWYER.name]
+        if (i.reds > 0 && !lawyerBusy && !i.noAppeal && (lw == null || (i.lastMatchAt != null && lw < i.lastMatchAt)))
+            add(ScreenType.LAWYER, if (soon) 2 else 1, "${i.reds} jogador(es) com cartão vermelho no plantel e o advogado não está cuidando: veja o recurso")
+        val dw = i.seen[ScreenType.DOCTOR.name]
+        if (i.injured > 0 && !doctorBusy && (dw == null || (i.lastMatchAt != null && dw < i.lastMatchAt)))
+            add(ScreenType.DOCTOR, if (soon) 2 else 1, "${i.injured} lesionado(s) sem tratamento em curso: veja o médico")
         val sc = age(ScreenType.SPECIALISTS)
         when {
             sc == null -> add(ScreenType.SPECIALISTS, 1, "ainda não li capitão, pênaltis, faltas e escanteios")
             sc > 7 * 24 * H -> add(ScreenType.SPECIALISTS, 0, "última leitura ${ago(sc)}")
         }
         val pr = age(ScreenType.PREP)
-        // a preparação só importa perto do jogo (é a lista que você cumpre antes de começar)
-        if (gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H)) add(ScreenType.PREP, 1, "falta pouco para o jogo: veja o que falta na preparação")
+        // a barra do pré-jogo já diz o nível: BOM/BOA/EXCELENTE não pede nada; CRÍTICO/FRACO/RAZOÁVEL pede a lista de afazeres
+        val prepRank = PrepLevel.rank(i.prepLevel)
+        // a lista de afazeres já foi aberta DEPOIS da última leitura do pré-jogo (que traz o nível): não cobra de novo, os itens pendentes já estão na lista
+        val prepListSeen = pr != null && (age(ScreenType.PREGAME).let { pg -> pg == null || pr <= pg })
+        if (gameIn != null && gameIn in 0L..(6 * H) && PrepLevel.low(i.prepLevel) && !prepListSeen)
+            add(ScreenType.PREP, if (prepRank == 0) 2 else 1, "preparação do jogo está ${i.prepLevel}: abra a lista de afazeres e conclua o que falta (cada item sobe o bônus)")
+        // sem leitura do nível: só cobra perto do jogo, como antes
+        else if (prepRank == null && gameIn != null && gameIn in 0L..(3 * H) && (pr == null || pr > 3 * H))
+            add(ScreenType.PREP, 1, "veja o que falta na preparação (menos de 3 h para o jogo): cada item feito sobe o bônus de preparação")
         if (i.timers.any { it.scout && it.at <= i.now }) add(ScreenType.SCOUT, 2, "o olheiro terminou a busca")
         val st = age(ScreenType.STATS)
         when {

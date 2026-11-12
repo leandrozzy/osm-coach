@@ -114,65 +114,383 @@ class FramePipeline private constructor(private val ctx: Context) {
     private var lastCheck = ""
     private var lastCheckAt = 0L
 
-    /** Tela de tática do OSM aberta: compara com a tática gerada e avisa por cima do jogo o que está diferente. */
+    /**
+     * Tela de Tática do OSM: guarda o que está montado (juntando as rolagens da mesma rodada) e marca o resumo para o fim da
+     * leitura. O aviso (confere / difere) só sai quando você deixa a tela: antes avisava a cada rolagem, com a tática meio lida.
+     */
+    /** Campo com os cartões do 11 ("7 KELMAN", "10 MOFFI"…): junta os números de camisa vistos (os cartões ficam atrás da bolha em alguns quadros). 11 distintos = onze completo. */
+    private suspend fun scanLineup(slot: Int, ocr: OcrResult, now: Long) {
+        val rx = Regex("^(\\d{1,2})\\s+[\\p{L}][\\p{L}.' -]{2,}$")
+        val nums = ocr.lines.filter { it.yc in 0.15f..0.95f && it.xc in 0.08f..0.92f }.mapNotNull { rx.find(it.text.trim())?.groupValues?.get(1)?.toIntOrNull() }.filter { it in 1..40 }
+        if (nums.size < 3) return
+        val old = dao.plan(slot, "lineup")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }?.takeIf { now - it.optLong("at") < 10 * 60_000L }
+        val set = HashSet<Int>()
+        old?.optJSONArray("n")?.let { a -> for (i in 0 until a.length()) set.add(a.optInt(i)) }
+        set.addAll(nums)
+        dao.putPlan(PlanEntity(slot, "lineup", JSONObject().put("n", org.json.JSONArray(set.toList())).put("at", now).put("full", set.size >= 11).toString(), now))
+    }
+
     private suspend fun checkTactic(slot: Int, ocr: OcrResult, now: Long) {
+        val f = repo.fieldMap(slot)
+        runCatching {
+            val seen = Parsers.tacticRead(ocr)
+            if (seen.length() > 0) {
+                val round = f[K.ROUND]?.value?.toIntOrNull() ?: -1
+                val old = dao.plan(slot, "tacmounted")?.json?.let { JSONObject(it) }?.takeIf { it.optInt("round", -2) == round && now - it.optLong("at") < 15 * 60_000L }
+                val merged = old ?: JSONObject()
+                for (k in seen.keys()) merged.put(k, seen.get(k))
+                dao.putPlan(PlanEntity(slot, "tacmounted", merged.put("at", now).put("round", round).toString(), now))
+            }
+        }
+        pending = Pending(slot, ScreenType.TACTIC, null)
+    }
+
+    /** O que está montado no OSM contra a tática gerada (formação, estilo, desarme com o árbitro, marcação). */
+    private suspend fun tacticSummary(slot: Int, now: Long): String? {
         val p = dao.plan(slot, "tactic")
         val j = p?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val f = repo.fieldMap(slot)
-        val msg = if (p == null || j == null || !Director.tacticValid(j, p.at, f, now)) {
-            "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
-        } else {
-            val w = Parsers.tacticCheck(ocr, j, f[K.REFEREE]?.value)
-            // igual ao gerado: a tarefa "montar a tática" está feita
-            if (w.isEmpty()) dao.putPlan(PlanEntity(slot, "tacticdone", JSONObject().put("at", p.at).toString(), now))
-            if (w.isEmpty()) "" else "⚠ S$slot: " + w.joinToString(" • ")
+        val farAway = (f[K.MATCH_AT]?.value?.toLongOrNull() ?: 0L).let { it > 0 && it - now > Director.TACTIC_WINDOW_MS }
+        if (p == null || j == null || !Director.tacticValid(j, p.at, f, now)) {
+            // jogo longe (fora das 8 h): a tática ainda nem deveria existir, não cobra
+            return if (farAway) null else "S$slot: sem tática gerada para este jogo. Gere no app antes de montar."
         }
-        if (msg.isEmpty() || (msg == lastCheck && now - lastCheckAt < 20000L)) return
-        lastCheck = msg
-        lastCheckAt = now
-        Diag.log("Tática no OSM → $msg")
-        CaptureService.instance?.notice(msg)
+        val m = dao.plan(slot, "tacmounted")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+        val w = Parsers.tacticDiff(m, j, f[K.REFEREE]?.value)
+        if (w.isEmpty()) {
+            dao.putPlan(PlanEntity(slot, "tacticdone", JSONObject().put("at", p.at).put("sig", Director.mountSig(j)).toString(), now))
+            return "✅ S$slot: a tática montada no OSM confere com a gerada."
+        }
+        return "⚠ S$slot: " + w.joinToString(" • ")
     }
     private val autoTacticAt = HashMap<Int, Long>()
+    private val lastNote = HashMap<Int, Pair<String, Long>>()
+
+    /** Aviso por cima do jogo; o mesmo texto não se repete em menos de 1 min por slot (avisos diferentes passam sempre). */
+    private fun note(slot: Int, text: String, now: Long, ttl: Long = 60_000L) {
+        val l = lastNote[slot]
+        if (l != null && l.first == text && now - l.second < ttl) return
+        lastNote[slot] = text to now
+        CaptureService.instance?.notice(text)
+    }
 
     /**
      * Gera a tática sozinho depois de ler o Pré-jogo ou a Análise do rival (só nas últimas horas antes do jogo e só se o
      * que importa mudou: rival, formação/estilo dele, força, árbitro, treino secreto). Avisa por cima do jogo quando
      * ficou pronta, para montar no OSM na hora.
      */
-    private suspend fun autoTactic(slot: Int, now: Long) {
-        if (Settings.get(ctx, "auto_tactic", "1") != "1") return
+    /**
+     * Compara o que o rival mostra agora (formação, estilo, marcação, fora-de-jogo, desarme, pressão, estilo, ritmo) com a
+     * última leitura deste mesmo jogo e diz se ele MUDOU ou MANTEVE a tática. Vale em qualquer hora antes do jogo.
+     */
+    private suspend fun rivalDelta(slot: Int, f: Map<String, StoredField>, now: Long): String? {
+        val keys = listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_PRESSURE, K.RIVAL_MENTALITY, K.RIVAL_TEMPO)
+        val labels = listOf("formação", "estilo", "marcação", "fora-de-jogo", "desarme", "pressão", "estilo (nível)", "ritmo")
+        val cur = keys.map { f[it]?.value?.takeIf { v -> v.isNotBlank() && FieldMerge.known(v) }.orEmpty() }
+        if (cur.count { it.isNotBlank() } < 2) return null
+        val tag = (f[K.ROUND]?.value ?: "") + "|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")
+        val oldJ = repo.dao.plan(slot, "rivalsnap")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val sameGame = oldJ?.optString("tag") == tag
+        // leitura feita há pouco, na mesma passada (fp): ainda é a primeira leitura, não dá para dizer "manteve"
+        val firstAt = oldJ?.optLong("first", 0L) ?: 0L
+        val inFirstPass = sameGame && oldJ?.optBoolean("fp", false) == true && now - firstAt < 10 * 60_000L
+        val old = if (sameGame && !inFirstPass) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
+        val prev = if (sameGame) (0 until keys.size).map { oldJ!!.optJSONArray("v")?.optString(it).orEmpty() } else null
+        val merged = cur.mapIndexed { i, v -> if (v.isNotBlank()) v else old?.get(i).orEmpty() }
+        val diffs = ArrayList<String>()
+        if (old != null) for (i in keys.indices) if (cur[i].isNotBlank() && old[i].isNotBlank() && !sameRivalValue(keys[i], cur[i], old[i])) diffs.add("${labels[i]} ${old[i]} → ${cur[i]}")
+        if (prev == null || merged != prev || (inFirstPass.not() && oldJ?.optBoolean("fp", false) == true)) {
+            val fresh = !sameGame
+            repo.dao.putPlan(PlanEntity(slot, "rivalsnap", JSONObject().put("tag", tag).put("v", org.json.JSONArray(merged)).put("at", now)
+                .put("first", if (fresh) now else firstAt).put("fp", fresh || inFirstPass).toString(), now))
+        }
+        val head = merged.getOrNull(0).orEmpty() + (merged.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: "")
+        val msg = when {
+            diffs.isNotEmpty() -> "⚠ S$slot: o rival MUDOU a tática: " + diffs.take(3).joinToString("; ") + ". Gere a tática de novo."
+            old != null -> "✅ S$slot: o rival MANTEVE a tática ($head)."
+            else -> "👀 S$slot: tática do rival lida ($head). Passe de novo perto do jogo para ver se ele muda."
+        }
+        // reanálise dos 20 min finais: guarda o veredito (a Véspera mostra feito/pendente) e avisa que é a conferência final
+        val mAt = f[K.MATCH_AT]?.value?.toLongOrNull()
+        if (mAt != null && mAt - now in 0..Reanalysis.WINDOW_MS) {
+            val verdict = if (diffs.isNotEmpty()) "mudou" else if (old != null) "manteve" else "lida"
+            repo.dao.putPlan(PlanEntity(slot, Reanalysis.PLAN, JSONObject().put("matchAt", mAt).put("at", now).put("verdict", verdict).put("detail", diffs.take(3).joinToString("; ")).toString(), now))
+            return "🔁 Reanálise (faltam ${(mAt - now) / 60000} min) — " + msg.removePrefix("⚠ ").removePrefix("✅ ").removePrefix("👀 ")
+        }
+        return msg
+    }
+
+    /** Mesmo valor apesar do ruído do OCR: formação/estilo canônicos, números ±4 (pressão/ritmo), texto por similaridade. */
+    private fun sameRivalValue(k: String, a: String, b: String): Boolean {
+        if (a.equals(b, ignoreCase = true)) return true
+        if (k == K.RIVAL_FORMATION || k == K.RIVAL_PLAN || k == K.RIVAL_MARKING || k == K.RIVAL_TACKLE) return !SigCompare.differs(k, a, b)
+        val na = a.filter { it.isDigit() }.toIntOrNull(); val nb = b.filter { it.isDigit() }.toIntOrNull()
+        if (na != null && nb != null && a.length <= 5 && b.length <= 5) return kotlin.math.abs(na - nb) <= 4
+        return Txt.sim(Txt.key(a), Txt.key(b)) >= 0.82
+    }
+
+    /**
+     * Tela em leitura (várias rolagens). A leitura só é "completa" quando o CONTEÚDO prova: a lista chegou ao fim (sobra espaço
+     * em branco embaixo da última linha) e as seções esperadas foram vistas. Nunca por tempo: você pode rolar rápido ou devagar.
+     */
+    private class Pending(val slot: Int, val type: ScreenType, val round: Int?, val seen: MutableSet<String> = HashSet()) {
+        var offFrames = 0
+        var endSeen = false
+        var done = false
+        val cats = HashSet<String>()
+        var ratings = false
+        var maxRound = 0
+        var lastSet: Set<String> = emptySet()
+        var moved = false
+        var still = 0
+        /** Último quadro mostrava goleiros (última seção do Plantel). */
+        var lastHadGk = false
+        /** Dono da lista (plantel): quadros rolados sem o título continuam a mesma leitura. */
+        var owner: String? = null
+    }
+    private var pending: Pending? = null
+    private var reportPassAt = 0L
+    private var reportPrev: ScreenType? = null
+
+    /** Chegou ao fim da lista: a última linha de conteúdo termina bem acima do rodapé da tela (há espaço em branco abaixo). */
+    private fun bottomReached(o: OcrResult): Boolean {
+        val ys = o.lines.filter { it.yc > 0.12f }.map { it.yc }
+        return ys.isNotEmpty() && ys.max() < 0.86f
+    }
+
+    private fun lowestRow(o: OcrResult): Float = o.lines.filter { it.yc > 0.12f }.maxOfOrNull { it.yc } ?: 1f
+
+    private suspend fun screenNote(slot: Int, type: ScreenType, ex: Extraction, ocr: OcrResult) {
+        val cur = pending?.takeIf { it.slot == slot && it.type == type }
+        val gap = bottomReached(ocr)
+        val pd: Pending = when (type) {
+            ScreenType.RESULT -> {
+                val r = ex.matchReport ?: return
+                (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (gap) it.endSeen = true } }
+            }
+            ScreenType.CALENDAR -> {
+                // o fim do calendário é sempre "Última rodada" + "Resumo da época": o quadro anterior é a última rodada
+                val endText = Txt.norm(ocr.fullText).contains("resumo da epoca")
+                if (ex.matches.size < 3 && !(cur != null && endText)) return
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (gap || endText) pd.endSeen = true }
+            }
+            ScreenType.SQUAD -> {
+                // rolada a lista, o título do time sai da tela: quadro sem dono continua a leitura em andamento (antes era descartado e o plantel nunca "chegava ao fim")
+                val own = ex.ownerTeam
+                val sameOwner = cur != null && (own == null || cur.owner == null || Txt.sim(Txt.key(own), Txt.key(cur.owner!!)) >= 0.8)
+                if (ex.players.size < 3 || (own == null && !sameOwner)) return
+                (if (sameOwner) cur!! else Pending(slot, type, null)).also { pd -> pending = pd; if (own != null) pd.owner = own; ex.players.forEach { p -> pd.seen.add(Txt.key(p.name)); p.cat?.let { c -> pd.cats.add(c) } }; if (gap && ex.players.any { it.cat == "GOL" }) pd.endSeen = true }
+            }
+            ScreenType.MARKET -> {
+                if (ex.listings.size < 3) return
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.listings.forEach { l -> pd.seen.add(Txt.key(l.name)) }; if (gap) pd.endSeen = true }
+            }
+            else -> return
+        }
+        pd.offFrames = 0
+        // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
+        // quadro "igual" = as MESMAS linhas nas MESMAS alturas (texto + altura em faixas de 0,02): rolar uma linha desloca todas as alturas,
+        // então um quadro que só ganhou 1 jogador novo embaixo NÃO é igual (antes valia ≥85% dos nomes e o plantel "terminava" no 1º goleiro)
+        val names = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) + "@" + Math.round(it.yc * 50f) }.toSet()
+        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.75f
+        if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
+        pd.still = if (same) pd.still + 1 else 0
+        // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
+        // Plantel e Mercado vão até os goleiros e a última linha cola no rodapé: não dá para exigir folga embaixo.
+        val hasGk = ex.players.any { it.cat == "GOL" } || ex.listings.any { it.cat == "GOL" }
+        val stalled = pd.moved && same && pd.still >= 1   // 2 quadros iguais seguidos (mesmas linhas, mesmas alturas): a lista parou mesmo
+        pd.lastSet = names
+        pd.lastHadGk = hasGk
+        // Mercado: lista parada (depois de rolar) já é o fim, qualquer que seja a ordem; Plantel: parada mostrando os goleiros (última seção)
+        if (stalled && (type == ScreenType.MARKET || (type == ScreenType.SQUAD && hasGk) || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
+        // Plantel: já li ao menos o elenco guardado (ou o mínimo de 18) com as 4 seções e o quadro atual mostra goleiros no fim = completo
+        if (type == ScreenType.SQUAD && hasGk && pd.moved && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))) {
+            val known = runCatching { repo.dao.playersOf(slot).size }.getOrDefault(0)
+            if (pd.seen.size >= maxOf(18, known) && ocr.lines.any { it.yc > 0.12f && it.yc >= 0.80f }) pd.endSeen = true
+        }
+        if (hasGk) pd.cats.add("GOL")
+        ex.listings.forEach { l -> l.cat?.let { c -> pd.cats.add(c) } }
+        if (!pd.done && complete(pd)) {
+            pd.done = true
+            summary(pd, true)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, System.currentTimeMillis()) }
+        }
+    }
+
+    private suspend fun complete(pd: Pending): Boolean {
+        val f = repo.fieldMap(pd.slot)
+        return when (pd.type) {
+            ScreenType.SQUAD -> pd.endSeen && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
+            ScreenType.MARKET -> pd.endSeen
+            ScreenType.CALENDAR -> {
+                // o total do OSM ("43") inclui jogos de copa ainda sem data/rival que o calendário nem lista: vale chegar à última rodada OU ao fim da lista
+                val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
+                pd.endSeen || (total != null && pd.maxRound >= total)
+            }
+            ScreenType.RESULT -> pd.endSeen && pd.ratings
+            else -> false
+        }
+    }
+
+    /** Resumo da tela. `complete`: a leitura chegou ao fim; senão diz que ficou incompleta (sem supor nada). */
+    private suspend fun summary(pd: Pending, complete: Boolean): String? {
+        val slot = pd.slot
+        val f = repo.fieldMap(slot)
+        val tail = if (complete) "" else " Leitura INCOMPLETA: role até o fim para concluir."
+        return when (pd.type) {
+            ScreenType.RESULT -> {
+                val rd = pd.round ?: ResultCtx.round ?: f[K.ROUND_DONE]?.value?.toIntOrNull()
+                val j = rd?.let { repo.dao.plan(slot, "mr_R$it")?.json?.let { s -> runCatching { JSONObject(s) }.getOrNull() } }
+                if (rd == null || j == null) null
+                else if (!j.has("sh")) "S$slot: Resultado da J$rd: não li o placar. Abra de novo e role a tela inteira (placar, estatísticas, notas)."
+                else {
+                    val st = j.optJSONObject("stats")?.length() ?: 0
+                    val rt = (j.optJSONArray("rh")?.length() ?: 0) + (j.optJSONArray("ra")?.length() ?: 0)
+                    val ev = j.optJSONArray("events")?.length() ?: 0
+                    val lacks = buildList { if (st < 7) add("estatísticas (até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
+                    (if (complete) "✅" else "⚠") + " S$slot: Resultado da J$rd: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
+                        (if (lacks.isEmpty()) (if (complete) " Completo: o aprendizado foi atualizado." else tail) else " Falta: " + lacks.joinToString(", ") + ".")
+                }
+            }
+            ScreenType.CALENDAR -> {
+                // as rodadas ficam guardadas: o total vem do banco (a passada só vê as que a tela mostrou), nunca "24" se há 43
+                val got = repo.dao.matchesOf(slot).mapNotNull { it.round }.toSet().size
+                val total = maxOf(f[K.ROUND_TOTAL]?.value?.toIntOrNull() ?: 0, pd.maxRound, got)
+                if (complete) "✅ S$slot: Calendário completo: $got de $total rodadas (até a última e o Resumo da época)."
+                else "⚠ S$slot: Calendário: $got de $total rodadas lidas (nesta passada vi ${pd.seen.size}).$tail"
+            }
+            ScreenType.SQUAD -> (if (complete) "✅ " else "⚠ ") + "S$slot: Plantel: li ${pd.seen.size} jogadores" + (if (complete) " (do goleiro ao ataque, até o fim da lista)." else ".$tail")
+            ScreenType.MARKET -> (if (complete) "✅ " else "⚠ ") + "S$slot: Mercado: li ${pd.seen.size} jogadores à venda" + (if (complete) " (até o fim da lista)." else ".$tail")
+            ScreenType.TACTIC -> tacticSummary(slot, System.currentTimeMillis())
+            else -> null
+        }
+    }
+
+    /** Você deixou a tela (ou encerrou): se a leitura não chegou ao fim, avisa que ficou incompleta; se já foi concluída, não repete. */
+    suspend fun flushPending() {
+        val pd = pending ?: return
+        pending = null
+        if (pd.done) return
+        // saiu da tela logo depois de chegar aos goleiros (última seção) com as 4 seções e ≥18 jogadores vistos: a lista foi até o fim
+        val atEnd = pd.type == ScreenType.SQUAD && pd.lastHadGk && pd.moved && pd.seen.size >= 18 && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
+        val txt = summary(pd, atEnd)
+        if (txt != null) { Diag.log("Resumo da tela → $txt"); note(pd.slot, txt, System.currentTimeMillis()) }
+    }
+
+    private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
+
+    /** Pré-jogo/Análise lidos com o jogo longe (fora das 8 h): diz o que foi lido e que a tática só sai nas 8 h antes (cada tela fala; o mesmo texto não repete em 1 min). */
+    private fun farNote(slot: Int, f: Map<String, StoredField>, type: ScreenType?, delta: String?, matchAt: Long, now: Long) {
+        fun v(k: String) = f[k]?.value?.takeIf { FieldMerge.known(it) }
+        val read = when (type) {
+            ScreenType.PREGAME -> {
+                val a = v(K.MY_STRENGTH); val b = v(K.RIVAL_STRENGTH)
+                if (a != null && b != null) "✅ S$slot: Pré-jogo lido — forças $a × $b." else "S$slot: Pré-jogo lido, mas não consegui ler as duas forças."
+            }
+            ScreenType.REPORT -> delta ?: run {
+                val fm = v(K.RIVAL_FORMATION); val pl = v(K.RIVAL_PLAN)
+                when {
+                    fm != null && pl != null -> "✅ S$slot: Análise do rival lida (formação $fm e estilo)."
+                    fm != null -> "S$slot: Análise do rival, tela 1 lida (formação $fm). Falta a 2ª tela (estilo e marcação)."
+                    pl != null -> "S$slot: Análise do rival, tela 2 lida. Falta a 1ª tela (formação)."
+                    else -> "S$slot: Análise do rival: não consegui ler formação nem estilo."
+                }
+            }
+            ScreenType.SQUAD -> "S$slot: Plantel do rival lido."
+            else -> return
+        }
+        val h = ((matchAt - now) / 3_600_000L).coerceAtLeast(0)
+        note(slot, "$read A tática só é gerada nas 8 h antes do jogo (faltam ${h} h).", now)
+    }
+
+    private suspend fun autoTactic(slot: Int, now: Long, type: ScreenType? = null) {
+        if (Settings.get(ctx, "auto_tactic", "1") != "1") { why(slot, "desligada em Ajustes"); return }
         val f = repo.fieldMap(slot)
         val st = f[K.SLOT_STATE]?.value
-        if (!(st == null || st == "ativo") || f[K.TEAM]?.value == null) return
-        val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull() ?: return
-        if (matchAt <= now + 60_000L || matchAt - now > Director.TACTIC_WINDOW_MS) return
+        if (!(st == null || st == "ativo") || f[K.TEAM]?.value == null) { why(slot, "slot sem competição ativa lida"); return }
+        val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
+        if (matchAt == null) { why(slot, "horário do jogo não lido"); return }
+        if (matchAt <= now + 60_000L) { why(slot, "jogo já começou"); return }
         if (Fixtures.seasonEnded(f, repo.dao.matchesOf(slot), now)) return
+        // "Mudou/manteve" só logo depois de LER a tela de Análise (últimos 90 s); em qualquer outra passada vale o checklist.
+        val secret = SecretTraining.on(f)
+        // a Análise tem 2 telas (1ª: formação; 2ª: estilo, marcação…): só compara quando as DUAS foram lidas nesta passada (antes cada tela avisava sozinha: "mudou", "manteve", "mudou" em 6 s)
+        val justRead = type == ScreenType.REPORT && listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN).all { k -> f[k]?.let { FieldMerge.known(it.value) && it.updatedAt >= reportPassAt } == true }
+        val gaps = Director.tacticGaps(f, now)
+        val check = Director.checklist(f, now)
+        val delta = if (justRead) runCatching { rivalDelta(slot, f, now) }.getOrNull() else null
+        delta?.let { why(slot, it.substringAfter(": ")) }
+        if (gaps.isNotEmpty()) {
+            why(slot, "faltam leituras: " + gaps.joinToString("; ") { it.first })
+            // longe do jogo (fora das 8 h) não há o que fazer agora: sem mensagem ao entrar no slot
+            if (matchAt - now > Director.TACTIC_WINDOW_MS) { farNote(slot, f, type, delta, matchAt, now); return }
+            val missing = Director.groups(f, now).filter { !it.ok }
+            val read = when (type) { ScreenType.PREGAME -> "Pré-jogo"; ScreenType.REPORT -> "Análise do rival"; ScreenType.SQUAD -> "Plantel do rival"; else -> null }
+            note(slot, (delta ?: ("S$slot:" + (read?.let { " $it lido." } ?: ""))) + " Falta ler: " +
+                missing.joinToString(" • ") { it.name.substringBefore(" (") + " (" + it.missing.joinToString(", ").take(60) + ")" } + ". Veja o caminho em Hoje → Para fazer.", now, 5 * 60_000L)
+            return
+        }
+        if (matchAt - now > Director.TACTIC_WINDOW_MS) {
+            farNote(slot, f, type, delta, matchAt, now)
+            return
+        }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
         if (now - (autoTacticAt[slot] ?: 0L) < 25_000L) return
-        val sig = listOf(
+        val sigKeys = listOf(
             K.ROUND, K.RIVAL_TEAM, K.RIVAL_NICK, K.RIVAL_STRENGTH, K.MY_STRENGTH, K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE,
             K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET, K.REFEREE, K.HOME
-        ).joinToString("|") { f[it]?.value.orEmpty() }
+        )
+        val sig = sigKeys.joinToString("|") { f[it]?.value.orEmpty() }
         val old = repo.dao.plan(slot, "autogen")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val p = repo.dao.plan(slot, "tactic")
         val valid = p != null && runCatching { Director.tacticValid(JSONObject(p.json), p.at, f, now) }.getOrDefault(false)
-        val same = old?.optString("sig") == sig
+        // o que mudou desde a última geração (força varia ±1 sozinha: não conta); sem registro anterior = tudo novo
+        val oldParts = old?.optString("sig")?.takeIf { it.isNotBlank() }?.split("|")
+        val changed = if (oldParts == null) sigKeys else sigKeys.filterIndexed { i, k -> SigCompare.differs(k, oldParts.getOrNull(i).orEmpty(), f[k]?.value.orEmpty()) }
+        val same = oldParts != null && changed.isEmpty()
+        val rivalTacticKeys = setOf(K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE, K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET)
+        // "o rival mudou a tática" só quando a ANÁLISE dele mudou; força, árbitro, bônus etc. são "dados do jogo"
+        // "o rival mudou a tática" só com a prova da Análise: duas leituras dela no MESMO jogo e diferentes (rivalDelta, "⚠ … MUDOU")
+        val rivalChanged = valid && delta?.startsWith("⚠") == true
+        val labels = mapOf(K.RIVAL_STRENGTH to "força do rival", K.MY_STRENGTH to "sua força", K.REFEREE to "árbitro", K.HOME to "casa/fora", K.RIVAL_NICK to "apelido do rival", K.RIVAL_TEAM to "adversário", K.ROUND to "rodada")
+        val dataChanged = changed.filter { it !in rivalTacticKeys }.mapNotNull { labels[it] }.distinct()
         // mesma leitura e tática válida: nada mudou. Mesma leitura sem tática válida (falhou antes): tenta de novo só após 5 min.
-        if (same && valid) return
+        if (same && valid) {
+            // só vira "conferido" quando a Análise foi lida AGORA (justRead); entrar no slot não confere o rival
+            val chk = if (justRead) now else old?.optLong("chk", 0L)?.takeIf { it > 0L }
+            repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { chk?.let { put("chk", it) } }.toString(), now))
+            // só avisa quando acabou de ler a Análise; entrar no slot não gera mensagem (o cartão já mostra o estado da tática)
+            if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
+            return
+        }
+        // só a força (dos dois times) mudou e a tática ainda vale: a força oscila e não muda a decisão; não regera nem avisa (só atualiza a assinatura)
+        val onlyStrength = valid && oldParts != null && changed.isNotEmpty() && changed.all { it == K.RIVAL_STRENGTH || it == K.MY_STRENGTH }
+        if (onlyStrength) {
+            repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { old?.optLong("chk", 0L)?.takeIf { it > 0L }?.let { put("chk", it) } }.toString(), now))
+            if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
+            return
+        }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
         repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", now).toString(), now))
         autoTacticAt[slot] = now
-        val rivalChanged = valid && old != null && !same
-        CaptureService.instance?.notice("S$slot: " + (if (rivalChanged) "o rival mudou; gerando a tática de novo…" else "gerando a tática…"))
+        val why1 = when {
+            rivalChanged -> "o rival mudou a tática; gerando de novo…"
+            valid && dataChanged.isNotEmpty() -> "mudou ${dataChanged.joinToString(", ")}; gerando a tática de novo…"
+            valid -> "leituras do rival atualizadas; gerando a tática de novo…"
+            else -> "gerando a tática…"
+        }
+        CaptureService.instance?.notice("S$slot: $why1")
+        val before = repo.dao.plan(slot, "tactic")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         startGeneration(ctx, "tactic", slot)
         AppScope.scope.launch {
             var waited = 0
             while (GenState.running("tactic", slot) && waited < 150) { delay(1000L); waited++ }
             val job = GenState.get("tactic", slot)
             val j = repo.dao.plan(slot, "tactic")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-            val msg = if (job?.ok == true && j != null) {
-                "✅ S$slot: tática pronta" + (if (rivalChanged) " (rival mudou)" else "") + ": ${j.optString("formation")} • ${j.optString("playStyle")}. Monte no OSM: toque em 📱 App ou abra a tela de Tática."
+            val unchanged = valid && job?.ok == true && j != null && before != null && j.optString("formation") == before.optString("formation") &&
+                j.optString("playStyle") == before.optString("playStyle") && j.optString("tackle") == before.optString("tackle")
+            val msg = if (unchanged) "✅ S$slot: refeita e a tática continua a mesma: ${j!!.optString("formation")} • ${j.optString("playStyle")}."
+            else if (job?.ok == true && j != null) {
+                "✅ S$slot: tática pronta" + (if (rivalChanged) " (rival mudou)" else if (valid && dataChanged.isNotEmpty()) " (${dataChanged.joinToString(", ")} mudou)" else "") + ": ${j.optString("formation")} • ${j.optString("playStyle")}. Monte no OSM: toque em 📱 App ou abra a tela de Tática."
             } else "⚠ S$slot: não consegui gerar a tática sozinho" + (job?.error?.let { ": $it" } ?: "") + ". Gere no app."
             CaptureService.instance?.notice(msg)
             // o rival pode ter mudado enquanto gerava (Análise lida logo depois do Pré-jogo): confere de novo
@@ -276,7 +594,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         ScreenType.MARKET -> Parsers.market(ocr)
         ScreenType.REPORT -> Parsers.report(ocr)
         ScreenType.STADIUM -> Parsers.stadium(ocr, img, now)
-        ScreenType.RESULT -> Parsers.matchResult(ocr)
+        ScreenType.RESULT -> Parsers.matchResult(ocr, img)
         ScreenType.TRAINING -> Extraction(ScreenType.TRAINING, trainees = Parsers.training(ocr, now))
         ScreenType.PREP -> Extraction(ScreenType.PREP, extra = Screens.prep(ocr, img))
         ScreenType.DOCTOR, ScreenType.LAWYER -> Extraction(type, extra = Screens.roster(ocr))
@@ -317,31 +635,172 @@ class FramePipeline private constructor(private val ctx: Context) {
      * escudo na hora; o mesmo time renova no máx. 1x a cada 6 h. Slot vazio/procurando não tem escudo: fica o antigo.
      */
     private fun saveCrests(bmp: Bitmap, cards: List<HubCard>) {
-        val dir = File(ctx.filesDir, "crests").apply { mkdirs() }
         for (card in cards) {
             if (card.state != null && card.state != "preepoca") continue
-            val slot = card.slot
-            val f = File(dir, "s$slot.png")
-            val tag = File(dir, "s$slot.txt")
-            val team = Txt.key(card.team)
-            val sameTeam = team.isNotEmpty() && tag.exists() && runCatching { tag.readText() }.getOrNull() == team
-            if (f.exists() && sameTeam && System.currentTimeMillis() - f.lastModified() < 6L * 3600L * 1000L) continue
-            val cx = (if (slot % 2 == 1) 0.5867f else 0.7953f) + card.dx
-            val cy = (if (slot <= 2) 0.263f else 0.711f) + card.dy
-            val x = ((cx - 0.04f) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
-            val y = ((cy - 0.09f) * bmp.height).toInt().coerceIn(0, bmp.height - 2)
-            val w = (0.08f * bmp.width).toInt().coerceAtMost(bmp.width - x)
-            val hh = (0.18f * bmp.height).toInt().coerceAtMost(bmp.height - y)
-            if (w < 8 || hh < 8) continue
-            try {
-                val crop = Bitmap.createBitmap(bmp, x, y, w, hh)
-                FileOutputStream(f).use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                crop.recycle()
-                if (team.isNotEmpty()) tag.writeText(team)
-            } catch (e: Exception) {
-                Diag.lastError = "Escudo: " + (e.message ?: "erro")
-            }
+            if (card.team.isBlank()) continue
+            val cx = (if (card.slot % 2 == 1) 0.5867f else 0.7953f) + card.dx
+            val cy = (if (card.slot <= 2) 0.263f else 0.711f) + card.dy
+            // escudo do clube do slot no arquivo global por nome (só grava o que ainda não existe e só se for mesmo um escudo)
+            if (CrestCut.find(ctx.filesDir, card.team) != null) continue
+            try { if (CrestCut.save(ctx.filesDir, bmp, card.team, cx, cy, 0.10f, 0.20f, expW = 0.065f, expH = 0.155f)) UiBus.bump() }
+            catch (e: Exception) { Diag.lastError = "Escudo: " + (e.message ?: "erro") }
         }
+    }
+
+    /**
+     * O OCR da tela inteira às vezes perde ou corta o número da força de uma linha ("74" vira "7" ou some) e o jogador ficava com "?".
+     * Para cada jogador sem força (e com setor conhecido) lê de novo SÓ a faixa das colunas Ata/Def/Med daquela linha, ampliada 3×:
+     * o OCR de um recorte pequeno acerta onde o da tela falhou. A força é a coluna do setor (ATA→Ata, MEI→Med, DEF/GOL→Def).
+     */
+    private suspend fun repairStrength(bmp: Bitmap, ex: Extraction): Extraction {
+        val need = ex.players.filter { it.strength == null && it.cat != null && it.natY != null }.take(8)
+        if (need.isEmpty()) return ex
+        val fixed = HashMap<String, Int>()
+        for (p in need) {
+            val y = p.natY!!
+            val x0 = (0.640f * bmp.width).toInt(); val x1 = (0.775f * bmp.width).toInt()
+            val y0 = ((y - 0.030f) * bmp.height).toInt().coerceAtLeast(0); val y1 = ((y + 0.030f) * bmp.height).toInt().coerceAtMost(bmp.height)
+            if (x1 - x0 < 20 || y1 - y0 < 12) continue
+            val crop = Bitmap.createBitmap(bmp, x0, y0, x1 - x0, y1 - y0)
+            val big = Bitmap.createScaledBitmap(crop, crop.width * 3, crop.height * 3, true)
+            val r = OcrEngine.read(big)
+            crop.recycle(); big.recycle()
+            val col = when (p.cat) { "ATA" -> 0.663f; "MEI" -> 0.737f; else -> 0.70f }
+            val v = r.tokens.mapNotNull { t ->
+                val n = t.text.trim().toIntOrNull() ?: return@mapNotNull null
+                val fx = 0.640f + t.xc * 0.135f
+                if (n in 30..120 && Math.abs(fx - col) <= 0.02f) Pair(Math.abs(fx - col), n) else null
+            }.minByOrNull { it.first }?.second
+            if (v != null) fixed[Txt.key(p.name)] = v
+        }
+        if (fixed.isEmpty()) return ex
+        Diag.log("Força relida por recorte: " + fixed.size + " jogador(es)")
+        return ex.copy(players = ex.players.map { p -> fixed[Txt.key(p.name)]?.let { p.copy(strength = it) } ?: p })
+    }
+
+    /** Miniatura NÍTIDA (WebP, ~44×30) de uma região da captura inteira, em base64; null se quase tudo escuro. */
+    private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int, refine: Boolean = false): Pair<Float, String>? = try {
+        val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
+        val y = ((cy - h / 2) * bmp.height).toInt().coerceIn(0, bmp.height - 2)
+        val ww = (w * bmp.width).toInt().coerceAtMost(bmp.width - x)
+        val hh = (h * bmp.height).toInt().coerceAtMost(bmp.height - y)
+        if (ww < 8 || hh < 8) null else {
+            var crop = Bitmap.createBitmap(bmp, x, y, ww, hh)
+            if (refine) {
+                // o recorte vem maior que a bandeira (~35×24 px em 1280×564); acha a caixa real e recorta nela (sem sobra à direita/esquerda)
+                val cpx = IntArray(ww * hh); crop.getPixels(cpx, 0, ww, 0, 0, ww, hh)
+                val box = Flags.flagBox(cpx, ww, hh, (0.0273f * bmp.width).toInt(), (0.0426f * bmp.height).toInt())
+                if (box != null) {
+                    val bx = (box[0] - 1).coerceAtLeast(0); val by = (box[1] - 1).coerceAtLeast(0)
+                    val bw2 = (box[2] + 2).coerceAtMost(ww) - bx; val bh2 = (box[3] + 2).coerceAtMost(hh) - by
+                    if (bw2 >= 8 && bh2 >= 8) { val c2 = Bitmap.createBitmap(crop, bx, by, bw2, bh2); crop.recycle(); crop = c2 }
+                }
+            }
+            val small = Bitmap.createScaledBitmap(crop, outW, outH, true)
+            val px = IntArray(outW * outH); small.getPixels(px, 0, outW, 0, 0, outW, outH)
+            val dark = px.count { ((it shr 16 and 0xFF) + (it shr 8 and 0xFF) + (it and 0xFF)) < 120 }
+            val os = java.io.ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.WEBP_LOSSY, 92, os)
+            if (crop !== small) crop.recycle(); small.recycle()
+            // nitidez: quadro em movimento (rolagem) borra a bandeira; o gradiente médio é menor. Guarda o MAIS nítido de cada jogador.
+            fun g(c: Int) = ((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3
+            var grad = 0L; var n = 0
+            for (yy in 0 until outH - 1) for (xx in 0 until outW - 1) {
+                val c0 = g(px[yy * outW + xx]); grad += Math.abs(c0 - g(px[yy * outW + xx + 1])) + Math.abs(c0 - g(px[(yy + 1) * outW + xx])); n++
+            }
+            if (dark > px.size * 0.8) null else Pair(grad.toFloat() / n.coerceAtLeast(1), android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP))
+        }
+    } catch (e: Exception) { null }
+
+    /** Bandeira de cada jogador do Plantel, recortada da captura em resolução cheia (plano `natimg`: nameKey -> WebP base64). */
+    private val lastRowY = HashMap<Int, Map<String, Float>>()
+    private suspend fun saveFlagThumbs(bmp: Bitmap, slot: Int, players: List<PlayerRead>) {
+        // lista em movimento (rolagem) = bandeira borrada: compara a altura das linhas com o quadro anterior e só recorta com a lista parada
+        val ys = players.mapNotNull { p -> p.natY?.let { Txt.key(p.name) to it } }.toMap()
+        val prev = lastRowY.put(slot, ys)
+        if (prev != null) {
+            val d = ys.mapNotNull { (k, y) -> prev[k]?.let { Math.abs(it - y) } }
+            if (d.size >= 2 && d.sorted()[d.size / 2] > 0.003f) return
+        }
+        FlagWeb.ensureAll(ctx)   // bandeiras de referência (Flagpedia) para descobrir o país
+        val mine = repo.dao.playersOf(slot).filter { it.owner == "MY" }
+        // chave do jogador = a MESMA do banco (o OCR varia "Fabinho II"/"Fabinho I|": chaves soltas deixavam bandeiras borradas sem par)
+        fun canon(p: PlayerRead): String {
+            val k = Txt.key(p.name)
+            return mine.firstOrNull { it.nameKey == k }?.nameKey
+                ?: mine.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+        }
+        val cur = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        // referência de nitidez = a MEDIANA das guardadas (com o máximo, uma bandeira de alto contraste como a dos EUA, q≈78, fazia recusar todas as
+        // novas, q≈20–31: o Fabinho II ficou sem recorte nenhum e só tinha a miniatura de 8×5 células)
+        val qs = cur.keys().asSequence().mapNotNull { Flags.imgQuality(cur.optString(it)) }.sorted().toList()
+        val refQ = if (qs.isEmpty()) 0f else qs[qs.size / 2]
+        var n = 0
+        for (p in players) {
+            val x = p.natX ?: continue; val y = p.natY ?: continue
+            val key = canon(p)
+            if (key.isBlank()) continue
+            val old = Flags.imgQuality(cur.optString(key))
+            val t = thumb(bmp, x, y, 0.040f, 0.062f, 48, 32, refine = true) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
+            // sem imagem boa ainda: só entra se não for bem mais borrada que as já guardadas; depois só troca por uma mais nítida
+            val ok = if (old == null) (refQ <= 0f || t.first >= refQ * 0.6f) else t.first > old * 1.08f + 1f
+            if (ok) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
+        }
+        if (n > 0) {
+            repo.dao.putPlan(PlanEntity(slot, "natimg3", cur.toString(), System.currentTimeMillis())); UiBus.bump()
+            runCatching { updateFlagBank(cur) }
+        }
+    }
+
+    /** Banco global de bandeiras (plano `natbank`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
+    private suspend fun updateFlagBank(imgs: JSONObject) {
+        val bank = repo.dao.plan(0, "natbank")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val atlas = Atlas.load(repo, Atlas.Kind.NAT)
+        var ch = 0
+        for (k in imgs.keys()) {
+            val v = imgs.optString(k)
+            val c = FlagIdent.identify(ctx.filesDir, v, atlas) ?: continue   // banco por código ISO do país
+            val old = Flags.imgQuality(bank.optString(c))
+            val q = Flags.imgQuality(v) ?: 0f
+            if (old == null || q > old * 1.08f + 1f) { bank.put(c, v); ch++ }
+        }
+        if (ch > 0) repo.dao.putPlan(PlanEntity(0, "natbank", bank.toString(), System.currentTimeMillis()))
+    }
+
+    /** Faixa de clubes do topo do Calendário: escudo + nome de cada clube da liga (um por clube; só grava o que ainda não existe). */
+    private fun saveStripCrests(bmp: Bitmap, spots: List<CrestSpot>) {
+        for (s in spots) CrestWeb.request(ctx, s.team)
+        for (s in spots) {
+            if (CrestCut.find(ctx.filesDir, s.team) != null) continue
+            try { if (CrestCut.save(ctx.filesDir, bmp, s.team, s.x, s.y, 0.075f, 0.125f, expW = 0.043f, expH = 0.10f)) UiBus.bump() } catch (e: Exception) { Diag.lastError = "Escudo da liga: " + (e.message ?: "erro") }
+        }
+    }
+
+    private fun saveCalendarCrests(bmp: Bitmap, matches: List<MatchRead>) {
+        for (m in matches) CrestWeb.request(ctx, m.opponent)
+        for (m in matches) {
+            // card de jogo JÁ JOGADO mostra o placar onde ficaria o escudo: só cards sem placar têm escudo
+            if (m.scoreMine != null || m.scoreOpp != null || m.result != null) continue
+            val cx = m.crestX ?: continue; val cy = m.crestY ?: continue
+            val team = m.opponent ?: continue
+            if (CrestCut.find(ctx.filesDir, team) != null) continue
+            try { if (CrestCut.save(ctx.filesDir, bmp, team, cx, cy, 0.08f, 0.15f, expW = 0.0525f, expH = 0.125f)) UiBus.bump() } catch (e: Exception) { Diag.lastError = "Escudo do calendário: " + (e.message ?: "erro") }
+        }
+    }
+
+    /** Os dois escudos do Pré-jogo (o rival e o meu) entram no arquivo global por nome do time (o escudo de um clube não muda). */
+    private fun savePregameCrest(bmp: Bitmap, ex: Extraction) {
+        val rival = ex.fields[K.RIVAL_TEAM]?.value?.takeIf { it.isNotBlank() } ?: return
+        val home = ex.fields[K.HOME]?.value ?: return
+        val mineLeft = home == "Casa"
+        CrestWeb.request(ctx, rival); CrestWeb.request(ctx, ex.fields[K.TEAM]?.value)
+        try {
+            if (CrestCut.find(ctx.filesDir, rival) == null &&
+                CrestCut.save(ctx.filesDir, bmp, rival, if (mineLeft) 0.767f else 0.233f, 0.258f, 0.10f, 0.17f, expW = 0.065f, expH = 0.158f)) UiBus.bump()
+            ex.fields[K.TEAM]?.value?.takeIf { CrestCut.find(ctx.filesDir, it) == null }?.let { mine ->
+                if (CrestCut.save(ctx.filesDir, bmp, mine, if (mineLeft) 0.233f else 0.767f, 0.258f, 0.10f, 0.17f, expW = 0.065f, expH = 0.158f)) UiBus.bump()
+            }
+        } catch (e: Exception) { Diag.lastError = "Escudo do Pré-jogo: " + (e.message ?: "erro") }
     }
 
     suspend fun onShot(sessionId: String, bmp: Bitmap) {
@@ -396,6 +855,8 @@ class FramePipeline private constructor(private val ctx: Context) {
                 lastProcessed = h
                 return
             }
+            // telas de filtro Nacionalidade/Liga: aprende bandeira + nome (Atlas, global)
+            Atlas.detect(ocr)?.let { k -> runCatching { Atlas.learn(repo, ocr, img, k, now) } }
             val type = ScreenClassifier.classify(ocr, topBar)
             Diag.currentType = type.name
             lastType = type
@@ -407,15 +868,26 @@ class FramePipeline private constructor(private val ctx: Context) {
                 }.take(4000))
             }
             lastProcessed = h
+            // campo com os 11 (Equipa inicial) pode cair em NOISE/OTHER: conta os cartões antes de descartar
+            if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { scanLineup(sl, ocr, now) } }
             if (type == ScreenType.NOISE || type == ScreenType.NON_OSM) {
                 Diag.discarded.incrementAndGet()
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")
                 return
             }
+            // passou para outra tela: fecha o resumo da anterior (Resultado, Calendário, Plantel, Mercado, Tática)
+            // saiu da tela em leitura: 2 quadros seguidos de outra tela (não por tempo; telas intermediárias da rolagem, OTHER_OSM, não contam)
+            pending?.let { pd ->
+                if (pd.type == type) pd.offFrames = 0
+                else if (type != ScreenType.OTHER_OSM) { pd.offFrames++; if (pd.offFrames >= 2) runCatching { flushPending() } }
+            }
+            // início da passada pela Análise do rival: as 2 telas dela precisam ser lidas DEPOIS daqui (conteúdo, não relógio)
+            if (type != ScreenType.OTHER_OSM) { if (type == ScreenType.REPORT && reportPrev != ScreenType.REPORT) reportPassAt = now; reportPrev = type }
             Diag.valid.incrementAndGet()
             lastOsmAcceptedAt = now
 
             var ex = parse(ocr, type, img, now)
+            if (type == ScreenType.SQUAD) ex = runCatching { repairStrength(bmp, ex) }.getOrDefault(ex)
             Diag.parsed.incrementAndGet()
 
             // Rolando a lista o cabeçalho some: reaproveita o dono lido por último (mesmo tipo e slot, até 10 min).
@@ -484,6 +956,12 @@ class FramePipeline private constructor(private val ctx: Context) {
                 noSlot.clear()
             }
             var changed = repo.apply(asg.slot, ex, "ocr", now)
+            if (changed > 0) UiBus.bump()   // tudo o que a captura gravou aparece no app sozinho
+            if (asgSlot != null && type == ScreenType.SQUAD && (ex.ownerTeam != null || pending?.let { it.slot == asgSlot && it.type == ScreenType.SQUAD } == true) && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
+            if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, ex)
+            // o Calendário mostra o escudo de cada rival: guarda uma vez por clube (só grava o que ainda não tem)
+            if (type == ScreenType.CALENDAR) { saveCalendarCrests(bmp, ex.matches); saveStripCrests(bmp, ex.crests) }
+            runCatching { Parsers.bossCoins(ocr)?.let { Coins.saveBalance(repo, it, now) } }
             runCatching { repo.smartReads(asg.slot, type, ocr, now) }
             // Fim da competição / diretoria: não é tela de adversário. Vai para o aprendizado do slot (reconhecido pela
             // navegação ou pelo nome do meu time na classificação) e "a época acabou" encerra a competição do slot.
@@ -500,8 +978,13 @@ class FramePipeline private constructor(private val ctx: Context) {
                     Diag.log("Fim de temporada/direção → S$ss" + (sr.rank?.let { " (${it}º lugar)" } ?: "") + (if (sr.over) " • competição encerrada" else ""))
                 }
             }
-            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT) && asgSlot != null && changed > 0) {
-                try { autoTactic(asgSlot, now) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
+            val rivalSquad = type == ScreenType.SQUAD && asgSlot != null && ex.ownerTeam != null &&
+                Txt.key(repo.fieldMap(asgSlot)[K.RIVAL_TEAM]?.value ?: "").let { rk -> rk.length >= 3 && Txt.sim(Txt.key(ex.ownerTeam), rk) >= 0.8 }
+            if ((type == ScreenType.PREGAME || type == ScreenType.REPORT || rivalSquad) && asgSlot != null) {
+                try { autoTactic(asgSlot, now, type) } catch (e: Exception) { Diag.lastError = "Tática automática: " + (e.message ?: e.javaClass.simpleName) }
+            }
+            if (asgSlot != null && type != ScreenType.PREGAME && type != ScreenType.REPORT && !rivalSquad) {
+                try { screenNote(asgSlot, type, ex, ocr) } catch (e: Exception) { Diag.lastError = "Aviso de leitura: " + (e.message ?: "") }
             }
             if (type == ScreenType.TACTIC && asgSlot != null) {
                 try { checkTactic(asgSlot, ocr, now) } catch (e: Exception) { Diag.lastError = "Conferir tática: " + (e.message ?: "") }
@@ -690,5 +1173,20 @@ class FramePipeline private constructor(private val ctx: Context) {
         onStep(list.size, list.size)
         for (slot in 1..4) runCatching { repo.syncRound(slot) }
         return ReplayResult(list.size, read, fields, bySlot)
+    }
+}
+
+/** Compara o valor guardado com o lido agora de cada campo da assinatura da tática (tolerante ao ruído do OCR). */
+object SigCompare {
+    fun differs(k: String, a: String, b: String): Boolean = when {
+        a == b -> false
+        // campo que sumiu ou ainda não foi lido não é "mudança" (o OCR do pré-jogo pisca entre leituras)
+        a.isBlank() || b.isBlank() -> false
+        (k == K.RIVAL_STRENGTH || k == K.MY_STRENGTH) && a.toIntOrNull() != null && b.toIntOrNull() != null -> kotlin.math.abs(a.toInt() - b.toInt()) > 1
+        // nome do time/apelido: o OCR troca letras ("VfB Stuttgart II" × "Vfb Stuttgart ll"); só é outro adversário se for bem diferente
+        k == K.RIVAL_TEAM || k == K.RIVAL_NICK -> Txt.sim(Txt.key(a), Txt.key(b)) < 0.8
+        k == K.RIVAL_FORMATION -> (Formations.canonical(a) ?: a) != (Formations.canonical(b) ?: b)
+        k == K.RIVAL_PLAN -> (Osm.style(a) ?: Txt.key(a)) != (Osm.style(b) ?: Txt.key(b))
+        else -> Txt.key(a) != Txt.key(b)
     }
 }

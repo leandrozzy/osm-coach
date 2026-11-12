@@ -98,6 +98,14 @@ class ParsersTest {
         assertTrue(ex.humans.values.none { it == "25 Anniversary" })
     }
 
+    @Test fun rivalWithStrengthAndNoUserUnderTheNameIsCpu() {
+        val lines = Fx.pregameLines().filter { it.text != "ChicoR78" } + Fx.line("70", 0.34f, 0.28f)
+        val ex = Parsers.pregame(Fx.ocr(*lines.toTypedArray()), null, 0L)
+        assertEquals("70", ex.fields[K.RIVAL_STRENGTH]?.value)
+        assertEquals("Não", ex.fields[K.RIVAL_HUMAN]?.value)
+        assertNull(ex.fields[K.RIVAL_NICK])
+    }
+
     @Test fun rivalNickIsKeptEvenWhenMyNickIsNotRead() {
         val lines = Fx.pregameLines().filter { it.text != "leandrozzy" }
         val ex = Parsers.pregame(Fx.ocr(*lines.toTypedArray()), null, 0L)

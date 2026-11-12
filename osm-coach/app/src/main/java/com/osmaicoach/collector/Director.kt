@@ -142,6 +142,10 @@ object Director {
         val fields = JSONObject()
         for ((k, v) in f) if (FieldMerge.known(v.value)) fields.put(k, v.value)
         ctx.put("campos", fields)
+        SlotRules.load(repo, slot)?.let { r ->
+            ctx.put("regras_especiais_da_liga", SlotRules.promptText(r))
+            SlotRules.promptExtra(r, SlotRules.gather(repo, slot, r, f, System.currentTimeMillis())).takeIf { it.isNotBlank() }?.let { ctx.put("situacao_nas_regras", it) }
+        }
         if (mustWin(f)) {
             ctx.put("batalha", "SIM: só a VITÓRIA conta (empate quase não ajuda). Busque vencer: mais gente na frente e mentalidade mais ofensiva, sem se expor a ponto de perder.")
         }
@@ -210,6 +214,10 @@ object Director {
             "Regras: não escolha sempre 4-3-3; use a composição do elenco e o adversário. Formações do OSM (nome exato, com a letra): ${Formations.ALL}. " +
             "Valores exatos do jogo: playStyle ${Osm.STYLES}; marking ${Osm.MARKING}; tackle ${Osm.TACKLES}; advAttack ${Osm.ATTACK}; " +
             "advMid ${Osm.MIDFIELD}; advDef ${Osm.DEFENSE}. " +
+            "OBJETIVO: VENCER o jogo (vitória = 3 pontos; empate só é aceitável quando o adversário é claramente mais forte). Raciocine como um técnico experiente: " +
+            "compare os setores (ataque, meio, defesa, goleiro) dos dois times, use o histórico deste slot e dos outros 3 (campo \"aprendizado\"/\"historico\" dos dados: formação e estilo que deram pontos, gols feitos e sofridos), " +
+            "NÃO repita formação+estilo que perdeu 2 vezes ou mais, prefira o que marcou gols contra humanos, e se o time sofre muitos gols reforce o meio/defesa sem abrir mão de finalizar. " +
+            "Se o adversário é humano, ele pode ter trocado a tática: escolha algo que funcione contra as 2–3 táticas mais prováveis dele. " +
             "árbitro \"Rigoroso\" => desarme NÃO agressivo; sliders são números inteiros de 0 a 100. " +
             "Responda APENAS JSON com as chaves: formation (ex.: \"4-5-1\"), playStyle (ex.: \"Jogo de passe\", \"Jogar pelas alas\", \"Remate à vista\"), " +
             "pressure (0-100), mentality (0-100, estilo ofensivo/defensivo), tempo (0-100, temporização), " +
@@ -281,7 +289,7 @@ object Director {
             rivalFormation = f[K.RIVAL_FORMATION]?.value?.takeIf { FieldMerge.known(it) } ?: repo.rivalProfileFormation(slot),
             myDef = f[K.MY_DEF]?.value?.toIntOrNull(),
             rivalAtk = f[K.RIVAL_ATK]?.value?.toIntOrNull(),
-            referee = f[K.REFEREE]?.value,
+            referee = refereeNow(f),
             home = boolOf(f[K.HOME]?.value, "Casa", "Fora"),
             history = history(repo, slot),
             myAtk = f[K.MY_ATK]?.value?.toIntOrNull(),
@@ -302,9 +310,60 @@ object Director {
     suspend fun allLogs(repo: Repo): List<JSONObject> =
         (1..4).flatMap { s ->
             repo.dao.tacticLogs(s).mapNotNull { p ->
-                runCatching { JSONObject(p.json).also { if (p.kind.startsWith("tlog_X")) it.put("archived", true) } }.getOrNull()
+                runCatching { JSONObject(p.json).also { it.put("genAt", p.at); if (p.kind.startsWith("tlog_X")) it.put("archived", true) } }.getOrNull()
             }
         }
+
+    /** Conhecimento dos seus jogos contra humanos + a lição da IA do último jogo deste slot (vale por poucos jogos). */
+    suspend fun priorFor(repo: Repo, slot: Int, diff: Int?): HumanPrior.Prior? {
+        val base = HumanPrior.build(allLogs(repo), diff) ?: return null
+        val round = repo.fieldMap(slot)[K.ROUND]?.value?.toIntOrNull()
+        val lesson = repo.dao.plan(slot, "lesson")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        return base.withLesson(HumanPrior.lessonFromJson(lesson, round))
+    }
+
+    /**
+     * Depois de cada jogo com resultado novo, a IA faz a análise do que deu certo/errado (olhando a tática, as forças,
+     * posse/chutes e os últimos jogos) e devolve o que evitar e o que repetir. A lição vale por 3 jogos e entra na nota
+     * das táticas e no pedido à IA: o app muda sozinho, sem alterar código. Sem IA configurada, nada acontece.
+     */
+    suspend fun learnFromLastGames(ctx: Context, repo: Repo, slot: Int) {
+        resolveTacticLogs(repo, slot)
+        val logs = repo.dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }
+            .mapNotNull { p -> runCatching { JSONObject(p.json) }.getOrNull() }
+            .filter { it.optString("result") in listOf("V", "E", "D") }.sortedBy { it.optInt("round") }
+        val last = logs.lastOrNull() ?: return
+        val round = last.optInt("round", -1)
+        if (round < 0) return
+        val old = repo.dao.plan(slot, "lesson")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (old?.optInt("round", -1) == round) return
+        if (!AiClient.hasAnyKey(ctx)) return
+        // uma tentativa por jogo a cada 30 min: se a IA falhar, cada geração automática não pode repetir a chamada (até 45 s)
+        val tried = repo.dao.plan(slot, "lessontry")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (tried?.optInt("round", -1) == round && System.currentTimeMillis() - tried.optLong("at") < 30L * 60_000L) return
+        repo.dao.putPlan(PlanEntity(slot, "lessontry", JSONObject().put("round", round).put("at", System.currentTimeMillis()).toString(), System.currentTimeMillis()))
+        val recent = logs.takeLast(5)
+        fun line(j: JSONObject) = "J${j.optInt("round")} ${j.optString("result")} ${j.opt("scoreMine")}-${j.opt("scoreOpp")} • minha ${j.opt("formation")} / ${j.opt("playStyle")} / estilo ${j.opt("mentality")} pressão ${j.opt("pressure")} ritmo ${j.opt("tempo")} / avançados ${j.opt("advAttack")} • força ${j.opt("myStrength")} x ${j.opt("rivalStrength")} • rival ${j.optString("rivalFormationRead")} ${j.optString("rivalStyleRead")}" +
+            (if (j.has("myPossession")) " • posse ${j.opt("myPossession")}% chutes ${j.opt("myShots")} x ${j.opt("oppShots")}" else "")
+        val prior = HumanPrior.build(allLogs(repo), null)
+        val prompt = "Você é o analista tático do OSM 26. Analise o ÚLTIMO jogo e os anteriores deste time e devolva uma LIÇÃO curta para a próxima tática. " +
+            "Use SÓ os dados abaixo; não invente. Prefira mudar o que perdeu mais de uma vez; não condene uma escolha por 1 derrota contra rival bem mais forte.\n" +
+            "Últimos jogos (mais recente por último):\n" + recent.joinToString("\n") { line(it) } + "\n" +
+            (prior?.let { HumanPrior.promptText(it) + "\n" } ?: "") +
+            "Formações válidas: ${Formations.BASES.joinToString()}. Estilos válidos: ${Osm.STYLES.joinToString()}.\n" +
+            "Responda SOMENTE um JSON: {\"cause\":\"causa provável em 1 frase\",\"avoid\":[{\"formation\":\"...\",\"style\":\"...\"}],\"prefer\":[{\"formation\":\"...\",\"style\":\"...\"}],\"text\":\"lição em até 2 frases\"}. " +
+            "No máximo 2 itens em avoid e 2 em prefer; deixe formation ou style vazio quando a lição valer só para um deles."
+        val reply = runCatching { AiClient.ask(ctx, prompt, null, 45000L) }.getOrNull() ?: return
+        val json = if (reply.ok) AiClient.parseJson(reply.text) else null
+        if (json == null) return
+        val lesson = JSONObject().put("round", round).put("at", System.currentTimeMillis())
+            .put("avoid", json.optJSONArray("avoid") ?: org.json.JSONArray()).put("prefer", json.optJSONArray("prefer") ?: org.json.JSONArray())
+            .put("text", (json.optString("text").ifBlank { json.optString("cause") }).take(400))
+        // só vale o que passa na validação (formação/estilo existentes); a IA nunca decide sozinha: é só um peso na nota
+        if (HumanPrior.lessonFromJson(lesson, round) == null) return
+        repo.dao.putPlan(PlanEntity(slot, "lesson", lesson.toString(), System.currentTimeMillis()))
+        repo.learn(slot, "licao", "Lição da IA depois da J$round: " + lesson.optString("text"))
+    }
 
     /** Jogos do slot para o treinador: táticas usadas + análises do jogo lidas. */
     suspend fun coachGames(repo: Repo, slot: Int): List<Coach.Game> = Coach.games(
@@ -356,6 +415,7 @@ object Director {
         fun bonus(k: String) = f[k]?.takeIf { FieldMerge.fresh(k, it, System.currentTimeMillis()) }?.value
             ?.let { Regex("(\\d{1,3})").find(it)?.groupValues?.get(1)?.toIntOrNull() }
         val matches = repo.dao.matchesOf(slot)
+        val standings = League.table(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, "st")
         val played = matches.filter { it.result != null && it.round != null }.sortedByDescending { it.round }
         val rival = str(K.RIVAL_TEAM)?.let { Txt.key(it) }
         val h2h = if (rival != null && rival.length >= 3) {
@@ -372,12 +432,16 @@ object Director {
             home = boolOf(str(K.HOME), "Casa", "Fora"),
             rivalHuman = if (SecretTraining.on(f)) true else boolOf(str(K.RIVAL_HUMAN), "Sim", "Não"),
             drawValue = if (mustWin(f)) BATTLE_DRAW else 1.0,
-            referee = str(K.REFEREE),
+            referee = refereeNow(f),
             myBonus = bonus(K.MY_BONUS), rivalBonus = bonus(K.RIVAL_LOGIN_BONUS),
             recent = played.filter { !Fixtures.isCup(it) }.mapNotNull { it.result }.take(5),
+            rivalRecent = f[K.RIVAL_FORM]?.takeIf { System.currentTimeMillis() - it.updatedAt <= 12L * 3_600_000L }?.value?.map { it.toString() }?.filter { it in listOf("V", "E", "D") } ?: emptyList(),
             headToHead = h2h,
             calib = Calib.offset(repo.dao.tacticLogs(slot).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }),
             learned = runCatching { Learned.fit(allLogs(repo)) }.getOrNull(),
+            myRates = League.rates(League.find(standings, str(K.TEAM) ?: str(K.HUB_TITLE))),
+            rivalRates = League.rates(League.find(standings, str(K.RIVAL_TEAM))),
+            leagueTeamGoals = League.leagueAvgGoals(standings),
             leagueGoals = runCatching { repo.dao.plan(slot, "lstats")?.json?.let { JSONObject(it).optDouble("avg", Double.NaN) }?.takeIf { !it.isNaN() } }.getOrNull(),
             meta = run {
                 val my = int(K.MY_STRENGTH)
@@ -401,7 +465,13 @@ object Director {
     suspend fun winProb(repo: Repo, slot: Int, plan: JSONObject? = null): WinModel.Prob? {
         val sp = plan?.let { simPlan(it) }
         val base = simInput(repo, slot)
-        return WinModel.predict(base.copy(plan = sp, tacticRecord = record(history(repo, slot), sp)))
+        val p = WinModel.predict(base.copy(plan = sp, tacticRecord = record(history(repo, slot), sp))) ?: return null
+        // contra humano: mistura com o que os seus jogos reais mostram para essa diferença de força
+        val my = base.myStrength; val rv = base.rivalStrength
+        if (base.rivalHuman == true && my != null && rv != null) {
+            Calibration.fit(allLogs(repo))?.let { return Calibration.blend(p, my - rv, it) }
+        }
+        return p
     }
 
     /** Preenche o resultado das táticas já usadas quando o jogo daquela rodada aparece no calendário. */
@@ -588,7 +658,72 @@ object Director {
     }
 
     /** Só pede a tática nas últimas horas antes do jogo: antes disso o rival humano ainda pode mudar tudo. */
+    /** Assinatura do que se monta no OSM (jogo + formação, estilo, desarme, marcação): regerar a mesma tática não desfaz o "já montei". */
+    fun mountSig(j: JSONObject): String = listOf(j.optString("forRound"), j.optString("matchAt"), j.optString("formation"), j.optString("playStyle"), j.optString("tackle"), j.optString("marking")).joinToString("|")
+
     const val TACTIC_WINDOW_MS = 8L * 3600_000L
+
+    /**
+     * Árbitro DESTE jogo: só vale se foi lido há pouco (3 h). Um árbitro lido num jogo anterior (30 h de validade do campo)
+     * fazia o app recomendar desarme "Agressivo/Extremo" com o árbitro de agora desconhecido.
+     */
+    fun refereeNow(f: Map<String, StoredField>, now: Long = System.currentTimeMillis()): String? =
+        f[K.REFEREE]?.takeIf { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS }?.value
+
+    /** Rival conferido: formação, estilo e força lidos há pouco (3 h). Sem isso a tática pode estar baseada em dado velho. */
+    const val RIVAL_FRESH_MS = 3L * 3600_000L
+    fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean = tacticGaps(f, now).isEmpty()
+
+    /** Leituras obrigatórias do rival para gerar a tática, em grupos (cada grupo = uma tela do OSM). */
+    class Group(val name: String, val where: String, val ok: Boolean, val missing: List<String>)
+
+    private val LB = listOf(K.RIVAL_GOL to "setor GOL", K.RIVAL_DEF to "setor DEF", K.RIVAL_MID to "setor MEI", K.RIVAL_ATK to "setor ATA")
+
+    fun groups(f: Map<String, StoredField>, now: Long): List<Group> {
+        fun fresh(k: String) = f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS } == true
+        val secret = SecretTraining.on(f)
+        val pre = ArrayList<String>()
+        if (!fresh(K.MY_STRENGTH)) pre.add("sua força")
+        if (!secret && !fresh(K.RIVAL_STRENGTH)) pre.add("força do rival")
+        if (!fresh(K.REFEREE)) pre.add("árbitro (termômetro ao lado de \"Árbitro\")")
+        val ana = ArrayList<String>()
+        if (!secret && !fresh(K.RIVAL_FORMATION)) ana.add("formação")
+        if (!secret && !fresh(K.RIVAL_PLAN)) ana.add("estilo de jogo")
+        val sq = ArrayList<String>()
+        for ((k, n) in LB) if (!fresh(k)) sq.add(n)
+        if (!fresh(K.RIVAL_VALUE)) sq.add("valor do elenco")
+        val mine = listOf(K.MY_GOL to "GOL", K.MY_DEF to "DEF", K.MY_MID to "MEI", K.MY_ATK to "ATA")
+            .filter { !FieldMerge.known(f[it.first]?.value) }.map { "setor ${it.second}" }
+        return listOf(
+            Group("Pré-jogo (forças e bônus)", "Central → toque no card do slot (Próximo jogo)", pre.isEmpty(), pre),
+            Group("Análise do rival", "Menu ☰ → Analista de Dados → Ver relatório", ana.isEmpty(), ana),
+            Group("Plantel do rival (setores e valor)", "Analista de Dados → time do rival (forças por setor e valor do elenco)", sq.isEmpty(), sq),
+            Group("Seu plantel (setores)", "Menu ☰ → Plantel do seu time", mine.isEmpty(), mine)
+        )
+    }
+
+    /** Idade (ms) da leitura MAIS ANTIGA de cada grupo [Pré-jogo, Análise, Plantel do rival]; null se algum campo falta. */
+    fun groupAgesMs(f: Map<String, StoredField>, now: Long): List<Long?> {
+        val secret = SecretTraining.on(f)
+        fun age(keys: List<String>): Long? {
+            val ks = keys.filter { !(secret && it in SecretTraining.HIDDEN) }
+            val ages = ks.map { k -> f[k]?.takeIf { FieldMerge.known(it.value) }?.let { now - it.updatedAt } ?: return null }
+            return ages.maxOrNull()
+        }
+        return listOf(
+            age(listOf(K.MY_STRENGTH, K.RIVAL_STRENGTH, K.REFEREE)), age(listOf(K.RIVAL_FORMATION, K.RIVAL_PLAN)),
+            age(listOf(K.RIVAL_GOL, K.RIVAL_DEF, K.RIVAL_MID, K.RIVAL_ATK, K.RIVAL_VALUE))
+        )
+    }
+
+    /** O que falta ler antes de gerar a tática (tudo é obrigatório). Vazio = pode gerar. */
+    fun tacticGaps(f: Map<String, StoredField>, now: Long): List<Pair<String, String>> =
+        groups(f, now).filter { !it.ok }.map { (it.name + ": falta " + it.missing.joinToString(", ")) to it.where }
+
+    /** "Pré-jogo ✓ • Análise ✗ (falta: formação)": o que já foi lido e o que falta. */
+    fun checklist(f: Map<String, StoredField>, now: Long): String = groups(f, now).joinToString(" • ") {
+        (if (it.ok) "✓ " else "✗ ") + it.name.substringBefore(" (") + (if (it.ok) "" else " (falta: " + it.missing.joinToString(", ") + ")")
+    }
 
     suspend fun tacticReady(repo: Repo, slot: Int): Boolean {
         val p = repo.dao.plan(slot, "tactic") ?: return false
@@ -689,7 +824,7 @@ object Director {
         val scen = scenarios(repo, slot, base)
         val hist = history(repo, slot)
         val lost = lostAgainst(repo, slot)
-        val prior = if (inp.rivalHuman == true) HumanPrior.build(allLogs(repo), rules.diff) else null
+        val prior = if (inp.rivalHuman == true) priorFor(repo, slot, rules.diff) else null
         val draftPts = score(rules.tactic, rules.rows, scen, hist, lost, prior)
         val cands = candidates(rules, inp, scen, hist, lost, prior)
         val top = cands.firstOrNull()
@@ -710,6 +845,8 @@ object Director {
                     "contra ${"%.2f".format(draftPts)} da regra."
             )
             prior?.let { HumanPrior.note(it, best.tactic.formation, best.tactic.playStyle, best.tactic.mentality) }?.let { why.add(it) }
+            prior?.lessonText?.takeIf { it.isNotBlank() }?.let { why.add("🧠 Lição do último jogo: $it") }
+            if (prior != null && prior.streak.startsWith("D D")) why.add("Sequência recente contra humanos: ${prior.streak}. As táticas que perderam foram cortadas.")
             if (scen.size > 1) why.add("Rival humano: testada contra ${scen.size - 1} táticas que ele pode usar (as dele já vistas ou as mais comuns entre humanos), não só a atual.")
             if (lost.isNotEmpty()) why.add("Evitei o que já perdeu para este rival: ${lost.keys.joinToString { it.replace("|", " • ") }}.")
             rules.copy(tactic = best.tactic.copy(notes = why + rules.tactic.notes), rows = best.rows)
@@ -743,6 +880,17 @@ object Director {
         val sp = simPlan(res2.tactic, res2.rows)
         val pp = WinModel.predict(base.copy(plan = sp, tacticRecord = record(hist, sp)))
         repo.dao.putPlan(PlanEntity(slot, "tlog_R${round ?: 0}", logJson(res2.tactic, round, rival, inp, pp, base, f[K.RIVAL_NICK]?.value).toString(), now))
+        // plano B para o painel "Por quê": a melhor simulação que difere da escolhida
+        runCatching {
+            val fin = res3.tactic
+            val altC = cands.firstOrNull { it.tactic.formation != fin.formation || it.tactic.playStyle != fin.playStyle }
+            if (altC != null) {
+                val a = altC.tactic
+                repo.dao.putPlan(PlanEntity(slot, "whyalt", JSONObject().put("main", fin.formation + "|" + fin.playStyle)
+                    .put("alt", JSONObject().put("formation", a.formation).put("style", a.playStyle).put("pressure", a.pressure).put("mentality", a.mentality).put("tempo", a.tempo).put("pts", altC.points))
+                    .put("round", round ?: -1).toString(), now))
+            }
+        }
         return Outcome(true, json.toString(), null)
     }
 
@@ -886,7 +1034,7 @@ object Director {
             if (ep < worst) worst = ep
         }
         if (wsum <= 0.0) return null
-        val penalty = 0.25 * (lost[Formations.base(t.formation) + "|" + (Osm.style(t.playStyle) ?: "")] ?: 0)
+        val penalty = 0.4 * minOf(3, lost[Formations.base(t.formation) + "|" + (Osm.style(t.playStyle) ?: "")] ?: 0)
         // Contra humano vale a tática que não quebra em nenhum cenário (ele troca a dele na última hora):
         // média e pior caso pesam juntos. Contra CPU só há o cenário lido.
         val mean = sum / wsum
@@ -895,8 +1043,11 @@ object Director {
     }
 
     /** As 3 melhores das regras e, contra rival bem mais fraco, sempre as formações de 3 atacantes. */
-    private fun candidateFormations(res: TacticEngine.Result, inp: TacticEngine.Input): List<String> {
-        val out = (listOf(Formations.base(res.tactic.formation)) + res.ranking.take(3).map { it.first }).distinct().toMutableList()
+    private fun candidateFormations(res: TacticEngine.Result, inp: TacticEngine.Input, prior: HumanPrior.Prior? = null): List<String> {
+        val raw = (listOf(Formations.base(res.tactic.formation)) + res.ranking.take(3).map { it.first }).distinct()
+        // contra humano: fora o que os seus jogos mostram que perde (4-5-1, 4-2-3-1…) e o 4-3-3 sempre entra no teste
+        val out = raw.filter { !HumanPrior.avoidsFormation(prior, it) }.ifEmpty { raw }.toMutableList()
+        if (inp.rivalHuman == true && "4-3-3" in Formations.BASES && "4-3-3" !in out && !HumanPrior.avoidsFormation(prior, "4-3-3")) out.add("4-3-3")
         val diff = res.diff
         // contra-tática da comunidade para a formação do rival entra sempre no teste
         CounterBook.suggestion(inp.rivalFormation, diff ?: 0)?.let { Formations.base(it.first) }
@@ -947,11 +1098,11 @@ object Director {
         val rowsBy = HashMap<String, List<List<PlayerEntity?>>>()
         data class Coarse(val f: String, val st: String, val dm: Int, val pts: Double)
         val coarse = ArrayList<Coarse>()
-        for (f in candidateFormations(res, inp)) {
+        for (f in candidateFormations(res, inp, prior)) {
             if (TacticEngine.strikers(f) < fl.minStrikers) continue
             val rows = TacticEngine.lineup(f, inp.players, inp.fitness)?.first ?: continue
             rowsBy[f] = rows
-            for (st in SIM_STYLES) for (dm in listOf(-12, 0, 12)) {
+            for (st in SIM_STYLES.filter { !HumanPrior.avoidsStyle(prior, it) }.ifEmpty { SIM_STYLES }) for (dm in listOf(-12, 0, 12)) {
                 val t = build(f, st, dm, tk0, off0, t0.marking, t0.advMid, t0.advAttack, 0)
                 val ep = score(t, rows, scen, hist, lost, prior) ?: continue
                 coarse.add(Coarse(f, st, dm, ep))
@@ -982,7 +1133,7 @@ object Director {
             "Pense como um especialista do OSM: o que ganhou em situação parecida deve ser repetido; o que perdeu, evitado. " +
             "Não copie o rascunho por comodidade e não aplique a mesma receita para rivais diferentes: olhe a formação e o " +
             "estilo DESTE rival, a diferença exata de força e os setores (ataque × defesa dele, meio × meio, defesa × ataque dele). " +
-            "Contra rival HUMANO prefira a tática que não perde para as táticas que ele já usou. " +
+            "Contra rival HUMANO prefira a tática que não perde para as táticas que ele já usou. Se os dados trazem a lista EVITE, NÃO use essas formações/estilos. " +
             (if (trusted) "O OBJETIVO é VENCER. O app já aprendeu com os gols REAIS deste treinador (no HISTÓRICO: 'Aprendido nos seus N jogos'). " +
                 "Use esse aprendizado e o APRENDIZADO DOS 4 SLOTS como evidência principal: repita o que gerou gols e vitórias e evite o que travou " +
                 "o ataque ou levou gols, mesmo que contrarie o senso comum ou o rascunho. Não siga receitas fixas. " +
@@ -1040,7 +1191,7 @@ object Director {
         AiStatus.set("Simulando táticas alternativas…")
         val scen = scenarios(repo, slot, base)
         val lost = lostAgainst(repo, slot)
-        val prior = if (inp.rivalHuman == true) HumanPrior.build(allLogs(repo), res.diff) else null
+        val prior = if (inp.rivalHuman == true) priorFor(repo, slot, res.diff) else null
         val cands = candidates(res, inp, scen, hist, lost, prior)
         val draftProb = prob(res.tactic, res.rows)
         val draftPts = score(res.tactic, res.rows, scen, hist, lost, prior) ?: draftProb?.points ?: 0.0
@@ -1067,14 +1218,7 @@ object Director {
         val allowed = Formations.BASES.filter { TacticEngine.lineup(it, inp.players, inp.fitness) != null }
         val allowedNames = allowed.flatMap { Formations.variants(it).ifEmpty { listOf(it) } }
         // contra humano: o que os jogos reais dele mostram por formação/estilo/mentalidade (a IA vê os mesmos números)
-        val priorLines = prior?.let { p ->
-            listOfNotNull(
-                "Seus jogos reais contra humanos (${p.bucket}, ${p.n} jogos, média ${"%.1f".format(p.ref).replace('.', ',')} pts/jogo):",
-                p.form.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} pts/jogo em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "formação — $it" },
-                p.style.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "estilo — $it" },
-                p.ment.filter { it.value.n >= 3 }.entries.joinToString("; ") { "${it.key}: ${"%.1f".format(it.value.ppg)} em ${it.value.n}" }.takeIf { it.isNotBlank() }?.let { "mentalidade — $it" }
-            ).joinToString("\n")
-        }
+        val priorLines = prior?.let { HumanPrior.promptText(it) }
         val learned = learnedText(inp, res.diff) + (priorLines?.let { "\n" + it } ?: "")
 
         val prompt = tacticRefinePrompt(context(repo, slot), draft, pct(draftProb), table, stats, learned, allowedNames, Osm.allowedTackles(inp.referee), base.learned?.trusted == true)
@@ -1238,6 +1382,7 @@ object Director {
 
     suspend fun marketPlan(repo: Repo, slot: Int): MarketEngine.Plan? {
         val f = repo.fieldMap(slot)
+        if (Hints.slotFree(f)) return null
         val mine = repo.playersOf(slot).filter { it.owner == "MY" }
         if (mine.none { it.strength != null }) return null
         // setor a reforçar: o que o treinador apontou nos últimos jogos; senão o titular mais fraco

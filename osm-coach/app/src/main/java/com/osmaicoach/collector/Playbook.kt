@@ -62,7 +62,9 @@ object Playbook {
         /** Telas desatualizadas deste slot. */
         val needs: List<Fresh.Need> = emptyList(),
         /** O usuário aceita dicas que gastam Boss Coins (amistoso, estágio, treino secreto)? Padrão: não. */
-        val spendBc: Boolean = false
+        val spendBc: Boolean = false,
+        /** Regras especiais da liga colada no slot (null = padrão do app). */
+        val rules: SlotRules.Rules? = null
     )
 
     const val MAX_LISTED = 4
@@ -152,7 +154,7 @@ object Playbook {
             // Se a sessão acabaria depois do jogo, prefere um reserva (titular treinando joga pior).
             val endIfNow = i.now + sessionH * 3600000L
             val clashes = i.matchAt != null && i.matchAt > i.now && i.matchAt < endIfNow
-            val pool = mine.filter { it.cat == cat && it.nameKey !in training }
+            val pool = mine.filter { it.cat == cat && it.nameKey !in training && (i.rules?.maxTrain == null || (it.strength ?: 0) < i.rules.maxTrain) }
             val pool2 = if (clashes) pool.filter { it.nameKey !in i.xi }.ifEmpty { pool } else pool
             val picked = TrainLearn.pick(pool2, i.trainRates)
             val pick = picked?.first

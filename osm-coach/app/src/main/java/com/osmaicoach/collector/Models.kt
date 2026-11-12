@@ -55,7 +55,16 @@ data class PlayerRead(
     /** Cartão amarelo na coluna "Estado" do plantel. */
     val yellow: Boolean? = null,
     /** Cartão vermelho na coluna "Estado" do plantel (jogador suspenso). */
-    val red: Boolean? = null
+    val red: Boolean? = null,
+    /** Assinatura da bandeira (coluna Nac.): ver `PixelProbe.flagSig`. */
+    val nat: String? = null,
+    /** Cruz vermelha de lesão na coluna "Estado" (x≈0,856–0,876, medido em vídeo 07/11); false = linha lida sem cruz. */
+    val injured: Boolean? = null,
+    /** Assinatura rica da bandeira (`PixelProbe.flagRich`): reconhece o país pelo Atlas. */
+    val natRich: String? = null,
+    /** Centro da bandeira na captura (0..1): o recorte NÍTIDO sai da imagem inteira, não da miniatura de análise. */
+    val natX: Float? = null,
+    val natY: Float? = null
 )
 
 data class MatchRead(
@@ -69,7 +78,10 @@ data class MatchRead(
     val scoreOpp: Int?,
     val result: String?,
     val opponent: String?,
-    val opponentNick: String?
+    val opponentNick: String?,
+    /** Centro do escudo do rival no card da captura (0..1); o recorte do escudo sai daqui. */
+    val crestX: Float? = null,
+    val crestY: Float? = null
 )
 
 data class ListingRead(
@@ -128,8 +140,12 @@ data class Extraction(
     /** Leitura das telas novas (Screens): JSON simples por tipo de tela. */
     val extra: JSONObject? = null,
     /** Estádio: obra em andamento por card ("Relvado" -> fim) ou null = card lido sem obra (limpa o aviso). */
-    val timers: Map<String, Long?> = emptyMap()
+    val timers: Map<String, Long?> = emptyMap(),
+    /** Calendário no topo: faixa com o escudo + nome de TODOS os clubes da liga (centro do escudo na captura, 0..1). */
+    val crests: List<CrestSpot> = emptyList()
 )
+
+data class CrestSpot(val team: String, val x: Float, val y: Float)
 
 /**
  * Uma coluna da tela de Treinamento: papel do treinador (UNI = universal, ATA, MEI, DEF, GOL), o jogador (nome como o
@@ -165,6 +181,10 @@ object K {
     const val MY_STAD_PITCH = "my.stadium.pitch"
     const val MY_STAD_TRAIN = "my.stadium.train"
     const val MY_BONUS = "my.bonus"
+    /** Forma recente (últimas partidas, ex. "VVDEV") lida no pré-jogo, dos dois times, e o nível da preparação (CRÍTICO…EXCELENTE). */
+    const val MY_FORM = "my.form"
+    const val RIVAL_FORM = "rival.form"
+    const val PREP_LEVEL = "my.prep"
     const val MY_STAD_STATUS = "my.stadium.status"
     const val SELLING = "market.selling"
     const val MY_STRENGTH = "my.strength"
@@ -676,7 +696,24 @@ object OwnApp {
 
     fun looksLikeApp(fullText: String): Boolean {
         val t = Txt.norm(fullText)
-        if (t.contains("sessoes") && t.contains("ajustes") && t.contains("diretor")) return true
+        if ((t.contains("sessoes") || t.contains("agenda")) && t.contains("ajustes") && t.contains("diretor")) return true
         return MARKS.count { t.contains(Txt.norm(it)) } >= 1
     }
+}
+
+
+/** Nível da barra "Preparação para o jogo" do pré-jogo (CRÍTICO, FRACO… BOM/BOA, EXCELENTE): 0 = pior, 4 = melhor. */
+object PrepLevel {
+    private val RANK = mapOf(
+        "critico" to 0, "fraco" to 1, "fraca" to 1, "razoavel" to 2, "medio" to 2, "media" to 2, "regular" to 2,
+        "bom" to 3, "boa" to 3, "otimo" to 4, "otima" to 4, "excelente" to 4, "perfeito" to 4, "perfeita" to 4, "maximo" to 4
+    )
+
+    fun rank(raw: String?): Int? = raw?.let { RANK[Txt.norm(it).trim()] }
+
+    /** Texto como o jogo mostra (maiúsculas), só se for um nível conhecido. */
+    fun canon(raw: String?): String? = raw?.trim()?.takeIf { rank(it) != null }?.uppercase()
+
+    /** Falta fazer coisas na preparação (abaixo de "bom"): vale abrir a lista de afazeres. */
+    fun low(raw: String?): Boolean = rank(raw)?.let { it <= 2 } == true
 }

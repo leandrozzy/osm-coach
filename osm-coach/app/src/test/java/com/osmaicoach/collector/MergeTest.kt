@@ -60,4 +60,12 @@ class MergeTest {
         assertEquals(1, needs.first { it.cat == "ATA" }.missing)
         assertEquals(1, needs.first { it.cat == "DEF" }.surplus)
     }
+
+    @org.junit.Test fun mesmaLeituraRenovaADataSemMudarOValor() {
+        val old = StoredField("4-3-3", 0.9, 1000L)
+        assertNull(FieldMerge.merge(K.RIVAL_FORMATION, old, Reading("4-3-3", 0.9), 2000L))
+        val n = FieldMerge.merge(K.RIVAL_FORMATION, old, Reading("4-3-3", 0.9), 100_000L)!!
+        org.junit.Assert.assertEquals("4-3-3", n.value)
+        org.junit.Assert.assertEquals(100_000L, n.updatedAt)
+    }
 }

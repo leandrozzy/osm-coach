@@ -1,5 +1,6 @@
 package com.osmaicoach.collector
 
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -61,6 +62,182 @@ object PixelProbe {
 
     /** Fração de pixels amarelo-ouro na caixa (cartão amarelo do plantel). */
     fun goldBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, GOLD)
+
+    /**
+     * Forma recente (até 5 bolinhas V verde / E laranja / D vermelha sob o nome do time, no Pré-jogo; frame real de 05/11:
+     * bolinhas de ≈0,0167 de largura, passo ≈0,0195, centro em y≈0,51). Lê pela COR, não pelo OCR (letra solta num círculo
+     * colorido o OCR perde ou erra). Devolve a corrente mais longa de círculos lado a lado (≥3), da esquerda p/ direita.
+     */
+    fun formDots(img: Img, left: Boolean): String? {
+        // 1ª passada: cores vivas de verdade (print 06/11: bolinhas com saturação ≥0,95; o gramado ao fundo ≈0,5);
+        // 2ª, mais frouxa, para quadro escurecido por janela por cima — só vale se achar mais bolinhas e sem juntar gramado.
+        val a = scanDots(img, left, 0.85f, 0.45f, 0.45f)
+        val b = scanDots(img, left, 0.68f, 0.40f, 0.2f)
+        val ok = listOf(a, b).filter { it.length in 1..5 }
+        return if (ok.size == 2 && b.length > a.length) b else ok.firstOrNull()
+    }
+
+    private fun scanDots(img: Img, left: Boolean, minSat: Float, minVal: Float, widthTol: Float): String {
+        val xa = ((if (left) 0.12f else 0.54f) * img.w).toInt()
+        val xb = ((if (left) 0.46f else 0.88f) * img.w).toInt().coerceAtMost(img.w)
+        val t = FloatArray(3)
+        val cols = CharArray(max(0, xb - xa))
+        for (x in xa until xb) {
+            var d = 0; var e = 0; var v = 0
+            for (k in 0 until 10) {
+                val y = ((0.485f + 0.05f * k / 9f) * img.h).toInt().coerceIn(0, img.h - 1)
+                hsv(img.px[y * img.w + x], t)
+                if (t[1] > minSat && t[2] > minVal) when {
+                    t[0] <= 12f || t[0] >= 344f -> d++
+                    t[0] in 20f..46f -> e++
+                    t[0] in 80f..165f -> v++
+                }
+            }
+            val best = max(d, max(e, v))
+            cols[x - xa] = if (best < 2) ' ' else if (best == d) 'D' else if (best == e) 'E' else 'V'
+        }
+        // corridas de mesma cor → círculos (largura ≈0,0167); descarta ruído de largura/forma diferente
+        class Run(val c: Char, val s: Int, val n: Int)
+        val runs = ArrayList<Run>()
+        var i = 0
+        while (i < cols.size) {
+            if (cols[i] == ' ') { i++; continue }
+            var j = i
+            while (j < cols.size && cols[j] == cols[i]) j++
+            runs.add(Run(cols[i], i + xa, j - i))
+            i = j
+        }
+        val minW = 0.011f * img.w
+        val maxW = 0.024f * img.w
+        val pitch = 0.0195f * img.w
+        val maxGap = 0.008f * img.w
+        var best = ""
+        var cur = StringBuilder()
+        var prevEnd = Int.MIN_VALUE
+        fun flush() { if (cur.length > best.length) best = cur.toString(); cur = StringBuilder(); prevEnd = Int.MIN_VALUE }
+        for (r in runs) {
+            // bolinhas vizinhas da mesma cor se fundem numa corrida larga (V V = 2 círculos): divide pelo passo
+            val k = if (r.n > maxW) Math.round((r.n + 0.0035f * img.w) / pitch) else 1
+            val ok = if (r.n > maxW) k in 2..5 && abs(r.n - (k * pitch - 0.0035f * img.w)) <= widthTol * pitch else r.n >= minW
+            if (!ok) { flush(); continue }
+            if (prevEnd != Int.MIN_VALUE && r.s - prevEnd > maxGap) flush()
+            repeat(k) { cur.append(r.c) }
+            prevEnd = r.s + r.n
+        }
+        flush()
+        return best
+    }
+
+    /**
+     * Assinatura da bandeira (coluna "Nac." do Plantel/Mercado): 3×3 células, cada uma na cor dominante
+     * (K preto, W branco, X cinza, R vermelho, O laranja, Y amarelo, G verde, L azul-claro, B azul, P roxo).
+     * França = "BWRBWRBWR", Nigéria = "GWGGWGGWG". Null se não há bandeira (tudo escuro/cinza).
+     */
+    fun flagSig(img: Img, cx: Float, cy: Float, w: Float = 0.026f, h: Float = 0.040f): String? {
+        val x0 = ((cx - w / 2) * img.w).toInt().coerceAtLeast(0)
+        val x1 = ((cx + w / 2) * img.w).toInt().coerceAtMost(img.w)
+        val y0 = ((cy - h / 2) * img.h).toInt().coerceAtLeast(0)
+        val y1 = ((cy + h / 2) * img.h).toInt().coerceAtMost(img.h)
+        if (x1 - x0 < 9 || y1 - y0 < 9) return null
+        val t = FloatArray(3)
+        val sb = StringBuilder()
+        for (r in 0 until 3) for (c in 0 until 3) {
+            val xa = x0 + (x1 - x0) * c / 3; val xb = x0 + (x1 - x0) * (c + 1) / 3
+            val ya = y0 + (y1 - y0) * r / 3; val yb = y0 + (y1 - y0) * (r + 1) / 3
+            val cnt = IntArray(10)
+            for (y in ya until yb) for (x in xa until xb) {
+                hsv(img.px[y * img.w + x], t)
+                val k = when {
+                    t[2] < 0.28f -> 0
+                    t[1] < 0.22f -> if (t[2] > 0.72f) 1 else 2
+                    t[0] < 15f || t[0] >= 340f -> 3
+                    t[0] < 40f -> 4
+                    t[0] < 70f -> 5
+                    t[0] < 170f -> 6
+                    t[0] < 215f -> 7
+                    t[0] < 262f -> 8
+                    else -> 9
+                }
+                cnt[k]++
+            }
+            var b = 0
+            for (i in 1 until 10) if (cnt[i] > cnt[b]) b = i
+            sb.append("KWXROYGLBP"[b])
+        }
+        val s = sb.toString()
+        return if (s.all { it == 'K' } || s.all { it == 'X' } || s.count { it == 'K' || it == 'X' } >= 8) null else s
+    }
+
+    /**
+     * Assinatura rica de uma bandeira/emblema: grade gx×gy com a cor média (RGB) de cada célula, em hexadecimal (6 dígitos por célula).
+     * Serve para reconhecer o país: a bandeira do Plantel (pequena) e a da tela de filtro "Nacionalidade" (grande) dão assinaturas parecidas
+     * (distância ≈ 0,02–0,04 para a mesma bandeira, ≥ 0,07 para outra). Null se quase tudo é escuro (sem bandeira).
+     */
+    fun flagRich(img: Img, cx: Float, cy: Float, w: Float, h: Float, gx: Int = 8, gy: Int = 5): String? {
+        val x0 = ((cx - w / 2) * img.w).toInt().coerceAtLeast(0)
+        val x1 = ((cx + w / 2) * img.w).toInt().coerceAtMost(img.w)
+        val y0 = ((cy - h / 2) * img.h).toInt().coerceAtLeast(0)
+        val y1 = ((cy + h / 2) * img.h).toInt().coerceAtMost(img.h)
+        if (x1 - x0 < gx || y1 - y0 < gy) return null
+        val sb = StringBuilder()
+        var dark = 0
+        for (r in 0 until gy) for (c in 0 until gx) {
+            val xa = x0 + (x1 - x0) * c / gx; val xb = max(xa + 1, x0 + (x1 - x0) * (c + 1) / gx)
+            val ya = y0 + (y1 - y0) * r / gy; val yb = max(ya + 1, y0 + (y1 - y0) * (r + 1) / gy)
+            var sr = 0L; var sg = 0L; var sbl = 0L; var n = 0
+            for (y in ya until yb) for (x in xa until xb) {
+                val px = img.px[y * img.w + x]
+                sr += (px shr 16) and 0xFF; sg += (px shr 8) and 0xFF; sbl += px and 0xFF; n++
+            }
+            if (n == 0) return null
+            val rr = (sr / n).toInt(); val gg = (sg / n).toInt(); val bb = (sbl / n).toInt()
+            if (rr + gg + bb < 120) dark++
+            sb.append("%02x%02x%02x".format(rr, gg, bb))
+        }
+        return if (dark >= gx * gy * 8 / 10) null else sb.toString()
+    }
+
+    /** Distância média (0..1) entre duas assinaturas ricas; 1,0 se incomparáveis. */
+    fun richDist(a: String, b: String): Float {
+        if (a.length != b.length || a.isEmpty()) return 1f
+        var sum = 0
+        var i = 0
+        while (i < a.length) {
+            sum += Math.abs(a.substring(i, i + 2).toInt(16) - b.substring(i, i + 2).toInt(16))
+            i += 2
+        }
+        return sum / (255f * (a.length / 2))
+    }
+
+    /**
+     * Ícone de um evento da tela de Resultado (vídeo/prints de 05/11): cruz vermelha = lesão, retângulo amarelo/vermelho = cartão,
+     * setas verde+vermelha = substituição, bola = gol (sem cor viva). Distingue cruz de cartão pelo preenchimento da caixa
+     * que envolve o vermelho (cruz ≈ 0,56; cartão ≈ 0,8+). null = nada reconhecível.
+     */
+    fun eventIcon(img: Img, left: Boolean, yc: Float): String? {
+        val x0 = if (left) 0.004f else 0.955f
+        val x1 = x0 + 0.045f
+        val y0 = yc - 0.032f
+        val y1 = yc + 0.032f
+        val g = frac(img, x0, x1, y0, y1, GREEN)
+        val r = frac(img, x0, x1, y0, y1, RED)
+        val y = frac(img, x0, x1, y0, y1, GOLD)
+        if (g >= 0.03f && r >= 0.02f) return "troca"
+        if (y >= 0.10f && r < 0.03f) return "amarelo"
+        if (r < 0.08f) return null
+        // preenchimento da caixa do vermelho
+        val xa = (x0 * img.w).toInt(); val xb = (x1 * img.w).toInt().coerceAtMost(img.w)
+        val ya = (y0.coerceAtLeast(0f) * img.h).toInt(); val yb = (y1 * img.h).toInt().coerceAtMost(img.h)
+        var minX = Int.MAX_VALUE; var maxX = -1; var minY = Int.MAX_VALUE; var maxY = -1; var n = 0
+        val t = FloatArray(3)
+        for (yy in ya until yb) for (xx in xa until xb) {
+            hsv(img.px[yy * img.w + xx], t)
+            if (RED(t[0], t[1], t[2])) { n++; if (xx < minX) minX = xx; if (xx > maxX) maxX = xx; if (yy < minY) minY = yy; if (yy > maxY) maxY = yy }
+        }
+        if (n == 0) return null
+        val box = (maxX - minX + 1) * (maxY - minY + 1)
+        return if (n.toFloat() / box < 0.68f) "lesao" else "vermelho"
+    }
 
     /** Fração de pixels vermelhos na caixa (cartão vermelho do plantel). */
     fun redBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, RED)

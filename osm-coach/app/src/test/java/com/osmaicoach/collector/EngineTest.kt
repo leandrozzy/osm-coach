@@ -34,26 +34,25 @@ class EngineTest {
         assertEquals(30, r.diff)
     }
 
-    @Test fun strongRivalMeansSolidDefenseAndLowMentality() {
+    @Test fun strongRivalStillAttacksWithThreeUpFront() {
+        // histórico real (04/11): recuar (5-x-x, 4-5-1, Contra-ataque) perdeu mais do que a força explicava
         val r = TacticEngine.recommend(input(70, 90))!!
         val lines = Formations.lines(r.tactic.formation)
         assertTrue(lines.first() >= 4)
-        assertTrue(lines.last() <= 2)
-        assertTrue(r.tactic.mentality <= 42)
-        // modelo de referência do OSM para o azarão: atacantes ficam lá na frente para o contra-ataque
+        assertEquals(3, lines.last())
+        assertTrue(r.tactic.mentality in 45..65)
         assertEquals("Atacar apenas", r.tactic.advAttack)
-        assertEquals("Ajudar a defesa", r.tactic.advMid)
+        assertEquals("Manter posições", r.tactic.advMid)
     }
 
-    @Test fun underdogFollowsTheCommunityModel() {
+    @Test fun underdogPlaysFourThreeThreeWingsNotCounter() {
         val r = TacticEngine.recommend(input(70, 90).copy(rivalFormation = "4-3-3 A"))!!
-        // azarão: bloco compacto com 2 atacantes que ficam na frente (não o 5-4-1 que ficava sem gol)
-        assertEquals("5-3-2", Formations.base(r.tactic.formation))
-        assertEquals("Contra-ataque", r.tactic.playStyle)
+        assertEquals("4-3-3", Formations.base(r.tactic.formation))
+        assertEquals("Jogar pelas alas", r.tactic.playStyle)
         assertEquals("Atacar apenas", r.tactic.advAttack)
-        assertTrue(r.tactic.mentality in 32..45)
-        assertTrue(r.tactic.pressure <= 42)
-        assertTrue(r.tactic.tempo >= 60)
+        assertTrue(r.tactic.mentality in 45..65)
+        assertTrue(r.tactic.pressure in 45..62)
+        assertTrue(r.tactic.tempo >= 58)
         assertEquals("Não", r.tactic.offside)
         assertTrue(r.tactic.notes.any { it.startsWith("Base da comunidade") })
     }
@@ -190,8 +189,8 @@ class EngineTest {
         assertEquals(24, Formations.OSM.size)
     }
 
-    @Test fun underdogPlaysCounterAttack() {
-        assertEquals("Contra-ataque", TacticEngine.recommend(input(70, 90))!!.tactic.playStyle)
+    @Test fun underdogPlaysWings() {
+        assertEquals("Jogar pelas alas", TacticEngine.recommend(input(70, 90))!!.tactic.playStyle)
     }
 
     @Test fun learningStatsCountOnlyResolvedGames() {
@@ -359,5 +358,154 @@ class EngineTest {
         // tudo certo: nenhum aviso
         val ok = Fx.ocr(Fx.line("4-3-3 A", 0.5f, 0.2f, 0.1f), Fx.line("Contra-ataque", 0.5f, 0.3f, 0.1f))
         assertTrue(Parsers.tacticCheck(ok, plan, "Rigoroso").isEmpty())
+    }
+}
+
+class FormDotsTest {
+    private val W = 1080; private val H = 480
+    private fun img(draw: (IntArray) -> Unit): PixelProbe.Img { val px = IntArray(W * H) { 0xFF101830.toInt() }; draw(px); return PixelProbe.Img(W, H, px) }
+    private fun dot(px: IntArray, cx: Int, c: Int) { for (y in 233..257) for (x in cx - 9..cx + 8) if ((x - cx) * (x - cx) + (y - 245) * (y - 245) <= 81) px[y * W + x] = c }
+    private val D = 0xFFC01010.toInt(); private val V = 0xFF30A010.toInt(); private val E = 0xFFE08A10.toInt()
+    @org.junit.Test fun leCincoBolinhasPelaCor() {
+        val im = img { px ->
+            "DVDVD".forEachIndexed { i, ch -> dot(px, 207 + 21 * i, if (ch == 'D') D else V) }
+            "EVVVD".forEachIndexed { i, ch -> dot(px, 790 + 21 * i, when (ch) { 'D' -> D; 'E' -> E; else -> V }) }
+            for (y in 240..252) for (x in 442..470) px[y * W + x] = V
+        }
+        org.junit.Assert.assertEquals("DVDVD", PixelProbe.formDots(im, true))
+        org.junit.Assert.assertEquals("EVVVD", PixelProbe.formDots(im, false))
+        org.junit.Assert.assertNull(PixelProbe.formDots(img { }, true))
+    }
+}
+
+class FlagSigTest {
+    private val W = 1080; private val H = 480
+    @org.junit.Test fun bandeiraFranciaEBrancaSemBandeira() {
+        val px = IntArray(W * H) { 0xFFFFFFFF.toInt() }
+        // França (azul | branco | vermelho) em x 0.576..0.602, y centrado em 0.5
+        val x0 = (0.577f * W).toInt(); val x1 = (0.602f * W).toInt(); val y0 = (0.48f * H).toInt(); val y1 = (0.52f * H).toInt()
+        for (y in y0 until y1) for (x in x0 until x1) { val t = (x - x0) * 3 / (x1 - x0); px[y * W + x] = when (t) { 0 -> 0xFF1D3FBF.toInt(); 1 -> 0xFFFFFFFF.toInt(); else -> 0xFFD01010.toInt() } }
+        val img = PixelProbe.Img(W, H, px)
+        val s = PixelProbe.flagSig(img, 0.59f, 0.50f)
+        org.junit.Assert.assertEquals("BWRBWRBWR", s)
+        org.junit.Assert.assertNull(PixelProbe.flagSig(PixelProbe.Img(W, H, IntArray(W * H) { 0xFF101010.toInt() }), 0.59f, 0.50f))
+    }
+}
+
+class FormDotsMergedTest {
+    private val W = 2000; private val H = 882
+    @org.junit.Test fun corridasLargasDeMesmaCorViramVariasBolinhas() {
+        // print real (S1, 06/11): rival V D V V D (2 verdes vizinhas) e meu V D V D V; dots de ≈0,018 de largura, passo 0,0195
+        val px = IntArray(W * H) { 0xFF101830.toInt() }
+        fun dot(cx: Int, c: Int) { val r = (0.009f * W).toInt(); val cy = (0.509f * H).toInt(); for (y in cy - r..cy + r) for (x in cx - r..cx + r) if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r) px[y * W + x] = c }
+        val g = 0xFF30B020.toInt(); val rd = 0xFFD01010.toInt()
+        val pitch = (0.0195f * W).toInt()
+        "VDVVD".forEachIndexed { i, ch -> dot((0.19f * W).toInt() + i * pitch, if (ch == 'V') g else rd) }
+        "VDVDV".forEachIndexed { i, ch -> dot((0.725f * W).toInt() + i * pitch, if (ch == 'V') g else rd) }
+        val img = PixelProbe.Img(W, H, px)
+        org.junit.Assert.assertEquals("VDVVD", PixelProbe.formDots(img, true))
+        org.junit.Assert.assertEquals("VDVDV", PixelProbe.formDots(img, false))
+    }
+}
+
+class FormReadTest {
+    private fun m(r: Int, res: String?) = MatchEntity(2, "L$r", "Jornada $r", r, null, null, null, null, null, res, null, null, 0L)
+    @org.junit.Test fun calendarioIncompletoUsaAsBolinhasDoJogo() {
+        // S2 (vídeo 06/11): rodada 19 jogada, calendário só até a 12 → vale o que o jogo mostra
+        val cal = (1..12).map { m(it, if (it % 2 == 0) "D" else "V") }
+        org.junit.Assert.assertEquals("EVVVD", FormRead.mine(cal, 19, "EVVVD"))
+        org.junit.Assert.assertEquals(7, FormRead.lag(cal, 19))
+        // calendário em dia e com mais jogos que as bolinhas (leitura parcial: 3 bolinhas) → calendário
+        val full = (1..19).map { m(it, if (it <= 14) "V" else "D") }
+        org.junit.Assert.assertEquals("DDDDD", FormRead.mine(full, 19, "DDD"))
+        org.junit.Assert.assertEquals(0, FormRead.lag(full, 19))
+        // bolinhas lidas no Pré-jogo da rodada 20 (E V V V D) + resultado novo da rodada 20 (V) → V V V D V
+        val after = (1..19).map { m(it, null) } + m(20, "V")
+        org.junit.Assert.assertEquals("VVVDV", FormRead.mine(after, 20, "EVVVD", 20))
+        // competição nova: 2 jogos, calendário em dia → 2 bolinhas
+        org.junit.Assert.assertEquals("VD", FormRead.mine(listOf(m(1, "V"), m(2, "D")), 2, "VD"))
+        // sem nada do calendário usa as bolinhas
+        org.junit.Assert.assertEquals("DDDDE", FormRead.mine(emptyList(), 7, "DDDDE"))
+    }
+}
+
+class FormDotsGrassTest {
+    private val W = 1080; private val H = 480
+    @org.junit.Test fun gramadoColadoNaPrimeiraBolinhaNaoAtrapalha() {
+        // frame real 06/11 (S4): rival V D V V D com o gramado (verde dessaturado) encostando na 1ª bolinha
+        val px = IntArray(W * H) { 0xFF101830.toInt() }
+        for (y in 236..260) for (x in 560..778) px[y * W + x] = 0xFF4E994E.toInt()
+        fun dot(cx: Int, c: Int) { for (y in 235..255) for (x in cx - 9..cx + 8) if ((x - cx) * (x - cx) + (y - 245) * (y - 245) <= 90) px[y * W + x] = c }
+        val g = 0xFF3AC000.toInt(); val r = 0xFFDF0000.toInt()
+        "VDVVD".forEachIndexed { i, ch -> dot(789 + i * 21, if (ch == 'V') g else r) }
+        org.junit.Assert.assertEquals("VDVVD", PixelProbe.formDots(PixelProbe.Img(W, H, px), false))
+    }
+}
+
+class TacticReadTest {
+    @org.junit.Test fun leOQueEstaMontadoNoOsm() {
+        val o = Fx.ocr(Fx.line("Formação: 4-3-3 A", 0.7f, 0.15f, 0.2f), Fx.line("Jogar pelas alas", 0.2f, 0.3f, 0.15f), Fx.line("Normal", 0.5f, 0.6f, 0.1f))
+        val j = Parsers.tacticRead(o)
+        org.junit.Assert.assertEquals("4-3-3 A", j.optString("formation"))
+        org.junit.Assert.assertEquals("Jogar pelas alas", j.optString("playStyle"))
+    }
+}
+
+class CalibrationTest {
+    private fun log(my: Int, rv: Int, res: String) = org.json.JSONObject().put("human", true).put("myStrength", my).put("rivalStrength", rv).put("result", res)
+    @org.junit.Test fun azaraoComPoucaChanceFavoritoComMuita() {
+        // padrão do diagnóstico de 06/11: favorito ganha, azarão perde
+        val logs = ArrayList<org.json.JSONObject>()
+        repeat(12) { logs.add(log(90, 80, if (it < 10) "V" else "E")) }
+        repeat(30) { logs.add(log(74, 84, if (it < 2) "V" else if (it < 8) "E" else "D")) }
+        val m = Calibration.fit(logs)!!
+        val under = m.predict(-10.0); val fav = m.predict(10.0)
+        org.junit.Assert.assertTrue("azarão ${under.first}", under.first < 0.2)
+        org.junit.Assert.assertTrue("favorito ${fav.first}", fav.first > 0.6)
+        org.junit.Assert.assertNull(Calibration.fit(logs.take(10)))
+    }
+
+    @org.junit.Test fun forcaComParentesesNoOcrEhLida() {
+        val o = Fx.ocr(
+            Fx.line("(104)", 0.34f, 0.26f, 0.05f), Fx.line("94", 0.66f, 0.26f, 0.05f), Fx.line("FC Ingolstadt", 0.23f, 0.37f, 0.1f),
+            Fx.line("Fortuna Düsseldorf", 0.77f, 0.37f, 0.1f), Fx.line("leandrozzy", 0.78f, 0.41f, 0.1f), Fx.line("Jornada 20", 0.5f, 0.13f, 0.1f)
+        )
+        val ex = Parsers.pregame(o, null, 0L)
+        org.junit.Assert.assertEquals("104", ex.fields[K.RIVAL_STRENGTH]?.value)
+    }
+}
+
+class FormKeepTest {
+    private fun m(r: Int, res: String?) = MatchEntity(2, "L$r", "Jornada $r", r, null, null, null, null, null, res, null, null, 0L)
+    @org.junit.Test fun soResultadosDepoisDaLeituraEntram() {
+        // bolinhas VVDV lidas no Pré-jogo da rodada 20; J18/J19 já estavam nelas; só J20 (E) é novo
+        val ms = listOf(m(18, "V"), m(19, "D"), m(20, "E"))
+        org.junit.Assert.assertEquals("VVDVE", FormRead.mine(ms, 20, "VVDV", 20))
+        // sem resultado novo, só as bolinhas
+        org.junit.Assert.assertEquals("VVDV", FormRead.mine(listOf(m(18, "V"), m(19, "D")), 19, "VVDV", 20))
+    }
+}
+
+class OsmThumbMatchTest {
+    @org.junit.Test fun achaAMiniaturaGiradaNaTelaDeRecentes() {
+        val tw = OsmThumb.TW; val th = OsmThumb.TH
+        // miniatura paisagem com padrão (gradiente + blocos)
+        val t = IntArray(tw * th) { i -> val x = i % tw; val y = i / tw; (x * 3 + (if ((x / 8 + y / 7) % 2 == 0) 90 else 20)).coerceIn(0, 255) }
+        val sw = 108; val sh = 240
+        val s = IntArray(sw * sh) { 40 }
+        // cartão girado 90° anti-horária: 28 colunas ×64 linhas esticado para 44×(44*64/28≈100) em x=50, y=70
+        val w = 44; val h = 100; val ox = 50; val oy = 70
+        for (y in 0 until h) for (x in 0 until w) {
+            val u = x * 28 / w; val v = y * 64 / h          // mesma regra do detector (girada anti-horária)
+            s[(oy + y) * sw + ox + x] = t[u.coerceIn(0, th - 1) * tw + (tw - 1 - v).coerceIn(0, tw - 1)]
+        }
+        // outro cartão (aplicativo azul liso) não pode ganhar
+        for (y in 0 until 100) for (x in 0 until 20) s[(70 + y) * sw + 5 + x] = 60
+        val hit = OsmThumb.match(s, sw, sh, t, tw, th)
+        org.junit.Assert.assertNotNull(hit)
+        org.junit.Assert.assertTrue("cx ${hit!!.cx} cy ${hit.cy} score ${hit.score}", kotlin.math.abs(hit.cx - (ox + w / 2f)) < 8 && kotlin.math.abs(hit.cy - (oy + h / 2f)) < 12)
+        // tela sem a miniatura: nada convincente
+        val noise = IntArray(sw * sh) { (it * 7919 % 251) }
+        org.junit.Assert.assertNull(OsmThumb.match(noise, sw, sh, t, tw, th))
     }
 }

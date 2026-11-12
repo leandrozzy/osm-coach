@@ -289,6 +289,11 @@ object TacticEngine {
                 if (f == "4-3-3" || f == "4-4-2" || f == "4-2-3-1") b += 3.0
                 if (d != 4) b -= 8.0
                 if (k > 3) b -= 8.0
+            } else if (inp.rivalHuman == true) {
+                // contra humano mais forte, os seus jogos reais não premiam recuar: 4-3-3 (e 4-4-2) na frente; 4-5-1/4-2-3-1/5-4-1 perderam
+                if (f == "4-3-3") b += 5.0 else if (f == "4-4-2") b += 2.0
+                if (f == "4-5-1" || f == "4-2-3-1" || f == "5-4-1") b -= 8.0
+                if (d > 5) b -= 10.0
             } else if (diff >= -14) {
                 b += (d - 4) * 4.0 - (k - 2) * 3.0
                 if (d > 5) b -= 10.0
@@ -496,9 +501,10 @@ object TacticEngine {
                 pF = (pF + 8).coerceIn(0, 100)
                 adjust.add("diferença de só ${-d}: bloco médio (estilo +10, pressão +8)")
             } else if (d <= -15) {
-                mF = (mF - 8).coerceIn(0, 100)
-                pF = (pF - 5).coerceIn(0, 100)
-                adjust.add("diferença de ${-d}: bloco baixo (estilo −8)")
+                // recuar tanto não funcionou nos jogos reais (menos gols sem sofrer menos): só um recuo leve
+                mF = (mF - 3).coerceIn(0, 100)
+                pF = (pF - 2).coerceIn(0, 100)
+                adjust.add("diferença de ${-d}: recuo leve (estilo −3, pressão −2)")
             } else if (d in 3..9) {
                 mF = (mF - 6).coerceIn(0, 100)
                 adjust.add("vantagem curta de $d: sem se expor (estilo −6)")

@@ -1330,6 +1330,20 @@ object Processor {
         return ReadResult("done", changed, "IA aplicou $changed campos")
     }
 
+    private val TYPE_NAMES = mapOf(
+        "PREGAME" to "Pré-jogo", "REPORT" to "Análise", "SQUAD" to "Elenco", "RESULT" to "Resultado", "CALENDAR" to "Calendário",
+        "MARKET" to "Mercado", "TRAINING" to "Treino", "TACTIC" to "Tática", "HUB" to "Central", "STADIUM" to "Estádio", "PREP" to "Preparação"
+    )
+
+    /** "Telas lidas nesta sessão: 83 (Pré-jogo 30, Elenco 12…) • campos novos: 41" (antes dizia só "reprocessadas: 0", que não é o que foi lido). */
+    internal fun readSummary(screens: List<ScreenEntity>): String? {
+        if (screens.isEmpty()) return null
+        val by = screens.groupingBy { TYPE_NAMES[it.type] ?: "outras" }.eachCount().entries.sortedByDescending { it.value }
+        val top = by.take(5).joinToString(", ") { "${it.key} ${it.value}" }
+        val fields = screens.sumOf { it.extracted }
+        return "Telas lidas nesta sessão: ${screens.size} ($top${if (by.size > 5) "…" else ""})" + (if (fields > 0) " • $fields campo(s) gravado(s)" else "")
+    }
+
     suspend fun run(ctx: Context, sessionId: String) {
         val repo = Repo(ctx)
         val dao = repo.dao
@@ -1380,7 +1394,8 @@ object Processor {
         } else 0
         ProcessState.finish(
             listOfNotNull(
-                "Telas reprocessadas: $fixed",
+                readSummary(dao.screensOfSession(sessionId)),
+                if (fixed > 0) "$fixed tela(s) re-lida(s) depois de reconhecer o slot" else null,
                 if (pending.isEmpty()) "IA: nada pendente" else "IA: ${pending.size - waiting} lida(s), $applied campo(s) novo(s)",
                 if (dropped > 0) "$dropped tela(s) que não precisavam mais da IA saíram da fila" else null,
                 if (noData > 0) "$noData tela(s) sem relatório do rival" else null,
@@ -1442,7 +1457,34 @@ object MetaRefresh {
     private const val LAST = "metaremote_last"
     @Volatile var running = false
 
-    suspend fun remote(repo: Repo): JSONObject? = repo.dao.plan(0, KIND)?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+    suspend fun aiRemote(repo: Repo): JSONObject? = repo.dao.plan(0, KIND)?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+
+    /**
+     * Modelo da comunidade em uso: regras lidas das páginas da web (`WebKnow`, semanal) + as da pesquisa por IA (só se recentes).
+     * Onde as duas existem, a da web é a principal e a da IA vira alternativa.
+     */
+    suspend fun remote(repo: Repo): JSONObject? {
+        val ai = aiRemote(repo)
+        val kb = WebKnow.rules(repo)
+        val kbRules = kb?.optJSONObject("rules")
+        if (kbRules == null || kbRules.length() == 0) return ai
+        val now = System.currentTimeMillis()
+        val merged = JSONObject()
+        val aiRules = ai?.takeIf { now - it.optLong("at") <= 30L * 86400000L }?.optJSONObject("rules")
+        if (aiRules != null) for (k in aiRules.keys()) merged.put(k, aiRules.get(k))
+        for (k in kbRules.keys()) {
+            val main = JSONObject(kbRules.getJSONObject(k).toString())
+            aiRules?.optJSONObject(k)?.let { a ->
+                val alts = main.optJSONArray("alts") ?: JSONArray().also { main.put("alts", it) }
+                val key = a.optString("formation") + "|" + a.optString("style")
+                val have = (0 until alts.length()).any { alts.optJSONObject(it)?.let { x -> x.optString("formation") + "|" + x.optString("style") } == key } ||
+                    key == main.optString("formation") + "|" + main.optString("style")
+                if (!have && alts.length() < 4) alts.put(JSONObject(a.toString()).also { it.remove("alts") })
+            }
+            merged.put(k, main)
+        }
+        return JSONObject().put("at", maxOf(kb.optLong("at"), ai?.optLong("at") ?: 0L)).put("rules", merged)
+    }
 
     private val BASES = listOf("4-3-3", "4-4-2", "4-2-3-1", "4-5-1", "5-4-1", "5-3-2", "3-4-3", "5-2-3", "3-5-2")
 
@@ -1568,7 +1610,7 @@ object MetaRefresh {
                     "(a resposta ficou guardada no diagnóstico)"
             }
             // junta com o que já havia: situações novas entram, as repetidas são atualizadas
-            val old = remote(repo)?.optJSONObject("rules")
+            val old = aiRemote(repo)?.optJSONObject("rules")
             val merged = JSONObject()
             if (old != null) for (k in old.keys()) merged.put(k, old.get(k))
             for (k in clean.keys()) merged.put(k, clean.get(k))
@@ -1707,11 +1749,12 @@ object MetaRefresh {
 
     /** Atualiza sozinho uma vez por semana (em segundo plano); depois de uma tentativa, espera 24 h para tentar de novo. */
     fun refreshIfStale(ctx: Context) {
+        WebKnow.refreshIfStale(ctx)
         if (running || !AiClient.hasAnyKey(ctx)) return
         val lastTry = Settings.get(ctx, "meta_try_at", "0").toLongOrNull() ?: 0L
         if (System.currentTimeMillis() - lastTry < 24L * 3600000L) return
         AppScope.scope.launch(Dispatchers.IO) {
-            val r = remote(Repo(ctx))
+            val r = aiRemote(Repo(ctx))
             if (r == null || System.currentTimeMillis() - r.optLong("at") > 7L * 86400000L) {
                 runCatching { Diag.log("Modelo da comunidade: " + refresh(ctx)) }
             }

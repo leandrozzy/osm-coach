@@ -13,7 +13,7 @@ object Hints {
     data class Hint(val icon: String, val title: String, val detail: String, val action: Boolean = false)
 
     /** Dicas que são "ainda não fiz": treinador parado, faltam jogadores, preparação, patrocínio vencido. Sugestão de melhoria não conta. */
-    private val ACTION_ICONS = setOf("🏋", "🚨", "📝", "🤝", "🔄", "🏗", "🏟", "⏰", "⚖", "🩹")
+    private val ACTION_ICONS = setOf("🏋", "🚨", "📝", "🤝", "🔄", "🏗", "🏟", "⏰", "⚖", "🩹", "🧩", "💼")
 
     fun asHint(t: Playbook.Tip): Hint = Hint(t.icon, t.title, t.why, t.icon in ACTION_ICONS && !(t.icon == "🤝" && t.priority < 88))
 
@@ -28,13 +28,30 @@ object Hints {
 
     private fun kv(f: Map<String, StoredField>, k: String): String? = f[k]?.value?.takeIf { FieldMerge.known(it) }
 
+    /** Slot livre no OSM (sem liga nem batalha): treinadores, mercado e dicas do clube antigo não valem mais. */
+    fun slotFree(f: Map<String, StoredField>): Boolean = f[K.SLOT_STATE]?.value == "vazio"
+
     /** Telas desatualizadas deste slot (com as regras do Fresh). */
+    /** A competição deste slot terminou (todas as rodadas jogadas ou tela de fim de época lida): não há mais nada a pedir. */
+    suspend fun competitionOver(repo: Repo, slot: Int, f: Map<String, StoredField> = emptyMap(), now: Long = System.currentTimeMillis()): Boolean {
+        val fields = f.ifEmpty { repo.fieldMap(slot) }
+        if (Fixtures.seasonEnded(fields, repo.dao.matchesOf(slot), now)) return true
+        return repo.dao.plan(slot, "season")?.json?.let { runCatching { JSONObject(it).optBoolean("over") }.getOrNull() } == true
+    }
+
     suspend fun needsFor(repo: Repo, slot: Int, matchAt: Long?, active: Boolean, now: Long = System.currentTimeMillis()): List<Fresh.Need> {
+        if (competitionOver(repo, slot, now = now)) return emptyList()
         val sp = Sponsors.fromJson(repo.dao.plan(slot, "sponsor")?.json)?.first.orEmpty()
         val lastMatch = runCatching {
             repo.dao.matchesOf(slot).filter { it.scoreMine != null || it.result != null }.mapNotNull { Fixtures.kickoff(it) }.filter { it <= now }.maxOrNull()
         }.getOrNull()
-        return Fresh.needs(Fresh.In(slot, repo.seenMap(slot), repo.timers(slot), matchAt, sp.any { it.games <= 1 }, now, active, lastMatch))
+        val (inj, susp) = repo.outByDoctorOrLawyer(slot)
+        val reds = repo.redsOf(slot).size
+        val noAppeal = repo.dao.plan(slot, "noappeal")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?.let { it.optInt("round", -2) == (repo.fieldMap(slot)[K.ROUND]?.value?.toIntOrNull() ?: -1) } == true
+        return Fresh.needs(Fresh.In(slot, repo.seenMap(slot), repo.timers(slot), matchAt, sp.any { it.games <= 1 }, now, active, lastMatch, reds, inj.size, noAppeal,
+            repo.fieldMap(slot)[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 6L * 3_600_000L }?.value,
+            FormRead.lag(repo.dao.matchesOf(slot), repo.fieldMap(slot)[K.ROUND_DONE]?.value?.toIntOrNull())))
     }
 
     suspend fun slotTips(
@@ -43,6 +60,7 @@ object Hints {
     ): List<Playbook.Tip> = runCatching {
         val now = System.currentTimeMillis()
         val f = repo.fieldMap(slot)
+        if (competitionOver(repo, slot, f, now) || slotFree(f)) return@runCatching emptyList<Playbook.Tip>()
         val xi = xi0 ?: runCatching {
             TacticEngine.recommend(Director.tacticInput(repo, slot))?.rows?.flatten()?.mapNotNull { it?.nameKey }?.toSet()
         }.getOrNull() ?: emptySet()
@@ -65,7 +83,7 @@ object Hints {
         val state = f[K.SLOT_STATE]?.value
         val matchTime = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull()
         val needs = needsFor(repo, slot, matchTime, (state == null || state == "ativo") && kv(f, K.TEAM) != null, now)
-        Playbook.tips(
+        val base = Playbook.tips(
             Playbook.Input(
                 events = events, activeEvents = active, upcomingEvents = upcoming,
                 prep = prep, prepAt = prepAt,
@@ -83,12 +101,76 @@ object Hints {
                 lawyerBusy = timers.any { it.lawyer && it.at > now },
                 noAppeal = noAppeal,
                 doctorBusy = timers.any { it.doctor && it.at > now },
-                listings = repo.dao.listingsOf(slot),
+                listings = repo.dao.listingsOf(slot).let { l -> SlotRules.load(repo, slot)?.maxBuy?.let { cap -> l.filter { (it.strength ?: 0) <= cap } } ?: l },
+                rules = SlotRules.load(repo, slot),
                 round = kv(f, K.ROUND)?.toIntOrNull(), roundTotal = kv(f, K.ROUND_TOTAL)?.toIntOrNull(),
                 seats = work.seats, matchAt = matchAt ?: f[K.MATCH_AT]?.value?.toLongOrNull(), now = now
             )
         )
+        val rules = SlotRules.load(repo, slot)
+        val ruleTips = rules?.let { r ->
+            val lastRead = f.values.maxOfOrNull { it.updatedAt }
+            SlotRules.tips(r, repo.playersOf(slot), xi, kv(f, K.ROUND)?.toIntOrNull(), kv(f, K.ROUND_TOTAL)?.toIntOrNull(), lastRead, now, SlotRules.gather(repo, slot, r, f, now))
+        }.orEmpty()
+        val late2 = kv(f, K.ROUND)?.toIntOrNull()?.let { r -> kv(f, K.ROUND_TOTAL)?.toIntOrNull()?.let { t -> r > t / 2 } } == true
+        // 2º turno sem transferências: some com as dicas de vender/listar (a liga proíbe)
+        val baseOk = if (rules?.noTransferSecondHalf == true && late2) base.filter { it.icon !in setOf("💰", "🔁", "📉") } else base
+        baseOk + ruleTips + todoTips(repo.dao.plan(slot, "todolist")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, now, repo.dao.plan(slot, "tacmounted")?.at ?: 0L, repo.dao.plan(slot, "sponsor")?.at ?: 0L, repo.dao.plan(slot, "lineup")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }?.takeIf { it.optBoolean("full") }?.optLong("at") ?: 0L) + leagueTips(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, f, repo.playersOf(slot).count { it.owner == "MY" }, now)
     }.getOrDefault(emptyList())
+
+    /** O que a aba "Lista de Afazeres" do OSM pediu na última leitura (vale 24 h): 11 inicial incompleto e patrocinador à espera. */
+    fun todoTips(j: JSONObject?, now: Long, tacticAt: Long = 0L, sponsorAt: Long = 0L, lineupFullAt: Long = 0L): List<Playbook.Tip> {
+        if (j == null || now - j.optLong("at", 0L) > 24L * 3600000L) return emptyList()
+        val listAt = j.optLong("at", 0L)
+        val keys = j.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val out = ArrayList<Playbook.Tip>()
+        // lista lida ANTES de você ter passado pela tela de Tática / Patrocinadores: o item pode já ter sido resolvido
+        if ("onze" in keys && tacticAt <= listAt && lineupFullAt <= listAt) out.add(Playbook.Tip("🧩", "Onze inicial incompleto: escolha o 11", "O OSM avisa que faltam jogadores no 11 (lesão, venda ou suspensão). Menu ☰ → Equipa inicial: time sem 11 em campo joga enfraquecido.", 96, 4))
+        if ("patroc" in keys && sponsorAt <= listAt) out.add(Playbook.Tip("💼", "Patrocinador à espera: escolha um acordo", "Menu ☰ → Estádio → Bancada: contrato novo rende por jogo em casa (ex.: +97K) e não gasta Boss Coins.", 70, 0))
+        return out
+    }
+
+    /** Seu elenco contra o da liga (tabela "Valor do plantel") e o convite para ler as tabelas quando faltam. Só informação: não conta na bolha. */
+    fun leagueTips(lj: JSONObject?, f: Map<String, StoredField>, mySize: Int, now: Long): List<Playbook.Tip> {
+        val done = kv(f, K.ROUND_DONE)?.toIntOrNull() ?: 0
+        val stAt = lj?.optLong("stAt", 0L) ?: 0L
+        val vaAt = lj?.optLong("vaAt", 0L) ?: 0L
+        val stale = 7L * 24 * 3600000L
+        val out = ArrayList<Playbook.Tip>()
+        if (done >= 6 && (now - stAt > stale || now - vaAt > stale)) {
+            out.add(
+                Playbook.Tip(
+                    "📊", "Leia a tabela da liga: Classificação e Valor do plantel",
+                    "Menu ☰ → Classificação, abas Classificação e Valor do plantel (role até o fim). O app compara o seu elenco com os rivais e ajusta a tática pelos gols que cada time marca e sofre.", 35, 0
+                )
+            )
+        }
+        val vals = League.table(lj, "va")
+        val me = League.find(vals, kv(f, K.TEAM) ?: kv(f, K.HUB_TITLE))
+        val c = League.squad(vals, me) ?: return out
+        out.add(Playbook.Tip("🏆", "Valor do elenco: ${c.rank}º de ${c.of} na liga", "Seu elenco vale ${"%.0f".format(c.value)}M" + (c.topValue?.let { "; o líder tem ${"%.0f".format(it)}M" } ?: "") + ".", 25, 0))
+        val mp = c.medianPlayers
+        val myPlayers = c.players ?: mySize
+        if (mp != null && myPlayers < mp - 1.5) {
+            out.add(
+                Playbook.Tip(
+                    "👥", "Seu elenco é menor que o da liga ($myPlayers × mediana ${"%.0f".format(mp)})",
+                    "Elenco curto fica sem reposição em lesão e suspensão e sobe menos de valor. Contrate reservas jovens e baratas até perto de ${"%.0f".format(mp)} (sem gastar Boss Coins: só com caixa e mercado).", 62, 2
+                )
+            )
+        }
+        val ma = c.medianAvg
+        val myAvg = c.avg
+        if (ma != null && myAvg != null && myAvg < ma * 0.85) {
+            out.add(
+                Playbook.Tip(
+                    "📈", "Valor médio por jogador abaixo da liga (${"%.1f".format(myAvg).replace('.', ',')}M × mediana ${"%.1f".format(ma).replace('.', ',')}M)",
+                    "O valor sobe com treino e com jogador jovem de alto potencial. Mantenha os 5 treinadores sempre ocupados e venda cedo quem só sobra no elenco.", 58, 6
+                )
+            )
+        }
+        return out
+    }
 
     private val BY_SCREEN = mapOf(
         ScreenType.TRAINING to setOf("🏋", "🗓", "⏰"),
@@ -125,6 +207,9 @@ object Hints {
         val f = repo.fieldMap(slot)
         val title = kv(f, K.TEAM) ?: kv(f, K.HUB_TITLE) ?: "Slot $slot"
         val spend = Settings.get(ctx, "spend_bc", "0") == "1"
+        if (slotFree(f)) return listOf(Hint("➕", "Slot livre", "Sem liga ou batalha neste slot: nada a fazer até começar outra.", false))
+        // fim da liga/batalha: a tela de fim de época basta; nada mais a pedir até começar outra competição
+        if (competitionOver(repo, slot, f)) return listOf(Hint("🏁", "Competição encerrada", "Nada a fazer neste slot até a nova liga ou batalha começar.", false))
         val tips = slotTips(repo, slot, null, null, title, trainRates(repo), spend)
         val now = System.currentTimeMillis()
         val st0 = f[K.SLOT_STATE]?.value
@@ -143,12 +228,17 @@ object Hints {
         val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
         val gameSoon = matchAt != null && matchAt > now && matchAt - now <= Director.TACTIC_WINDOW_MS
         val ch = rivalChangesOf(repo, slot)
-        if (activeSlot && tacticOk.not() && gameSoon) pend.add(Hint("⚡", "Gere a tática deste jogo no app", "Toque em 📱 App → Slots → Tática → Gerar.", true))
+        // a mesma regra do cartão do slot: sem as leituras do rival (3 h) a tática não vale, nem gera; o texto diz o que falta
+        val gaps = if (activeSlot && gameSoon) Director.tacticGaps(f, now) else emptyList()
+        if (gaps.isNotEmpty()) pend.add(Hint("🔎", "Leia o rival antes da tática", Director.checklist(f, now) + " → " + gaps.first().second, true))
+        else if (activeSlot && tacticOk.not() && gameSoon) pend.add(Hint("⚡", "Gere a tática deste jogo no app", "Toque em 📱 App → Slots → Tática → Gerar.", true))
         if (activeSlot && ch.isNotEmpty()) pend.add(Hint("⚠", "O rival mudou: gere a tática de novo", RivalWatch.headline(ch), true))
 
         // tática gerada: montar no OSM é pendência até a tela de tática do jogo confirmar que está igual
-        val done = repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it).optLong("at") }.getOrNull() }
-        if (activeSlot && tacticOk && tj != null && tp != null && done != tp.at) {
+        val doneJ = repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val done = doneJ?.optLong("at")
+        val doneSame = tj != null && doneJ?.optString("sig").orEmpty().let { it.isNotBlank() && it == Director.mountSig(tj) }
+        if (activeSlot && tacticOk && tj != null && tp != null && done != tp.at && !doneSame) {
             pend.add(Hint("📋", "Monte: ${tj.optString("formation")} • ${tj.optString("playStyle")}", Director.tacticSummary(tj), true))
         }
         // O cartão mostra SÓ o que falta fazer (o que já foi feito não aparece nem conta). Na tela de preparação, cada item.

@@ -11,6 +11,9 @@ object ResultCtx {
     var at: Long = 0L
 }
 
+/** Último momento em que cada aviso do registro foi gravado (compartilhado: o app cria vários Repo). */
+private val LEARN_SEEN = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
 class Repo(private val ctx: Context) {
     val dao: CoachDao = CoachDb.get(ctx).dao()
 
@@ -37,6 +40,11 @@ class Repo(private val ctx: Context) {
             if (o != null && now < o.updatedAt && FieldMerge.known(o.value)) continue
             if (k in CHECKED && o != null && old[k]?.source != "manual") noteConflict(slot, k, o, r.value, now)
             val n = FieldMerge.merge(k, o, r, now) ?: continue
+            // mesma leitura repetida: só renova a data de leitura (mantém a origem e não conta como mudança)
+            if (o != null && o.value == n.value && n.conf == o.conf) {
+                dao.putField(FieldEntity(slot, k, n.value, n.conf, n.updatedAt, old[k]?.source ?: source))
+                continue
+            }
             dao.putField(FieldEntity(slot, k, n.value, n.conf, n.updatedAt, source))
             if (k == K.RIVAL_FORMATION || k == K.MY_FORMATION) rememberFormation(n.value)
             changed++
@@ -62,6 +70,11 @@ class Repo(private val ctx: Context) {
     }
 
     suspend fun learn(slot: Int, kind: String, text: String, now: Long = System.currentTimeMillis()) {
+        // o mesmo aviso (ex.: "elenco de dono desconhecido ignorado") a cada quadro lotava o registro: 1 vez a cada 30 min
+        val key = "$slot|$kind|${text.take(300)}"
+        val prev = LEARN_SEEN[key]
+        if (prev != null && now - prev < 30L * 60_000L) return
+        LEARN_SEEN[key] = now
         dao.insertLearning(LearningEntity(at = now, slotId = slot, kind = kind, text = text.take(300)))
     }
 
@@ -91,6 +104,12 @@ class Repo(private val ctx: Context) {
             return adv.clock
         }
         val c = c0
+        // competição que ainda não começou: o hub não mostra "x/y" e as rodadas concluídas ficavam "NI" (S3, 11/11).
+        // Concluídas = próxima rodada − 1; qualquer leitura do hub/resultado (fonte ≠ sync) passa por cima.
+        val dn = rows.firstOrNull { it.fkey == K.ROUND_DONE }
+        if (c.round != null && c.round >= 1 && (dn == null || dn.source == "sync") && dn?.fvalue?.toIntOrNull() != c.round - 1) {
+            dao.putField(FieldEntity(slot, K.ROUND_DONE, (c.round - 1).toString(), 0.5, now, "sync"))
+        }
         val cur = rows.firstOrNull { it.fkey == K.ROUND }
         val old = cur?.fvalue?.toIntOrNull()
         if (c.round != null && c.round != old && (cur?.source != "manual" || (old != null && c.round > old))) {
@@ -228,7 +247,18 @@ class Repo(private val ctx: Context) {
             val rows = dao.fieldsOf(c.slot).associateBy { it.fkey }
             val prev = rows[K.SLOT_STATE]?.fvalue
             // pré-época na central, mas o pré-jogo da competição nova já foi lido (jornada 1-2): o slot está ativo
-            if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 99) <= 2) continue
+            if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 99) <= 2) {
+                // o slot segue "ativo", mas o card da central mostra o NOME da competição nova ("Brasileirão UZM"): sem isto o app mostrava
+                // para sempre a liga anterior ("Superliga Uzbeque", lida em 01/11). Total de rodadas da liga antiga sai (o novo vem com o "x/y").
+                if (c.team.isNotBlank()) changed += hubPut(c.slot, K.HUB_TITLE, Txt.titleCase(c.team), now)
+                if (c.subtitle.isNotBlank()) {
+                    val oldComp = rows[K.COMPETITION]?.fvalue
+                    val newComp = Txt.titleCase(c.subtitle)
+                    if (oldComp != null && Txt.sim(Txt.key(oldComp), Txt.key(newComp)) < 0.6) { dao.deleteField(c.slot, K.ROUND_TOTAL); dao.deleteField(c.slot, K.COMP_TYPE) }
+                    changed += hubPut(c.slot, K.COMPETITION, newComp, now)
+                }
+                continue
+            }
             if (c.state != null) {
                 // Slot livre, procurando adversário ou pré-época: a competição anterior acabou. Só arquiva quando DUAS
                 // leituras da central (com 15 s ou mais entre elas) mostram o mesmo estado; nunca apaga os campos
@@ -288,6 +318,7 @@ class Repo(private val ctx: Context) {
             }
             r[K.COMP_TYPE] = Reading(type, 0.7)
             if (type == "Batalha") r[K.RIVAL_HUMAN] = Reading("Sim", 0.9)
+            changed += runCatching { detectSwitchFromHub(c, type, now) }.getOrDefault(0)
             changed += putFields(c.slot, r, "hub", now)
         }
         return changed
@@ -311,6 +342,10 @@ class Repo(private val ctx: Context) {
     /** O slot passou a ter o meu time novo: troca o time guardado e o slot volta a "ativo". */
     suspend fun startCompetition(slot: Int, team: String, now: Long) {
         val old = dao.fieldsOf(slot).firstOrNull { it.fkey == K.TEAM }
+        // competição nova no slot livre: o que era da anterior (liga, total, rodada, regras, elenco do clube antigo) é arquivado/apagado;
+        // só o aprendizado (tlog/relatórios arquivados, lições) fica
+        if (old != null && Txt.sim(Txt.key(old.fvalue), Txt.key(team)) < 0.85) runCatching { archiveSeason(slot, now, true) }
+        else runCatching { archiveSeason(slot, now, false) }
         if (old != null && Txt.sim(Txt.key(old.fvalue), Txt.key(team)) < 0.85) dao.deleteField(slot, K.TEAM)
         dao.putField(FieldEntity(slot, K.SLOT_STATE, "ativo", 0.9, now, "pregame"))
         dao.deleteField(slot, K.SLOT_PENDING)
@@ -334,10 +369,61 @@ class Repo(private val ctx: Context) {
     private suspend fun newSeasonIfNeeded(slot: Int, roundRead: Int?, now: Long): Boolean {
         val r = roundRead ?: return false
         val done = Fixtures.lastDone(dao.matchesOf(slot), scoredRounds(slot)) ?: return false
-        if (r > 3 || done < r + 5) return false
-        archiveSeason(slot, now, false)
-        learn(slot, "temporada", "Competição nova (rodada $r depois da $done): calendário e relatórios antigos arquivados; o aprendizado das táticas continua.", now)
+        if (r <= 3 && done >= r + 5) {
+            archiveSeason(slot, now, false)
+            learn(slot, "temporada", "Competição nova (rodada $r depois da $done): calendário e relatórios antigos arquivados; o aprendizado das táticas continua.", now)
+            return true
+        }
+        // competição que entrou no meio (vídeo 07/11: nova liga já na rodada 5 e a anterior tinha 22 jogos): a rodada nunca volta
+        // na mesma competição, então rodada lida MENOR que as já jogadas = outra competição (2 leituras iguais para confirmar)
+        if (r < done) return confirmSwitch(slot, "R$r|$done", false, "rodada $r depois de $done jogadas", now, 2)
+        return false
+    }
+
+    /**
+     * Troca de competição/clube no slot, confirmada por leituras repetidas do mesmo sinal (o OCR pisca): arquiva a anterior
+     * (calendário, relatórios, tática, tabela, fim de temporada) e, se o clube mudou, apaga também elenco e leituras do clube
+     * e do rival antigos. O aprendizado das táticas (tlog) e as regras coladas do slot ficam.
+     */
+    private suspend fun confirmSwitch(slot: Int, sig: String, clearClub: Boolean, reason: String, now: Long, need: Int): Boolean {
+        val p = planJson(slot, "compswitch")
+        val n = if (p.optString("sig") == sig) p.optInt("n") + 1 else 1
+        if (n < need) {
+            dao.putPlan(PlanEntity(slot, "compswitch", org.json.JSONObject().put("sig", sig).put("n", n).toString(), now))
+            return false
+        }
+        dao.deletePlan(slot, "compswitch")
+        archiveSeason(slot, now, clearClub)
+        dao.deleteRivalFields(slot)
+        dao.deleteRivalPlayers(slot)
+        if (clearClub) {
+            for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
+        }
+        learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
+        Diag.log("S$slot: competição nova detectada ($reason)")
         return true
+    }
+
+    /** A central mostra outro clube/competição/nº de rodadas neste slot: é uma competição nova (não só a rodada que avança). */
+    private suspend fun detectSwitchFromHub(c: HubCard, type: String, now: Long): Int {
+        val f = fieldMap(c.slot)
+        val oldTitle = f[K.HUB_TITLE]?.value
+        val oldComp = f[K.COMPETITION]?.value
+        val oldTotal = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
+        if (oldTitle == null && oldComp == null) return 0
+        val newTitle = Txt.titleCase(c.team)
+        val titleChanged = oldTitle != null && newTitle.isNotBlank() && Txt.sim(Txt.key(oldTitle), Txt.key(newTitle)) < 0.7
+        val compChanged = oldComp != null && c.subtitle.isNotBlank() && Txt.sim(Txt.key(oldComp), Txt.key(Txt.titleCase(c.subtitle))) < 0.6
+        val totalChanged = oldTotal != null && c.roundTotal != null && oldTotal != c.roundTotal
+        val strong = (titleChanged && (compChanged || totalChanged)) || (compChanged && totalChanged)
+        if (!strong && !titleChanged) {
+            dao.deletePlan(c.slot, "compswitch")
+            return 0
+        }
+        val sig = "H|" + Txt.key(newTitle) + "|" + Txt.key(c.subtitle) + "|" + c.roundTotal
+        // só apaga o clube quando o título E a competição/nº de rodadas mudaram; título sozinho (OCR repetido) só arquiva a competição
+        return if (confirmSwitch(c.slot, sig, titleChanged && strong, "a central mostra $newTitle (${c.subtitle})", now, if (strong) 2 else 3)) 1 else 0
     }
 
     /**
@@ -345,9 +431,21 @@ class Repo(private val ctx: Context) {
      * ficam, renomeados, para o aprendizado). Com clearClub (slot livre ou batalha nova com outro clube) apaga também
      * os campos e o elenco do clube antigo.
      */
+    /** O que só vale DENTRO de uma competição (suspensões, tática montada, leituras do rival, forma, listas): apaga; o aprendizado (tlog arquivado, lições, histórico de treino) fica. */
+    private suspend fun clearCompetitionState(slot: Int) {
+        for (k in listOf("reds", "suspended", "noappeal", "tacticdone", "tacmounted", "autogen", "rivalsnap", "formread", "lineup", "todolist", "watch", "rivalchange", "prep", "whyalt", "reanalysis"))
+            dao.deletePlan(slot, k)
+        for (k in listOf(K.MY_FORM, K.RIVAL_FORM)) dao.deleteField(slot, k)
+        dao.deleteRivalFields(slot)
+        dao.deleteRivalPlayers(slot)
+    }
+
     private suspend fun archiveSeason(slot: Int, now: Long, clearClub: Boolean) {
         val tag = "X" + (now / 1000)
+        clearCompetitionState(slot)
         dao.deleteMatches(slot)
+        // competição nova = linha de base nova: semanas (valor do elenco) e livro de caixa do que acabou não valem
+        dao.deletePlan(slot, "weekly"); dao.deletePlan(slot, "ledger")
         for (p in dao.matchReports(slot)) {
             dao.putPlan(PlanEntity(slot, "old_" + tag + "_" + p.kind, p.json, p.at))
             dao.deletePlan(slot, p.kind)
@@ -375,7 +473,13 @@ class Repo(private val ctx: Context) {
             dao.putPlan(PlanEntity(slot, "old_" + tag + "_season", it.json, it.at))
             dao.deletePlan(slot, "season")
         }
-        for (k in listOf(K.ROUND, K.ROUND_DONE, K.MATCH_AT)) dao.deleteField(slot, k)
+        dao.plan(slot, "league")?.let {
+            dao.putPlan(PlanEntity(slot, "old_" + tag + "_league", it.json, it.at))
+            dao.deletePlan(slot, "league")
+        }
+        for (k in listOf(K.ROUND, K.ROUND_DONE, K.MATCH_AT, K.COMPETITION, K.COMP_TYPE, K.ROUND_TOTAL)) dao.deleteField(slot, k)
+        // regras coladas, bandeira da liga e valor-base da meta eram DA liga que acabou: a nova tem as suas
+        for (k in listOf("rules", "leagueflag", "valuebase")) dao.deletePlan(slot, k)
         if (clearClub) {
             dao.deleteFieldsOf(slot)
             dao.deletePlayersOf(slot)
@@ -385,6 +489,14 @@ class Repo(private val ctx: Context) {
 
     private suspend fun applyPregame(slot: Int, ex: Extraction, source: String, now: Long): Int {
         // competição nova só pela jornada lida com segurança (OCR); a leitura da IA (0,65) pode errar a jornada
+        run {
+            // o time lido no pré-jogo é outro: clube novo neste slot (a leitura é confiável: nome grande do meu time)
+            val nt = ex.fields[K.TEAM]?.takeIf { it.conf >= 0.8 }?.value
+            val ot = dao.fieldsOf(slot).firstOrNull { it.fkey == K.TEAM }?.fvalue
+            if (nt != null && ot != null && Txt.sim(Txt.key(ot), Txt.key(nt)) < 0.6) {
+                runCatching { confirmSwitch(slot, "P|" + Txt.key(nt), true, "meu time agora é $nt", now, 2) }
+            }
+        }
         newSeasonIfNeeded(slot, ex.roundRead ?: ex.fields[K.ROUND]?.takeIf { it.conf >= 0.85 }?.value?.toIntOrNull(), now)
         // Jogo novo (outra rodada): o cadeado do jogo anterior não vale mais.
         val oldRound = dao.fieldsOf(slot).firstOrNull { it.fkey == K.ROUND }?.fvalue?.toIntOrNull()
@@ -433,7 +545,8 @@ class Repo(private val ctx: Context) {
         else if (ex.fields[K.RIVAL_HUMAN]?.value == "Não" && (nickSeen || ex.fields.containsKey(K.RIVAL_LOGIN_BONUS) || humanHints(slot))) {
             ex.fields - K.RIVAL_HUMAN
         } else ex.fields
-        var n = putTracked(slot, readings, source, "PREGAME", now)
+        var n = putTracked(slot, readings - K.MY_FORM - K.RIVAL_FORM, source, "PREGAME", now)
+        runCatching { keepForms(slot, ex, now) }
         // Meu apelido não foi lido: o apelido sob o time que é o rival guardado ainda conta.
         if (!ex.fields.containsKey(K.RIVAL_NICK)) {
             val rk = (ex.fields[K.RIVAL_TEAM]?.value ?: fieldMap(slot)[K.RIVAL_TEAM]?.value)?.let { Txt.key(it) }
@@ -441,6 +554,31 @@ class Repo(private val ctx: Context) {
             if (nk != null && Evidence.plausibleNick(nk)) n += recordEvidence(slot, mapOf(K.RIVAL_NICK to nk.trim()), "PREGAME", now)
         }
         return n + confirmHuman(slot, planJson(slot, "evidence"), now) + estimateMid(slot, "rival.", now) + estimateMid(slot, "my.", now)
+    }
+
+    /**
+     * Forma (bolinhas) do Pré-jogo: a leitura mais COMPLETA do mesmo jogo vence (janela do app por cima, transição ou quadro
+     * parcial mostravam 1–2 bolinhas e apagavam as 5). Guarda a rodada da leitura: o jogo seguinte completa as bolinhas
+     * com os resultados novos (`FormRead.mine`). Plano `formread` {tag, round, my, rival, at}.
+     */
+    private suspend fun keepForms(slot: Int, ex: Extraction, now: Long) {
+        val my = ex.fields[K.MY_FORM]?.value?.takeIf { it.isNotEmpty() }
+        val rv = ex.fields[K.RIVAL_FORM]?.value?.takeIf { it.isNotEmpty() }
+        if (my == null && rv == null) return
+        val f = fieldMap(slot)
+        val round = f[K.ROUND]?.value?.toIntOrNull() ?: ex.roundRead ?: -1
+        val tag = "$round|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")
+        val old = planJson(slot, "formread")
+        val same = old.optString("tag") == tag
+        fun pick(k: String, nw: String?): String {
+            val o = if (same) old.optString(k) else ""
+            return if (nw != null && nw.length >= o.length) nw else o
+        }
+        val m = pick("my", my)
+        val r = pick("rival", rv)
+        dao.putPlan(PlanEntity(slot, "formread", JSONObject().put("tag", tag).put("round", round).put("my", m).put("rival", r).put("at", now).toString(), now))
+        if (m.isNotEmpty()) dao.putField(FieldEntity(slot, K.MY_FORM, m, 0.85, now, "ocr"))
+        if (r.isNotEmpty()) dao.putField(FieldEntity(slot, K.RIVAL_FORM, r, 0.85, now, "ocr"))
     }
 
     private suspend fun applySquad(slot: Int, ex: Extraction, source: String, now: Long): Int {
@@ -473,11 +611,19 @@ class Repo(private val ctx: Context) {
             }
         }
         if (owner == "MY" && ot != null) mapped[K.TEAM] = Reading(ot, 0.8)
-        if (owner == "RIVAL") {
-            val st = ex.fields["x.strength"]?.value?.toIntOrNull() ?: f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
-            val v = mapped[K.RIVAL_VALUE]
-            if (v != null && st != null) {
-                Money.fixLostComma(v.value, st)?.let { mapped[K.RIVAL_VALUE] = Reading(it, 0.8) }
+        run {
+            // OCR perde a vírgula ("57,3M" vira "573M"): vale para o MEU elenco também (S2 mostrou 573M em vez de 57,3M)
+            val vk = if (owner == "MY") K.MY_VALUE else K.RIVAL_VALUE
+            val st = ex.fields["x.strength"]?.value?.toIntOrNull() ?: f[if (owner == "MY") K.MY_STRENGTH else K.RIVAL_STRENGTH]?.value?.toIntOrNull()
+            val v = mapped[vk]
+            if (v != null) {
+                var fixed = if (st != null) Money.fixLostComma(v.value, st) else null
+                if (fixed == null && owner == "MY") {
+                    // sem força: se o valor guardado é ~10× menor e só a vírgula explica, corrige
+                    val prev = Money.parse(f[vk]?.value); val now1 = Money.parse(v.value)
+                    if (prev != null && now1 != null && prev > 0 && now1 / prev in 7.0..13.0) fixed = Regex("^(\\d+)(\\d)M$").find(v.value.trim())?.let { it.groupValues[1] + "," + it.groupValues[2] + "M" }
+                }
+                fixed?.let { mapped[vk] = Reading(it, 0.8) }
             }
         }
         changed += putTracked(slot, mapped, source, "SQUAD", now)
@@ -493,6 +639,10 @@ class Repo(private val ctx: Context) {
         val blocked = blockedPlayers(slot)
         val seen = ArrayList<String>()
         val arrived = ArrayList<String>()
+        // contratação só vale se o elenco já era conhecido de antes (>6 h): na 1ª leitura de um clube (rolando a lista) todo jogador "novo" parecia comprado
+        val squadBaseAt = planJson(slot, "squadbase").optLong("at", 0L)
+        if (squadBaseAt == 0L) dao.putPlan(PlanEntity(slot, "squadbase", JSONObject().put("at", now).toString(), now))
+        val squadBaseOld = squadBaseAt != 0L && now - squadBaseAt > 6 * 3600_000L
         val cm = LinkedHashMap<String, Pair<Int, Int>>()
         for (p in ex.players) {
             var key = Txt.key(p.name)
@@ -522,7 +672,7 @@ class Repo(private val ctx: Context) {
                 posCode = if (aiOnly) old?.posCode ?: p.posCode else p.posCode ?: old?.posCode,
                 cat = if (aiOnly) old?.cat ?: p.cat else p.cat ?: old?.cat,
                 strength = if (aiOnly) old?.strength ?: p.strength else p.strength ?: old?.strength,
-                valueText = p.valueText ?: old?.valueText,
+                valueText = sanePlayerValue(old?.valueText, p.valueText),
                 training = p.training ?: old?.training,
                 forSale = p.forSale ?: old?.forSale,
                 updatedAt = now
@@ -532,7 +682,33 @@ class Repo(private val ctx: Context) {
                 changed++
             }
             // jogador novo num elenco que já estava lido = contratação (a 1ª leitura do elenco não conta)
-            if (old == null && existing.size >= 14 && source != "ai" && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
+            if (old == null && existing.size >= 14 && squadBaseOld && source != "ai" && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
+        }
+        // bandeiras (coluna Nac.): agrupa assinaturas parecidas numa só (representante) e guarda por jogador no plano "nations"
+        runCatching {
+            val withNat = ex.players.filter { it.nat != null }
+            if (withNat.size >= 3 && source != "ai") {
+                val reps = planJson(slot, "natreps").optJSONArray("reps")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.toMutableList() ?: mutableListOf()
+                val nat = planJson(slot, "nations")
+                for (p in withNat) {
+                    val s = p.nat!!
+                    val rep = reps.firstOrNull { SlotRules.sameFlag(it, s) } ?: s.also { reps.add(it) }
+                    val k = Txt.key(p.name)
+                    val key = seen.firstOrNull { it == k } ?: dao.playersOf(slot).firstOrNull { it.owner == "MY" && SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                    nat.put(key, rep)
+                }
+                dao.putPlan(PlanEntity(slot, "natreps", JSONObject().put("reps", JSONArray(reps)).toString(), now))
+                dao.putPlan(PlanEntity(slot, "nations", nat.toString(), now))
+                // assinatura rica por jogador (o Atlas dá o nome do país)
+                val rich = planJson(slot, "natrich")
+                for (p in withNat) {
+                    val rs = p.natRich ?: continue
+                    val k = Txt.key(p.name)
+                    val key = seen.firstOrNull { it == k } ?: dao.playersOf(slot).firstOrNull { it.owner == "MY" && SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                    rich.put(key, rs)
+                }
+                dao.putPlan(PlanEntity(slot, "natrich", rich.toString(), now))
+            }
         }
         if (ex.players.size >= 3) {
             runCatching { noteScreen(slot, ScreenType.SQUAD, now) }
@@ -547,6 +723,20 @@ class Repo(private val ctx: Context) {
                 if (!y && cards.has(near)) { cards.remove(near); cardsChanged = true }
             }
             if (cardsChanged) dao.putPlan(PlanEntity(slot, "cards", cards.toString(), now))
+            // cruz vermelha no Estado = lesionado; só sai da lista quando a cruz some (linha lida sem cruz)
+            run {
+                val inj = planJson(slot, "injured")
+                val oldNames = inj.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().toMutableList()
+                var ch = false
+                for (p in ex.players) {
+                    val flag = p.injured ?: continue
+                    val k = Txt.key(p.name)
+                    val near = existing.firstOrNull { it.nameKey == k }?.nameKey ?: existing.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+                    if (flag && near !in oldNames) { oldNames.add(near); ch = true }
+                    if (!flag && near in oldNames) { oldNames.remove(near); ch = true }
+                }
+                if (ch) dao.putPlan(PlanEntity(slot, "injured", JSONObject().put("names", JSONArray(oldNames)).put("at", now).toString(), now))
+            }
             // cartão vermelho = suspenso (vale mesmo sem passar pelo Advogado); quem foi lido sem vermelho sai
             val reds = planJson(slot, "reds")
             var redsChanged = false
@@ -748,8 +938,13 @@ class Repo(private val ctx: Context) {
         val x = ex.extra ?: return 0
         when (ex.type) {
             ScreenType.PREP -> {
-                val items = x.optJSONArray("items") ?: return 0
-                if (items.length() == 0) return 0
+                // aba "Lista de Afazeres": o que o jogo pede agora (guardado inteiro; item que sumiu da lista foi feito)
+                if (x.optBoolean("todoSeen")) {
+                    dao.putPlan(PlanEntity(slot, "todolist", JSONObject().put("keys", x.optJSONArray("todo") ?: JSONArray()).put("at", now).toString(), now))
+                    noteScreen(slot, ScreenType.PREP, now)
+                }
+                val items = x.optJSONArray("items") ?: return if (x.optBoolean("todoSeen")) 1 else 0
+                if (items.length() == 0) return if (x.optBoolean("todoSeen")) 1 else 0
                 val cur = planJson(slot, "prep")
                 for (i in 0 until items.length()) {
                     val o = items.optJSONObject(i) ?: continue
@@ -773,6 +968,8 @@ class Repo(private val ctx: Context) {
                     else if (!x.optBoolean("empty") && planJson(slot, "noappeal").length() > 0) dao.putPlan(PlanEntity(slot, "noappeal", "{}", now))
                 }
                 val kind = if (ex.type == ScreenType.DOCTOR) "injured" else "suspended"
+                // Advogado diz que não há ninguém: vermelhos antigos (nome que sumiu/OCR) não valem mais
+                if (ex.type == ScreenType.LAWYER && x.optBoolean("empty") && planJson(slot, "reds").length() > 0) dao.putPlan(PlanEntity(slot, "reds", "{}", now))
                 val mine = dao.playersOf(slot).filter { it.owner == "MY" }
                 val lines = x.optJSONArray("lines")
                 val names = ArrayList<String>()
@@ -786,6 +983,17 @@ class Repo(private val ctx: Context) {
                 if (names.isEmpty() && !x.optBoolean("empty")) return 0
                 val old = planJson(slot, kind)
                 val oldNames = old.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                // cartão de um jogador em tratamento: só soma (continua lesionado até acabar), sem apagar os outros da lista
+                if (x.optBoolean("card")) for (n in oldNames) if (n !in names) names.add(n)
+                // quem está em tratamento sai da lista de lesionados quando o cronômetro acaba (curado)
+                if (ex.type == ScreenType.DOCTOR && x.optBoolean("card") && !x.isNull("endsIn")) {
+                    val cardNames = lines?.let { l -> (0 until l.length()).mapNotNull { i -> mine.firstOrNull { nameMatches(l.optString(i), it) }?.nameKey } }.orEmpty().distinct()
+                    if (cardNames.isNotEmpty()) {
+                        val left = if (x.isNull("cross")) null else x.optInt("cross")
+                        dao.putPlan(PlanEntity(slot, "treating", JSONObject().put("names", JSONArray(cardNames)).put("until", now + x.optLong("endsIn") * 1000L).apply { left?.let { put("left", it) } }.toString(), now))
+                        if (left != null) learn(slot, "elenco", "Tratamentos que faltam (cruz): ${cardNames.joinToString { n -> mine.firstOrNull { it.nameKey == n }?.name ?: n }} = $left.", now)
+                    }
+                }
                 dao.putPlan(PlanEntity(slot, kind, JSONObject().put("names", JSONArray(names)).put("at", now).toString(), now))
                 noteScreen(slot, ex.type, now)
                 if (names.sorted() != oldNames.sorted()) {
@@ -851,6 +1059,9 @@ class Repo(private val ctx: Context) {
         }
     }
 
+    /** Jogadores com cartão vermelho no plantel (nameKeys). */
+    suspend fun redsOf(slot: Int): Set<String> = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
+
     /** Lesionados e suspensos lidos do Médico/Advogado (nameKeys). */
     suspend fun outByDoctorOrLawyer(slot: Int): Pair<Set<String>, Set<String>> {
         fun names(j: JSONObject): Set<String> {
@@ -858,6 +1069,7 @@ class Repo(private val ctx: Context) {
             return (0 until a.length()).map { a.optString(it) }.toSet()
         }
         val reds = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
+        // lesionado só sai da lista quando a cruz some (Médico sem ele): o fim de UM cronômetro não cura, a cruz pode pedir vários tratamentos
         return Pair(names(planJson(slot, "injured")), names(planJson(slot, "suspended")) + reds)
     }
 
@@ -870,6 +1082,11 @@ class Repo(private val ctx: Context) {
             // vale o maior teto já visto (o controle de preço começa no máximo)
             val old = dao.plan(slot, "ceiling")?.json?.let { runCatching { org.json.JSONObject(it).optDouble("r", 0.0) }.getOrNull() } ?: 0.0
             if (r > old) dao.putPlan(PlanEntity(slot, "ceiling", org.json.JSONObject().put("r", r).put("at", now).toString(), now))
+        }
+        // tabelas da liga inteira (Classificação / Valor do plantel): guarda para comparar o elenco e calibrar a tática
+        League.read(ocr)?.let { (kind, rows) ->
+            val old = dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+            dao.putPlan(PlanEntity(slot, "league", League.merge(old, kind, rows, now).toString(), now))
         }
         val deals = Sponsors.parse(ocr)
         if (deals.size >= 2) {
@@ -1048,6 +1265,9 @@ class Repo(private val ctx: Context) {
                 n++
             }
             if (f[K.MATCH_AT] != null) dao.deleteField(slot, K.MATCH_AT)
+            // competição acabou: some o que era só dela (rival, tática, suspensões, forma); resultados e aprendizado ficam para a revisão e o aprendizado
+            clearCompetitionState(slot)
+            dao.deletePlan(slot, "tactic")
         }
         return n
     }
@@ -1453,6 +1673,25 @@ class Repo(private val ctx: Context) {
             changed++
         }
         j.put("events", evs)
+        // lesão (cruz vermelha) no MEU lado do jogo: soma o jogador à lista de lesionados (o Médico confirma/limpa depois)
+        if (j.has("mineHome")) {
+            val side = if (j.optBoolean("mineHome")) "(casa)" else "(visitante)"
+            val mineP = dao.playersOf(slot).filter { it.owner == "MY" }
+            val hurt = ArrayList<String>()
+            for (e in rep.events) if (e.contains(side) && e.contains(" lesão de ")) {
+                val nm = e.substringAfter(" lesão de ").substringBefore(" (").trim()
+                mineP.firstOrNull { nameMatches(nm, it) }?.let { if (it.nameKey !in hurt) hurt.add(it.nameKey) }
+            }
+            if (hurt.isNotEmpty()) {
+                val oldI = planJson(slot, "injured")
+                val cur = oldI.optJSONArray("names")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                val merged = (cur + hurt.filter { it !in cur })
+                if (merged.size != cur.size) {
+                    dao.putPlan(PlanEntity(slot, "injured", JSONObject().put("names", JSONArray(merged)).put("at", now).toString(), now))
+                    learn(slot, "elenco", "Lesão no jogo: " + hurt.joinToString { n -> mineP.firstOrNull { it.nameKey == n }?.name ?: n } + ".", now)
+                }
+            }
+        }
         if (changed > 0 || old == null) {
             dao.putPlan(PlanEntity(slot, key, j.toString(), now))
             linkResult(slot, round, j, now)
@@ -1504,6 +1743,30 @@ class Repo(private val ctx: Context) {
             val home = mineHome == mineSide
             return if (home) pr.first else pr.second
         }
+        // o que foi JOGADO de verdade: a tática montada no OSM (tela de Tática, mesma rodada) e a formação que o Resultado mostra.
+        // Sem isso, derrota com tática trocada à mão era atribuída à tática do app (e o aprendizado ficava errado).
+        runCatching {
+            if (!t.has("genFormation")) {
+                val gen = t.optString("formation")
+                val m = dao.plan(slot, "tacmounted")?.json?.let { org.json.JSONObject(it) }?.takeIf { it.optInt("round", -2) == round }
+                val resultForm = side("formacao", true)?.let { Formations.canonical(it) }
+                val usedForm = resultForm ?: m?.optString("formation")?.takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }
+                var deviated = usedForm != null && Formations.canonical(gen) != usedForm
+                if (m != null) {
+                    val ps = m.optString("playStyle").takeIf { it.isNotBlank() }
+                    if (ps != null && Osm.style(ps) != Osm.style(t.optString("playStyle"))) { t.put("genPlayStyle", t.optString("playStyle")); t.put("playStyle", ps); deviated = true }
+                    val tk = m.optString("tackle").takeIf { it.isNotBlank() }
+                    if (tk != null && Osm.tackle(tk) != Osm.tackle(t.optString("tackle"))) { t.put("genTackle", t.optString("tackle")); t.put("tackle", tk); deviated = true }
+                    val mk = m.optString("marking").takeIf { it.isNotBlank() }
+                    if (mk != null && Osm.marking(mk) != Osm.marking(t.optString("marking"))) { t.put("genMarking", t.optString("marking")); t.put("marking", mk); deviated = true }
+                }
+                if (usedForm != null && Formations.canonical(gen) != usedForm) { t.put("genFormation", gen); t.put("formation", usedForm) }
+                if (deviated) {
+                    t.put("deviated", true)
+                    learn(slot, "resultado", "Na J$round você jogou ${t.optString("formation")} • ${t.optString("playStyle")} (a do app era $gen): o aprendizado usa o que foi jogado.", now)
+                }
+            }
+        }
         side("posse de bola", true)?.let { v -> pct(v)?.let { t.put("myPossession", it) } }
         side("faltas", true)?.let { v -> pct(v)?.let { t.put("myFouls", it) } }
         side("remates", true)?.let { v -> pct(v)?.let { t.put("myShots", it) } }
@@ -1515,7 +1778,30 @@ class Repo(private val ctx: Context) {
             t.put("switchChecked", true)
         }
         j.optString("mom").takeIf { it.isNotBlank() && !Overlay.isChip(it) }?.let { t.put("mom", it) }
+        // nota média dos meus jogadores por setor (a tela de Resultado mostra a nota de cada um)
+        runCatching { sectorRatings(slot, j, mineHome) }.getOrNull()?.let { t.put("secRate", it) }
         dao.putPlan(PlanEntity(slot, p.kind, t.toString(), p.at))
+    }
+
+    /** {GOL, DEF, MEI, ATA: nota média, n: jogadores casados} dos meus jogadores no relatório; null sem notas ou sem elenco. */
+    private suspend fun sectorRatings(slot: Int, j: org.json.JSONObject, mineHome: Boolean?): org.json.JSONObject? {
+        val arr = j.optJSONArray(if (mineHome == true) "rh" else "ra") ?: return null
+        val mine = playersOf(slot).filter { it.owner == "MY" }
+        if (mine.isEmpty()) return null
+        val by = HashMap<String, MutableList<Int>>()
+        for (i in 0 until arr.length()) {
+            val a = arr.optJSONArray(i) ?: continue
+            val nm = Txt.key(a.optString(0))
+            val r = a.optInt(1)
+            if (nm.length < 3 || r !in 1..10) continue
+            val p = mine.firstOrNull { it.nameKey == nm } ?: mine.firstOrNull { (it.nameKey.length >= 4 && nm.length >= 4) && (it.nameKey.endsWith(nm) || nm.endsWith(it.nameKey)) } ?: continue
+            by.getOrPut(p.cat ?: continue) { ArrayList() }.add(r)
+        }
+        if (by.isEmpty()) return null
+        val o = org.json.JSONObject()
+        for ((k, v) in by) o.put(k, Math.round(v.average() * 10) / 10.0)
+        o.put("n", by.values.sumOf { it.size })
+        return o
     }
 
     /**
@@ -1744,7 +2030,35 @@ class Repo(private val ctx: Context) {
      * Evolução do time: histórico de força/valor de quem foi lido (com a marca de treino), contratações no livro de
      * caixa (preço da lista de transferências quando o jogador foi visto lá) e o resumo da semana.
      */
+    /** Evolução (semanas, livro de caixa, histórico de treino) é do CLUBE: se o time do slot mudou, começa do zero (valores do clube antigo não se comparam). */
+    private suspend fun guardEvoTeam(slot: Int, now: Long) {
+        val team = fieldMap(slot)[K.TEAM]?.value?.takeIf { FieldMerge.known(it) } ?: return
+        val tag = dao.plan(slot, "evoteam")?.json
+        val weeks = Weekly.parse(dao.plan(slot, "weekly")?.json)
+        val cur = Money.parse(fieldMap(slot)[K.MY_VALUE]?.value)
+        // sem marca (versões antigas): só zera se o valor atual é incompatível com o histórico (outro clube)
+        val mixed = tag == null && cur != null && weeks.any { w -> w.value != null && w.value > 0 && (cur / w.value > 3.0 || w.value / cur > 3.0) }
+        val other = tag != null && Txt.sim(Txt.key(tag), Txt.key(team)) < 0.6
+        if (other || mixed) {
+            for (k in listOf("weekly", "ledger", "phist")) dao.deletePlan(slot, k)
+            learn(slot, "elenco", "Evolução reiniciada: o time do slot mudou para $team.", now)
+        }
+        if (tag == null || other) dao.putPlan(PlanEntity(slot, "evoteam", team, now))
+    }
+
+    /** Valor de jogador que muda ~10× de uma leitura para outra é vírgula perdida/ganha pelo OCR ("7,6M" ↔ "76M"): mantém o anterior. */
+    private fun sanePlayerValue(old: String?, new: String?): String? {
+        if (new == null) return old
+        val o = Money.parse(old); val n = Money.parse(new)
+        if (o != null && n != null && o > 0 && n > 0) {
+            val r = n / o
+            if (r in 8.0..12.5 || r in 0.08..0.125) return old
+        }
+        return new
+    }
+
     private suspend fun trackProgress(slot: Int, seen: List<String>, arrived: List<String>, now: Long) {
+        guardEvoTeam(slot, now)
         try {
             val mine = playersOf(slot).filter { it.owner == "MY" }
             val byKey = mine.associateBy { it.nameKey }
@@ -1781,7 +2095,7 @@ class Repo(private val ctx: Context) {
     suspend fun snapshotWeek(slot: Int, now: Long = System.currentTimeMillis()) {
         val f = fieldMap(slot)
         val mine = dao.playersOf(slot).filter { it.owner == "MY" }
-        val res = dao.tacticLogs(slot).mapNotNull { runCatching { org.json.JSONObject(it.json).optString("result") }.getOrNull() }
+        val res = dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { runCatching { org.json.JSONObject(it.json).optString("result") }.getOrNull() }
         val list = Weekly.parse(dao.plan(slot, "weekly")?.json)
         Weekly.upsert(
             list, Weekly.Week(
@@ -1799,7 +2113,8 @@ class Repo(private val ctx: Context) {
 
     /** Tudo o que a tela de Evolução mostra. */
     suspend fun progress(slot: Int, now: Long = System.currentTimeMillis()): ProgressData {
-        val logs = dao.tacticLogs(slot).mapNotNull { p -> runCatching { org.json.JSONObject(p.json).put("at", p.at) }.getOrNull() }
+        // só a competição atual (tlog_R*); as arquivadas ficam para o aprendizado
+        val logs = dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { p -> runCatching { org.json.JSONObject(p.json).put("at", p.at) }.getOrNull() }
         val mine = dao.playersOf(slot).filter { it.owner == "MY" }
         val weeks = Weekly.parse(dao.plan(slot, "weekly")?.json)
         return ProgressData(
@@ -1813,6 +2128,10 @@ class Repo(private val ctx: Context) {
         val j = planJson(slot, "squadseen")
         for (k in keys) j.put(k, now)
         dao.putPlan(PlanEntity(slot, "squadseen", j.toString(), now))
+        // quantas passadas leram cada nome: o nome mal lido (fantasma) aparece 1× e o verdadeiro dezenas (ver dedupeSlot)
+        val r = planJson(slot, "squadreads")
+        for (k in keys) r.put(k, r.optInt(k, 0) + 1)
+        dao.putPlan(PlanEntity(slot, "squadreads", r.toString(), now))
     }
 
     /** Remove um jogador que não existe (ou já saiu) e impede que a leitura o recrie. */
@@ -1899,7 +2218,26 @@ class Repo(private val ctx: Context) {
             dao.deletePlayer(slot, "MY", bad)
             learn(slot, "elenco", "Nome mal lido removido: \"${left.first { it.nameKey == bad }.name}\" (agora lido como \"${left.first { it.nameKey == keep }.name}\").", now)
         }
-        return drop.size + ghosts.size
+        // fantasma por contagem de leituras: mesma idade, posição, força e valor + nome ainda parecido; o nome lido só 1× (ou nenhuma) contra o
+        // outro lido 3+ vezes mais é erro de OCR ("Lapixdud" no lugar de "Capixaba"). Não depende do intervalo de 10 min das regras acima.
+        val reads = planJson(slot, "squadreads")
+        val gone = HashSet<String>(); for ((b, _) in ghosts) gone.add(b)
+        val rest = left.filter { it.nameKey !in gone }
+        var byReads = 0
+        for (a in rest) {
+            if (a.nameKey in gone) continue
+            val ra = reads.optInt(a.nameKey, 0)
+            if (ra > 1) continue
+            val real = rest.firstOrNull { b ->
+                b.nameKey != a.nameKey && b.nameKey !in gone && a.age != null && a.age == b.age && a.cat != null && a.cat == b.cat &&
+                    a.strength != null && a.strength == b.strength && a.valueText != null && a.valueText == b.valueText &&
+                    Txt.sim(a.nameKey, b.nameKey) >= 0.4 && reads.optInt(b.nameKey, 0) >= ra + 3
+            } ?: continue
+            gone.add(a.nameKey); byReads++
+            dao.deletePlayer(slot, "MY", a.nameKey)
+            learn(slot, "elenco", "Nome mal lido removido: \"${a.name}\" (lido poucas vezes; o jogador é \"${real.name}\").", now)
+        }
+        return drop.size + ghosts.size + byReads
     }
 
     /** Apaga jogadores "fantasma" (nome ilegível) que repetem outro jogador com mesma idade, força e posição. */

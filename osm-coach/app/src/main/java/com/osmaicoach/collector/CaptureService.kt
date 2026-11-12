@@ -157,6 +157,9 @@ class CaptureService : AccessibilityService() {
     private var hintType = ""
 
     /** Aviso curto por cima do OSM (ex.: tática montada diferente da gerada). Some sozinho. */
+    /** O serviço foi (re)ligado com a capacidade de gestos (config nova)? */
+    fun canSwipeAway(): Boolean = (serviceInfo?.capabilities ?: 0) and android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES != 0
+
     fun notice(text: String) {
         mainExecutor.execute {
             val tv = noticeView ?: return@execute
@@ -199,7 +202,19 @@ class CaptureService : AccessibilityService() {
                 val ok = Director.tacticValid(j, p.at, repo.fieldMap(slot), now)
                 val ch = rivalChangesOf(repo, slot)
                 val warn = if (ch.isNotEmpty()) "⚠ O rival mudou: " + RivalWatch.headline(ch) + ". Gere uma nova tática.\n" else ""
-                "S$slot • vs ${j.optString("rival")}\n" + (if (ok) "" else "⚠ Tática de outro jogo: gere de novo.\n") + warn + Director.tacticSummary(j)
+                if (!ok) {
+                    val f = repo.fieldMap(slot)
+                    val next = f[K.RIVAL_TEAM]?.value?.takeIf { FieldMerge.known(it) }
+                    val at = f[K.MATCH_AT]?.value?.toLongOrNull()
+                    val gaps = Director.tacticGaps(f, now)
+                    "S$slot" + (next?.let { " • próximo jogo vs $it" } ?: "") + "\n" +
+                        "Ainda não há tática para este jogo (a guardada era contra ${j.optString("rival")}).\n" +
+                        (if (at != null && at - now > Director.TACTIC_WINDOW_MS) "Ela é gerada nas últimas 8 h antes do jogo."
+                        else if (gaps.isNotEmpty()) "Antes de gerar, leia: " + gaps.joinToString(", ") { it.first } + "."
+                        else "Toque em 📱 App → Tática para gerar.")
+                } else {
+                    "S$slot • vs ${j.optString("rival")}\n" + warn + Director.tacticSummary(j)
+                }
             }
         }
     } catch (e: Exception) {
@@ -272,16 +287,16 @@ class CaptureService : AccessibilityService() {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding((8 * dp).toInt(), (5 * dp).toInt(), (8 * dp).toInt(), (5 * dp).toInt())
-                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(0x33FFFFFF) }
+                background = GradientDrawable().apply { cornerRadius = 14 * dp; setColor(0x332AB4FF) }
             }
             row.addView(TextView(this).apply { text = h.icon; textSize = 18f; setPadding(0, 0, (8 * dp).toInt(), 0) })
             val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             col.addView(TextView(this).apply {
-                text = h.title; setTextColor(android.graphics.Color.WHITE); textSize = 12.5f; maxLines = 2
+                text = h.title; setTextColor(android.graphics.Color.WHITE); textSize = 14f; maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
             })
-            col.addView(TextView(this).apply { text = h.detail; setTextColor(0xFFB8C7E6.toInt()); textSize = 10.5f; maxLines = if (allowDone) 2 else 30; ellipsize = android.text.TextUtils.TruncateAt.END })
+            col.addView(TextView(this).apply { text = h.detail; setTextColor(0xFFC3D3EE.toInt()); textSize = 12f; maxLines = if (allowDone) 3 else 30; ellipsize = android.text.TextUtils.TruncateAt.END })
             row.addView(col, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             if (allowDone) {
                 val done = TextView(this).apply {
@@ -330,7 +345,7 @@ class CaptureService : AccessibilityService() {
                         updateBadge()
                         if (gone.isNotEmpty()) notice("✅ Feito: " + gone.first().title)
                         if (cardView?.visibility == View.VISIBLE && headView?.text?.startsWith("Tática") != true) {
-                            showCard(hints, "S$slot • " + Hints.screenLabel(st))
+                            showCard(hints, (if (slot > 0) "S$slot • " else "OSM • ") + Hints.screenLabel(st))
                         }
                     }
                 }
@@ -408,9 +423,9 @@ class CaptureService : AccessibilityService() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF2132A5C.toInt(), 0xF20B1530.toInt())).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFA0F2347.toInt(), 0xFA081A3C.toInt())).apply {
                 cornerRadius = 18 * dp
-                setStroke((1 * dp).toInt(), 0x6672B8FF)
+                setStroke((1.5f * dp).toInt(), 0xAA2AB4FF.toInt())
             }
             elevation = 12 * dp
             addView(head)
