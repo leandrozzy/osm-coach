@@ -843,11 +843,25 @@ private fun MatchupHero(slot: Int, d: SlotData) {
         Text("📅  Próximo jogo", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
         val sub = listOfNotNull(known(d.fields, K.COMPETITION), known(d.fields, K.ROUND)?.let { "Rodada $it" }).joinToString(" • ")
         if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+        // o SEU time (marcado "VOCÊ") fica à esquerda em casa e à direita fora, como no OSM
+        val mineLeft = home != "Fora"
+        val mineCol: @Composable (Modifier) -> Unit = { m ->
+            Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(contentAlignment = Alignment.BottomEnd) { Crest(slot, 64.dp, known(d.fields, K.TEAM)); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(myStr, 30.dp, true) } }
                 Text(known(d.fields, K.TEAM) ?: "Meu time", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp))
+                Box(Modifier.padding(top = 4.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY.copy(alpha = 0.25f)).border(1.dp, C.PRIMARY.copy(alpha = 0.7f), RoundedCornerShape(50)).padding(horizontal = 9.dp, vertical = 2.dp)) {
+                    Text("VOCÊ" + (if (home == "Casa") " • 🏠 casa" else if (home != null) " • ✈ fora" else ""), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                }
             }
+        }
+        val rivalCol: @Composable (Modifier) -> Unit = { m ->
+            Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(rival, 64.dp, slot); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(rivalStr, 30.dp) } }
+                Text(rival ?: "rival não lido", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp), color = if (rival == null) C.WARN else Color.White)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (mineLeft) mineCol(Modifier.weight(1f)) else rivalCol(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (at != null && at > System.currentTimeMillis()) {
                     val cc = countdownColor(at)
@@ -863,10 +877,7 @@ private fun MatchupHero(slot: Int, d: SlotData) {
                 }
                 Text("VS", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
             }
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(rival, 64.dp, slot); Box(Modifier.offset(x = 8.dp, y = 8.dp)) { StrengthBadge(rivalStr, 30.dp) } }
-                Text(rival ?: "rival não lido", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp), color = if (rival == null) C.WARN else Color.White)
-            }
+            if (mineLeft) rivalCol(Modifier.weight(1f)) else mineCol(Modifier.weight(1f))
         }
         FlowRow(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.Center) {
             if (at != null) Pill("📅 " + fmtTime(at))
@@ -1299,6 +1310,8 @@ data class SlotSummary(
     val ended: Boolean = false,
     /** Central do OSM: "vazio" (+ começar nova liga) ou "procurando" (batalha procurando adversário). */
     val state: String? = null,
+    /** Próximo jogo em casa (true) ou fora (false); null = não lido. O time do usuário fica à ESQUERDA em casa e à DIREITA fora. */
+    val home: Boolean? = null,
     /** O rival mudou algo (formação, estilo, árbitro…) depois que a tática foi gerada. */
     val rivalChanged: List<RivalWatch.Change> = emptyList(),
     /** Última vez que o app conferiu o rival e a tática gerada continuou valendo (geração automática). */
@@ -1320,6 +1333,8 @@ object TodayCache {
 data class SlotData(
     /** false enquanto o slot ainda está carregando (evita piscar "ainda não lido"). */
     val ready: Boolean = false,
+    /** Slot sem competição em andamento (livre, procurando adversário, pré-época ou competição encerrada): texto do estado; null = ativo. */
+    val idle: String? = null,
     val fields: Map<String, StoredField> = emptyMap(),
     val players: List<PlayerEntity> = emptyList(),
     val matches: List<MatchEntity> = emptyList(),
@@ -1429,8 +1444,18 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
     val eveList = runCatching { buildEve(repo, slot, f, tplan) }.getOrDefault(emptyList())
+    val idleState = known(f, K.SLOT_STATE)?.takeIf { it == "vazio" || it == "procurando" || it == "preepoca" }
+    val idleOver = runCatching { Hints.competitionOver(repo, slot, f, System.currentTimeMillis()) }.getOrDefault(false)
+    val idleText = when {
+        idleState == "vazio" -> "Slot livre • sem liga ou batalha"
+        idleState == "procurando" -> "Procurando adversário"
+        idleState == "preepoca" -> "Pré-época • a competição começa em breve"
+        idleOver -> "Competição encerrada • aguardando a próxima"
+        else -> null
+    }
     return SlotData(
         ready = true,
+        idle = idleText,
         learned = runCatching { Learned.fit(Director.allLogs(repo)) }.getOrNull(),
         rivalPred = runCatching { RivalPredict.of(repo.rivalProfile(slot)?.json?.let { JSONObject(it) }) }.getOrNull(),
         fields = f, players = players, matches = dao.matchesOf(slot),
@@ -1541,7 +1566,8 @@ private suspend fun loadToday(ctx: Context): TodayData {
         val market = repo.dao.snapshots("TRANSFER", slot).isNotEmpty()
         val c = Completeness.compute(f, players, matches, market, f[K.ROUND_TOTAL]?.value?.toIntOrNull())
         val state = known(f, K.SLOT_STATE)?.takeIf { it == "vazio" || it == "procurando" || it == "preepoca" }
-        val name = when (state) {
+        val overNow = Hints.competitionOver(repo, slot, f, now)
+        val name = if (state == null && overNow) "Competição encerrada" else when (state) {
             "vazio" -> "Slot livre"
             "procurando" -> known(f, K.COMPETITION) ?: "Batalha"
             "preepoca" -> known(f, K.HUB_TITLE) ?: known(f, K.TEAM)
@@ -1550,6 +1576,7 @@ private suspend fun loadToday(ctx: Context): TodayData {
         list.add(
             SlotSummary(
                 slot = slot, title = name ?: "Slot $slot ainda não lido", known = name != null, state = state,
+                home = known(f, K.HOME)?.let { it == "Casa" },
                 competition = known(f, K.COMPETITION), compType = known(f, K.COMP_TYPE),
                 roundDone = known(f, K.ROUND_DONE), roundTotal = known(f, K.ROUND_TOTAL),
                 rival = known(f, K.RIVAL_TEAM), human = known(f, K.RIVAL_HUMAN),
@@ -2130,7 +2157,7 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
                 val kind = when (s.compType) { "Batalha" -> "⚔ Batalha"; "Copa" -> "🏆 Copa"; else -> null }
                 val flagE = Flags.emojiOfCompetition(s.competition)
                 val sub = listOfNotNull(kind, s.competition?.let { c -> if (flagE != null) "$flagE $c" else c }, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
-                if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (sub.isNotBlank() && !(s.ended && s.state == null)) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             s.win?.takeIf { at != null }?.let { w -> VerdictPill(verdictOf(w.win, w.draw, w.loss)) }
         }
@@ -2147,12 +2174,28 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
             if (s.needsResult) CtaButton("Registrar resultado", Modifier.padding(top = 12.dp)) { onTab(5) } else CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }
             return@Column
         }
-        // quem joga contra quem
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+        // quem joga contra quem: o SEU time (marcado "VOCÊ") fica à esquerda em casa e à direita fora, como no OSM
+        val mineLeft = s.home != false
+        val mineCol: @Composable (Modifier) -> Unit = { m ->
+            Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(contentAlignment = Alignment.BottomEnd) { Crest(s.slot, 48.dp, s.title); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
                 Text(s.title, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.clip(RoundedCornerShape(50)).background(C.PRIMARY.copy(alpha = 0.25f)).border(1.dp, C.PRIMARY.copy(alpha = 0.7f), RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 1.dp)) {
+                        Text("VOCÊ", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
+                    s.home?.let { Text(if (it) "  🏠 casa" else "  ✈ fora", fontSize = 11.sp, color = C.MUTED) }
+                }
             }
+        }
+        val rivalCol: @Composable (Modifier) -> Unit = { m ->
+            Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
+                Text(s.rival ?: "rival não lido", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp), color = if (s.rival != null) Color.White else C.WARN)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (mineLeft) mineCol(Modifier.weight(1f)) else rivalCol(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("VS", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = C.MUTED)
                 Column(
@@ -2163,18 +2206,15 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
                     Text(countdownShort(at), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = countdownColor(at), maxLines = 1)
                 }
             }
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
-                Text(s.rival ?: "rival não lido", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp), color = if (s.rival != null) Color.White else C.WARN)
-            }
+            if (mineLeft) rivalCol(Modifier.weight(1f)) else mineCol(Modifier.weight(1f))
         }
         s.human?.let { Text(if (it == "Sim") "👤 rival humano" else "🖥 rival CPU", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), textAlign = TextAlign.Center) }
         // forma recente dos dois e preparação, como no pré-jogo do OSM
         if (s.myForm != null || s.rivalForm != null || s.prepLevel != null) {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(s.myForm) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(if (mineLeft) s.myForm else s.rivalForm) }
                 PrepChip(s.prepLevel)
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(s.rivalForm) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) s.rivalForm else s.myForm) }
             }
         }
         // vitória / empate / derrota (previsão calibrada com os seus jogos) + dados lidos e tática
@@ -2361,6 +2401,7 @@ private fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) {
         AgendaCard(data)
         data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }
+        NoFlagFold()
         LearningCard()
         if (data.work.isNotEmpty()) {
             Fold("⏱", "Treinos e estádio", data.work.size.toString() + " slots") {
@@ -3043,21 +3084,25 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
     val ctx = LocalContext.current
     val tick = rememberTick(6000L)
     val data = rememberLoaded(SlotData(), tick, Pair(slot, UiBus.version)) { loadSlot(ctx, slot) }
-    val tabs = listOf("Visão geral", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Diretor", "Aprendizado")
-    val title = known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
+    val idle = data.idle
+    // slot sem competição em andamento: só a Visão geral (resumo do que foi) e o estado no topo; nada de Elenco/Calendário/Tática da competição antiga
+    val tabs = if (idle != null) listOf("Visão geral") else listOf("Visão geral", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Diretor", "Aprendizado")
+    val tab = if (idle != null) 0 else tab
+    val title = if (idle != null) "Slot $slot" else known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clip(RoundedCornerShape(50)).clickable { onBack() }, contentAlignment = Alignment.Center) { Text("‹", fontSize = 30.sp, color = Color.White) }
-            Crest(slot, 44.dp, known(data.fields, K.TEAM))
+            Crest(slot, 44.dp, if (idle != null) null else known(data.fields, K.TEAM))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (idle != null) Text(idle, color = C.GOLD, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                else Row(verticalAlignment = Alignment.CenterVertically) {
                     FlagBadge(Flags.isoFromCompetition(known(data.fields, K.COMPETITION)), data.leagueRich, null, 22.dp, 16.dp)
                     Text("Slot $slot • " + (known(data.fields, K.COMPETITION) ?: if (data.ready) "competição não lida" else ""), color = C.MUTED, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            data.completeness?.let { c ->
+            if (idle == null) data.completeness?.let { c ->
                 Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.End) {
                     Text("Slot ativo", fontSize = 11.5.sp, color = C.MUTED)
                     Text("${c.percent}%", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = if (c.percent >= 80) C.OK else if (c.percent >= 50) C.GOLD else C.WARN)
@@ -3065,7 +3110,7 @@ private fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> 
             }
             OsmButton()
         }
-        SlotTabs(tabs, tab, onTab)
+        if (idle == null) SlotTabs(tabs, tab, onTab)
         if (!data.ready) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = C.PRIMARY) }
             return@Column
@@ -3296,6 +3341,17 @@ private fun SlotSummaryTab(slot: Int, d: SlotData) {
     var missingEdit by remember { mutableStateOf<Completeness.Item?>(null) }
     val c = d.completeness
     val ended = Fixtures.seasonEnded(d.fields, d.matches, System.currentTimeMillis())
+    d.idle?.let { msg ->
+        Panel {
+            Text(if (ended) "🏁 $msg" else "🔎 $msg", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = C.GOLD)
+            Text(
+                if (ended) "O resumo abaixo mostra como foi. Os dados desta competição ficam guardados só para o aprendizado do app; as outras abas voltam quando a próxima começar."
+                else "Quando uma competição ou batalha começar, o app reconhece sozinho e as abas voltam.",
+                fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        if (!ended) return
+    }
     if (ended) {
         SeasonEndCard(d)
         if (d.board.size > 1) Fold("💬", "Mensagens da direção", d.board.size.toString()) { BoardLines(d.board) }
@@ -5944,27 +6000,6 @@ private fun SettingsTab() {
             Bar(flPct)
             Text("Escudos: ${cr.first} reais de ${clubs.size} clubes" + (if (cr.third > 0) " • buscando ${cr.third}" else if (clubs.isNotEmpty()) " ✅" else "") + (if (cr.second > 0) " • ${cr.second} sem escudo real (uso o recorte do jogo)" else ""), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
             Bar(crPct)
-            // jogadores sem bandeira confirmada (sem recorte nítido ainda): escolher o país à mão; fica guardado para os 4 slots e ligas futuras
-            var flagFor by remember { mutableStateOf<PlayerEntity?>(null) }
-            val noFlag = rememberLoaded(emptyList<Pair<Int, PlayerEntity>>(), prTick / 3, UiBus.version) {
-                val r = Repo(ctx)
-                val manual = FlagManual.all(r)
-                (1..4).flatMap { s ->
-                    val iso = r.dao.plan(s, "natiso2")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
-                    r.playersOf(s).filter { it.owner == "MY" && it.nameKey !in manual && (iso == null || iso.optString(it.nameKey).isBlank()) }.map { s to it }
-                }
-            }
-            if (noFlag.isNotEmpty()) {
-                Text("Jogadores sem bandeira (toque para escolher o país):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
-                for ((s, pl) in noFlag.take(25)) {
-                    Row(Modifier.fillMaxWidth().clickable { flagFor = pl }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("S$s", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.width(30.dp))
-                        Text(pl.name, fontSize = 14.sp, color = Color.White, modifier = Modifier.weight(1f))
-                        Text("🏳 escolher", fontSize = 13.sp, color = C.PRIMARY)
-                    }
-                }
-            }
-            flagFor?.let { fp -> PlayerFlagDialog(fp) { flagFor = null } }
             if (cr.second > 0) GhostButton("Tentar de novo os que faltaram") { CrestWeb.clearMisses(ctx.filesDir); UiBus.bump() }
             // clubes que nenhuma fonte achou: o app já tentou variações do nome (sem FC/SK, ß→ss, Red Bull→RB…); aqui dá para dizer com que outro nome procurar
             var aliasFor by remember { mutableStateOf<String?>(null) }
@@ -6582,6 +6617,43 @@ private fun LearningCard() {
 
 
 /** Onde achar cada novidade (aparece até o usuário tocar em "Entendi"). */
+/**
+ * Bandeiras dos jogadores sem país confirmado (só slots ATIVOS): escolher à mão; fica guardado (vale para os 4 slots e ligas futuras). Fica na aba
+ * Hoje, separado das bandeiras/escudos da web. Antes de listar, roda a identificação de cada slot (`playerCountries`): sem isso todos apareciam
+ * "sem bandeira" até você abrir o slot (o país só era calculado ao abrir).
+ */
+@Composable
+private fun NoFlagFold() {
+    val ctx = LocalContext.current
+    val tick = rememberTick(3000L)
+    var flagFor by remember { mutableStateOf<PlayerEntity?>(null) }
+    val noFlag = rememberLoaded(emptyList<Pair<Int, PlayerEntity>>(), tick, UiBus.version) {
+        val r = Repo(ctx)
+        val manual = FlagManual.all(r)
+        val now = System.currentTimeMillis()
+        (1..4).flatMap { s ->
+            val f = r.fieldMap(s)
+            val st = known(f, K.SLOT_STATE)
+            if (st == "vazio" || st == "procurando" || st == "preepoca" || Hints.competitionOver(r, s, f, now)) return@flatMap emptyList<Pair<Int, PlayerEntity>>()
+            runCatching { SlotRules.playerCountries(r, s, ctx.filesDir) }   // preenche os países já identificáveis (antes só ao abrir o slot)
+            val iso = r.dao.plan(s, "natiso2")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
+            r.playersOf(s).filter { it.owner == "MY" && it.nameKey !in manual && (iso == null || iso.optString(it.nameKey).isBlank()) }.map { s to it }
+        }
+    }
+    if (noFlag.isEmpty()) return
+    Fold("🏳", "Jogadores sem bandeira", "${noFlag.size}") {
+        Text("O app não achou o país destes jogadores. Toque para escolher: fica guardado e vale para todos os slots e ligas futuras.", fontSize = 13.sp, color = C.MUTED)
+        for ((s, pl) in noFlag.take(30)) {
+            Row(Modifier.fillMaxWidth().clickable { flagFor = pl }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("S$s", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.width(30.dp))
+                Text(pl.name, fontSize = 14.sp, color = Color.White, modifier = Modifier.weight(1f))
+                Text("🏳 escolher", fontSize = 13.sp, color = C.PRIMARY)
+            }
+        }
+    }
+    flagFor?.let { fp -> PlayerFlagDialog(fp) { flagFor = null } }
+}
+
 @Composable
 private fun NewsCard() {
     val ctx = LocalContext.current
