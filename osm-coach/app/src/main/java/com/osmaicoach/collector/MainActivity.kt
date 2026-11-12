@@ -2131,12 +2131,7 @@ private fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit)
                 val sub = listOfNotNull(kind, s.competition?.let { c -> if (flagE != null) "$flagE $c" else c }, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
                 if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            s.win?.takeIf { at != null }?.let { w ->
-                val (txt, col) = if (w.win >= 60) Pair("★ Favorito", C.GOLD) else if (w.win >= 40) Pair("⚖ Equilíbrio", C.PRIMARY) else Pair("⚠ Azarão", C.WARN)
-                Box(Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.6f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                    Text(txt, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = col)
-                }
-            }
+            s.win?.takeIf { at != null }?.let { w -> VerdictPill(verdictOf(w.win, w.draw, w.loss)) }
         }
         if (s.state != null || s.ended || at == null) {
             val msg = when {
@@ -4357,14 +4352,39 @@ private fun winIcon(win: Int): String = when {
     else -> "🛡"
 }
 
-/** Selo com o veredito da previsão. */
+/** Veredito do jogo pela chance de vitória/derrota: ícone, nome e cor próprios (5 níveis, do verde forte ao vermelho). */
+private data class Verdict(val icon: String, val label: String, val color: Color)
+
+private fun verdictOf(win: Int, draw: Int, loss: Int): Verdict = when {
+    win >= 65 -> Verdict("🏆", "Favorito claro", Color(0xFF22C55E))
+    win >= 50 -> Verdict("💪", "Favorito", Color(0xFF3DDC84))
+    kotlin.math.abs(win - loss) <= 10 -> Verdict("⚖", "Equilibrado", C.PRIMARY)
+    loss >= 50 -> Verdict("🛡", "Azarão", Color(0xFFFF6B4A))
+    else -> Verdict("⚡", "Leve desvantagem", Color(0xFFFFB020))
+}
+
+/** Selo do veredito: bolinha colorida com o ícone + nome, fundo em degradê da cor do nível. */
 @Composable
-private fun VerdictChip(p: WinModel.Prob, big: Boolean = false) {
-    val c = winColor(p.win)
-    Box(Modifier.clip(RoundedCornerShape(50)).background(c.copy(alpha = 0.2f)).border(1.dp, c.copy(alpha = 0.6f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = if (big) 4.dp else 2.dp)) {
-        Text(winIcon(p.win) + " " + p.verdict, fontSize = if (big) 13.sp else 10.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+private fun VerdictPill(v: Verdict, big: Boolean = false) {
+    val shape = RoundedCornerShape(50)
+    Row(
+        Modifier.clip(shape)
+            .background(Brush.horizontalGradient(listOf(v.color.copy(alpha = 0.38f), v.color.copy(alpha = 0.10f))))
+            .border(1.dp, v.color.copy(alpha = 0.75f), shape)
+            .padding(start = 3.dp, end = if (big) 12.dp else 9.dp, top = 3.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(if (big) 26.dp else 22.dp).clip(RoundedCornerShape(50)).background(v.color.copy(alpha = 0.30f)), contentAlignment = Alignment.Center) {
+            Text(v.icon, fontSize = if (big) 15.sp else 12.sp)
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(v.label, fontSize = if (big) 14.sp else 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1)
     }
 }
+
+/** Selo com o veredito da previsão. */
+@Composable
+private fun VerdictChip(p: WinModel.Prob, big: Boolean = false) = VerdictPill(verdictOf(p.win, p.draw, p.loss), big)
 
 /** Barra V/E/D em três cores com o rótulo dentro de cada parte (quando cabe). */
 @Composable
