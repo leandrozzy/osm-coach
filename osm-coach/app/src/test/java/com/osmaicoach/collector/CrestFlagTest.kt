@@ -183,4 +183,9 @@ class CrestFlagTest {
         assertEquals("Bragantino", y.first())
         assertTrue(y.any { it == "RB Bragantino" })
     }
+
+    @Test fun fasesDaCopaEVagasAindaNaoDecididasNaoSaoClubes() {
+        for (n in listOf("Fase preliminar", "Oitavos-de-final", "Quartos de final", "Meias finais", "Final", "ASD", "ANNIY", "ANNYEA")) assertTrue(n, Fixtures.notAClub(n))
+        for (n in listOf("Flamengo", "Floridsdorfer AC", "Annecy FC", "Fortuna Düsseldorf", "Young Violets Austria Wien")) assertFalse(n, Fixtures.notAClub(n))
+    }
 }

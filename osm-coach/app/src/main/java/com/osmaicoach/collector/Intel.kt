@@ -11,11 +11,14 @@ import org.json.JSONObject
 object Fixtures {
     private val STAGE = Regex(
         "^(oitavos|quartos|meias? ?finais|meia ?final|semi ?finais?|semifinal|finais|final|fase de grupos|" +
-            "grupo [a-h]|eliminatoria|pre ?eliminatoria|ronda|1/\\d+|play ?off)\\b"
+            "grupo [a-h]|eliminatoria|pre ?eliminatoria|fase preliminar|fase|ronda|1/\\d+|play ?off)\\b"
     )
 
     /** Texto do card é o nome de uma fase de copa (não é um time). */
     fun isStage(text: String?): Boolean = text != null && STAGE.containsMatchIn(Txt.norm(text))
+
+    /** Não é um clube: fase de copa ("Oitavos-de-final", "Fase preliminar") ou vaga ainda não decidida ("ASD"). Vira clube quando a liga avança. */
+    fun notAClub(text: String?): Boolean = text.isNullOrBlank() || isStage(text) || undecidedName(text)
 
     fun isCup(m: MatchEntity): Boolean = m.label.startsWith("Copa") || isStage(m.opponent)
 
@@ -29,7 +32,7 @@ object Fixtures {
     fun undecidedName(text: String?): Boolean {
         val n = Txt.norm(text ?: return true)
         return n.isBlank() || n == "asd" || n == "a s d" || n.contains("a definir") || n == "tbd" ||
-            n.endsWith("sary") || n.contains("anniv") || n.contains("annyea")
+            n.endsWith("sary") || n.contains("anniv") || n.contains("annyea") || n.startsWith("anny") || (n.startsWith("anni") && n.length <= 7)
     }
 
     /** Rival de verdade do card (null quando o card só mostra a fase da copa ou o rival ainda não foi definido). */

@@ -65,7 +65,7 @@ object CrestWeb {
     /** Pede o escudo de um clube (fila única, ritmo de 1 consulta a cada ~2,5 s; o que já existe ou falhou há pouco não repete). */
     fun request(ctx: Context, team: String?) {
         val t = team?.trim() ?: return
-        if (Txt.key(t).length < 3) return
+        if (Txt.key(t).length < 3 || Fixtures.notAClub(t)) return   // fase da copa / "a definir" não é clube: o escudo vem quando a vaga for preenchida
         if (Settings.get(ctx, "web_crests", "1") != "1") return
         if (find(ctx.filesDir, t) != null) return
         if (missedRecently(ctx.filesDir, t)) return

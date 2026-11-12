@@ -5881,7 +5881,7 @@ private fun SettingsTab() {
                 (1..4).flatMap { s ->
                     val f = r.fieldMap(s)
                     listOfNotNull(f[K.TEAM]?.value, f[K.RIVAL_TEAM]?.value) + r.dao.matchesOf(s).mapNotNull { it.opponent }
-                }.map { it.trim() }.filter { Txt.key(it).length >= 3 }.distinctBy { Txt.key(it) }
+                }.map { it.trim() }.filter { Txt.key(it).length >= 3 && !Fixtures.notAClub(it) }.distinctBy { Txt.key(it) }
             }
             LaunchedEffect(webCrests, clubs.size) {
                 if (webCrests) { FlagWeb.ensureAll(ctx); clubs.forEach { CrestWeb.request(ctx, it) } }
