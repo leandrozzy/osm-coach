@@ -128,4 +128,27 @@ object FlagIdent {
         }
         return bi
     }
+
+    /**
+     * Plano B enquanto as bandeiras do Flagpedia ainda não foram baixadas: só o Atlas (cor nomeada 8×5, tolera borrão). Não é guardado no
+     * jogador (só o resultado com as duas provas vale); null se nada no Atlas parece com a bandeira.
+     */
+    fun identifyAtlasOnly(thumbB64: String?, atlas: Map<String, String>): String? {
+        if (thumbB64.isNullOrEmpty() || atlas.isEmpty()) return null
+        return runCatching {
+            val bytes = Base64.decode(Flags.imgPayload(thumbB64), Base64.NO_WRAP)
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+            val w = bmp.width; val h = bmp.height
+            val px = IntArray(w * h); bmp.getPixels(px, 0, w, 0, 0, w, h); bmp.recycle()
+            val x0 = (w * 0.08f).toInt(); val y0 = (h * 0.10f).toInt()
+            val t85 = cells(px, w, x0, y0, w - x0, h - y0, 8, 5)
+            var best = Float.MAX_VALUE; var bi: String? = null
+            for ((name, hex) in atlas) {
+                val iso = Flags.iso(name) ?: continue
+                val d = dist(t85, cellsOfHex(hex) ?: continue)
+                if (d < best) { best = d; bi = iso }
+            }
+            if (best <= 0.22f) bi else null
+        }.getOrNull()
+    }
 }

@@ -96,7 +96,9 @@ object SlotRules {
                 iso = FlagIdent.identify(filesDir, imgs.optString(k), atlas)
                 if (iso != null) { isos.put(k, iso); changed = true }
             }
-            out[k] = iso?.let { atlasNameOf(atlas, it) ?: Flags.countryName(it) } ?: Atlas.nameOfThumb(repo, imgs.optString(k))
+            // sem as bandeiras de referência ainda: Atlas por cor nomeada (não guarda), depois o Atlas por miniatura
+            val shown = iso ?: FlagIdent.identifyAtlasOnly(imgs.optString(k), atlas)
+            out[k] = shown?.let { atlasNameOf(atlas, it) ?: Flags.countryName(it) } ?: Atlas.nameOfThumb(repo, imgs.optString(k))
         }
         if (changed) repo.dao.putPlan(PlanEntity(slot, "natiso", isos.toString(), System.currentTimeMillis()))
         if (rich != null) for (k in rich.keys()) if (out[k] == null) out[k] = Atlas.nameOf(repo, rich.optString(k))

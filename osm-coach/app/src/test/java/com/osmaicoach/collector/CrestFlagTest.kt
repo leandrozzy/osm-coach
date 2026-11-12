@@ -171,4 +171,16 @@ class CrestFlagTest {
         val ie = tri(0xFF169B62.toInt(), 0xFFFFFFFF.toInt(), 0xFFFF883E.toInt())
         assertTrue(FlagIdent.dist(osmFr, fr) < FlagIdent.dist(osmFr, ie))
     }
+
+    @Test fun variacoesDoNomeDoClube() {
+        val v = CrestWeb.variants("Schwarz-Weiß Bregenz")
+        assertTrue(v.any { it == "Schwarz-Weiss Bregenz" })
+        val w = CrestWeb.variants("SKU Amstetten")
+        assertTrue(w.any { it == "Amstetten" })
+        val x = CrestWeb.variants("Mirassol FC (SP)")
+        assertTrue(x.any { it == "Mirassol FC" })
+        val y = CrestWeb.variants("Red Bull Bragantino", alias = "Bragantino")
+        assertEquals("Bragantino", y.first())
+        assertTrue(y.any { it == "RB Bragantino" })
+    }
 }

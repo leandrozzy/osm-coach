@@ -23,12 +23,25 @@ object CrestWeb {
     @Volatile private var worker = false
     private val lock = Any()
 
-    fun dir(filesDir: File): File = File(filesDir, "crests/web").apply { mkdirs() }
+    private const val VER = "2"   // 2: SVG com largura/altura diferentes do viewBox saía cortado (Cruzeiro, Atlético-PR): refaz os escudos já baixados
+    @Volatile private var verChecked = false
+
+    fun dir(filesDir: File): File = File(filesDir, "crests/web").apply {
+        mkdirs()
+        if (!verChecked) {
+            verChecked = true
+            val v = File(this, "_v.txt")
+            if (!v.exists() || runCatching { v.readText().trim() }.getOrNull() != VER) {
+                listFiles()?.filter { it.name.endsWith(".png") || it.name == "_miss.json" }?.forEach { it.delete() }
+                v.writeText(VER)
+            }
+        }
+    }
 
     /** Arquivo do escudo real (nome exato; senão o nome mais parecido). */
     fun find(filesDir: File, team: String?): File? {
         val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
-        val d = File(filesDir, "crests/web")
+        val d = dir(filesDir)
         val exact = File(d, "$k.png")
         if (exact.exists()) return exact
         val all = d.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
@@ -93,11 +106,48 @@ object CrestWeb {
         if (code in 200..299) Pair(code, c.inputStream.use { it.readBytes() }) else Pair(code, null)
     } catch (e: Exception) { Pair(-1, null) }
 
+    // ------------------------------------------------------------ nomes alternativos
+
+    private val PREFIX = setOf("fc", "sc", "sk", "sv", "sku", "ask", "tsv", "vfb", "vfl", "vfr", "fk", "ac", "as", "cf", "cd", "ec", "esporte", "clube", "club", "sport", "sociedade", "associacao", "atletico clube")
+
+    /** Variações do nome para procurar: apelido dado pelo usuário, nome como está, "ß→ss", sem parênteses, sem prefixos (FC/SK/SKU…), "Red Bull"→"RB". */
+    internal fun variants(team: String, alias: String? = null): List<String> {
+        val out = LinkedHashSet<String>()
+        alias?.trim()?.takeIf { it.length >= 3 }?.let { out.add(it) }
+        out.add(team.trim())
+        val folded = team.replace("ß", "ss").replace("ẞ", "SS")
+        out.add(folded)
+        val noParen = folded.replace(Regex("\\s*\\([^)]*\\)"), "").trim()
+        out.add(noParen)
+        val toks = noParen.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val noPrefix = toks.dropWhile { Txt.norm(it).trim('.') in PREFIX }
+        if (noPrefix.isNotEmpty()) out.add(noPrefix.joinToString(" "))
+        if (noPrefix.size > 1 && noPrefix.last().matches(Regex("(?i)ii|iii|b|2")) ) out.add(noPrefix.dropLast(1).joinToString(" "))
+        out.add(noParen.replace(Regex("(?i)red bull"), "RB"))
+        return out.filter { Txt.key(it).length >= 3 }
+    }
+
+    private fun aliasFile(fd: File) = File(dir(fd), "_alias.json")
+    fun aliasOf(fd: File, team: String): String? = runCatching { JSONObject(aliasFile(fd).readText()).optString(Txt.key(team)).takeIf { it.isNotBlank() } }.getOrNull()
+
+    /** O usuário diz com que outro nome procurar o escudo deste clube; limpa o "não achei" e pede de novo. */
+    fun setAlias(ctx: Context, team: String, alias: String) {
+        val fd = ctx.filesDir
+        val f = aliasFile(fd)
+        val j = runCatching { JSONObject(f.readText()) }.getOrDefault(JSONObject())
+        j.put(Txt.key(team), alias.trim()); f.writeText(j.toString())
+        runCatching { val m = missFile(fd); if (m.exists()) { val mj = JSONObject(m.readText()); mj.remove(Txt.key(team)); m.writeText(mj.toString()) } }
+        request(ctx, team)
+    }
+
+    /** Clubes entre [names] que já foram procurados e não achados. */
+    fun missing(filesDir: File, names: Collection<String>): List<String> = names.filter { find(filesDir, it) == null && missedRecently(filesDir, it) }
+
     /** true = consultou o TheSportsDB (precisa do intervalo entre pedidos). O repositório football-logos vem 1º: sem limite e em vetor. */
     private fun fetch(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         if (fetchRepo(ctx, team)) return false
-        val queries = listOf(team, team.split(' ').filter { it.length > 3 || it.any(Char::isDigit) }.joinToString(" ")).distinct().filter { it.length >= 3 }
+        val queries = variants(team, aliasOf(fd, team)).take(4)
         for (q in queries) {
             val (code, body) = get(SEARCH + java.net.URLEncoder.encode(q, "UTF-8"), true)
             if (code == 429) { Diag.log("Escudo da web: limite de consultas, tento depois"); return true }
@@ -106,7 +156,7 @@ object CrestWeb {
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
                 val name = o.optString("strTeam"); val badge = o.optString("strBadge")
-                if (badge.isBlank() || !sameClub(team, name)) continue
+                if (badge.isBlank() || !(sameClub(q, name) || sameClub(team, name))) continue
                 val (c2, png) = get("$badge/small", true)
                 val bytes = png?.takeIf { c2 in 200..299 } ?: get(badge, true).second ?: continue
                 val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
@@ -168,26 +218,46 @@ object CrestWeb {
 
     private fun fetchRepo(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
-        val path = pickPath(team, loadIndex(fd)) ?: return false
+        val idx = loadIndex(fd)
+        val path = variants(team, aliasOf(fd, team)).firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
         val url = RAW + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
         val (code, body) = get(url, true)
         if (code !in 200..299 || body == null || body.size > MAX_SVG) return false
-        val bmp = runCatching {
-            val svg = com.caverock.androidsvg.SVG.getFromInputStream(body.inputStream())
-            val pic = svg.renderToPicture(256, 256)
-            val b = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
-            android.graphics.Canvas(b).drawPicture(pic)
-            b
-        }.getOrNull() ?: return false
-        // desenho vazio (SVG que o renderizador não entendeu): quase nenhum pixel visível
-        val px = IntArray(256 * 256); bmp.getPixels(px, 0, 256, 0, 0, 256, 256)
-        if (px.count { (it ushr 24) > 40 } < 256 * 256 / 20) { bmp.recycle(); return false }
+        val bmp = runCatching { renderSvg(body) }.getOrNull() ?: return false
         val f = File(dir(fd), Txt.key(team) + ".png")
         java.io.FileOutputStream(f).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         bmp.recycle()
         Diag.log("Escudo real de $team ← ${nameOfPath(path)} (football-logos)")
         UiBus.bump()
         return true
+    }
+
+    /**
+     * SVG → PNG 256×256 do escudo inteiro. O SVG pode ter largura/altura diferentes do viewBox (Cruzeiro: 316 × viewBox 2092) ou nem ter viewBox
+     * (Atlético-PR): sem acertar isso o desenho saía cortado. Define o viewBox quando falta, escala o documento para 512×512, corta nas bordas do
+     * desenho (pixels visíveis) e centraliza em 256×256. Null se o desenho ficou vazio.
+     */
+    internal fun renderSvg(bytes: ByteArray): android.graphics.Bitmap? {
+        val svg = com.caverock.androidsvg.SVG.getFromInputStream(bytes.inputStream())
+        val dw = svg.documentWidth; val dh = svg.documentHeight
+        if (svg.documentViewBox == null && dw > 0f && dh > 0f) svg.setDocumentViewBox(0f, 0f, dw, dh)
+        val big = 512
+        val pic = if (svg.documentViewBox != null) { svg.setDocumentWidth(big.toFloat()); svg.setDocumentHeight(big.toFloat()); svg.renderToPicture() } else svg.renderToPicture(big, big)
+        val full = android.graphics.Bitmap.createBitmap(big, big, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(full).drawPicture(pic, android.graphics.RectF(0f, 0f, big.toFloat(), big.toFloat()))
+        val px = IntArray(big * big); full.getPixels(px, 0, big, 0, 0, big, big)
+        var x0 = big; var x1 = -1; var y0 = big; var y1 = -1; var n = 0
+        for (y in 0 until big) for (x in 0 until big) if ((px[y * big + x] ushr 24) > 24) { n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+        if (n < big * big / 40 || x1 <= x0 || y1 <= y0) { full.recycle(); return null }
+        val bw = x1 - x0 + 1; val bh = y1 - y0 + 1
+        val crop = android.graphics.Bitmap.createBitmap(full, x0, y0, bw, bh); full.recycle()
+        val out = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+        val sc = 248f / maxOf(bw, bh)
+        val dwid = (bw * sc).toInt().coerceAtLeast(1); val dhei = (bh * sc).toInt().coerceAtLeast(1)
+        val scaled = android.graphics.Bitmap.createScaledBitmap(crop, dwid, dhei, true); crop.recycle()
+        android.graphics.Canvas(out).drawBitmap(scaled, (256 - dwid) / 2f, (256 - dhei) / 2f, null)
+        scaled.recycle()
+        return out
     }
 
     /** Situação dos escudos dos [names]: (com escudo real, sem escudo real na web, ainda na fila). */

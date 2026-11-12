@@ -2208,16 +2208,20 @@ private fun WdlBar(p: WinModel.Prob?, modifier: Modifier = Modifier) {
             Text("Chance de vitória • aparece quando a tática é gerada", fontSize = 12.5.sp, color = C.MUTED)
             return@Column
         }
-        Row(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50))) {
-            for ((v, col) in listOf(p.win to C.WIN, p.draw to C.DRAW, p.loss to C.LOSS)) {
-                Box(Modifier.weight(v.toFloat().coerceAtLeast(1f)).fillMaxSize().background(col))
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        // três cartões, cada um com a SUA cor, o seu número e a sua barrinha (antes uma barra única empilhada e os números em 3 colunas iguais
+        // pareciam ligados a trechos errados: o "Empate" caía embaixo do verde da vitória)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((label, v, col) in listOf(Triple("Vitória", p.win, C.WIN), Triple("Empate", p.draw, C.DRAW), Triple("Derrota", p.loss, C.LOSS))) {
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$v%", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = col)
-                    Text(label, fontSize = 11.5.sp, color = C.MUTED)
+                Column(
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(col.copy(alpha = 0.14f))
+                        .border(1.dp, col.copy(alpha = 0.55f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = col)
+                    Text("$v%", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(5.dp).clip(RoundedCornerShape(50)).background(Color(0x33FFFFFF))) {
+                        Box(Modifier.fillMaxWidth((v / 100f).coerceIn(0.03f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50)).background(col))
+                    }
                 }
             }
         }
@@ -5868,6 +5872,33 @@ private fun SettingsTab() {
             Text("Escudos: ${cr.first} reais de ${clubs.size} clubes" + (if (cr.third > 0) " • buscando ${cr.third}" else if (clubs.isNotEmpty()) " ✅" else "") + (if (cr.second > 0) " • ${cr.second} sem escudo real (uso o recorte do jogo)" else ""), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
             Bar(crPct)
             if (cr.second > 0) GhostButton("Tentar de novo os que faltaram") { CrestWeb.clearMisses(ctx.filesDir); UiBus.bump() }
+            // clubes que nenhuma fonte achou: o app já tentou variações do nome (sem FC/SK, ß→ss, Red Bull→RB…); aqui dá para dizer com que outro nome procurar
+            var aliasFor by remember { mutableStateOf<String?>(null) }
+            val missingClubs = CrestWeb.missing(ctx.filesDir, clubs)
+            if (missingClubs.isNotEmpty()) {
+                Text("Sem escudo real (toque para procurar por outro nome):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+                for (c in missingClubs.take(20)) {
+                    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c + (CrestWeb.aliasOf(ctx.filesDir, c)?.let { "  → $it" } ?: ""), fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        GhostButton("Outro nome") { aliasFor = c }
+                    }
+                }
+            }
+            aliasFor?.let { club ->
+                var txt by remember(club) { mutableStateOf(CrestWeb.aliasOf(ctx.filesDir, club) ?: "") }
+                AlertDialog(
+                    onDismissRequest = { aliasFor = null },
+                    title = { Text("Escudo de $club") },
+                    text = {
+                        Column {
+                            Text("Com que nome procurar? Ex.: o nome oficial do clube.", fontSize = 13.sp)
+                            OutlinedTextField(value = txt, onValueChange = { txt = it }, singleLine = true, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { if (txt.trim().length >= 3) CrestWeb.setAlias(ctx, club, txt); aliasFor = null }) { Text("Procurar") } },
+                    dismissButton = { TextButton(onClick = { aliasFor = null }) { Text("Cancelar") } }
+                )
+            }
         }
         val atlasTick = rememberTick(4000L)
         val atlasCounts = rememberLoaded(Pair(0, 0), atlasTick, UiBus.version) { Pair(Atlas.count(Repo(ctx), Atlas.Kind.NAT), Atlas.count(Repo(ctx), Atlas.Kind.LEAGUE)) }
