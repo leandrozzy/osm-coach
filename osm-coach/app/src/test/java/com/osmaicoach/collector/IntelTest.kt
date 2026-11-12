@@ -73,6 +73,9 @@ class IntelTest {
         val ms = listOf(m(24, "Dinamo", result = "V"), m(25, "FK Atyrau", time = "22:18", readAt = readYesterday))
         assertNull(Fixtures.awaitingResult(ms, emptySet(), now, 25, tonight))
         assertEquals(25, Fixtures.next(ms, now, 25, tonight)?.round)
+        // passou do horário SEM resultado lido: o rival NÃO muda sozinho (12/11, S2)
+        val ms2 = ms + m(26, "First Vienna", time = "22:18", readAt = readYesterday)
+        assertEquals(25, Fixtures.next(ms2, at(2026, 10, 9, 3, 0), 25, tonight)?.round)
         // passou do horário: agora sim pede o resultado
         assertEquals(25, Fixtures.awaitingResult(ms, emptySet(), at(2026, 10, 8, 22, 40), 25, tonight)?.round)
         // rodada antiga sem placar não vira alerta

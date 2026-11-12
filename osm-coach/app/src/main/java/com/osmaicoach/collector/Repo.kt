@@ -98,11 +98,7 @@ class Repo(private val ctx: Context) {
         val f = rows.associate { it.fkey to StoredField(it.fvalue, it.conf, it.updatedAt) }
         val ms = dao.matchesOf(slot)
         val c0 = Fixtures.clock(ms, scoredRounds(slot), now, f)
-        val adv = Fixtures.advanceAfterKickoff(ms, c0, now)
-        if (adv != null) {
-            advanceTo(slot, adv, f, now)
-            return adv.clock
-        }
+        // Não avança sozinho por horário (12/11): o rival/rodada só mudam quando uma tela lida (Resultado, Pré-jogo) mostra o jogo seguinte.
         val c = c0
         // competição que ainda não começou: o hub não mostra "x/y" e as rodadas concluídas ficavam "NI" (S3, 11/11).
         // Concluídas = próxima rodada − 1; qualquer leitura do hub/resultado (fonte ≠ sync) passa por cima.

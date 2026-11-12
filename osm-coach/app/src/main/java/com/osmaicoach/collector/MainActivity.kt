@@ -2574,17 +2574,17 @@ private fun AgendaTab() {
     val H = 3600000L
     for (s in data.slots) {
         val at = s.nextAt ?: continue
-        // jogo: fica até 6 h depois do horário (para ler o Resultado); some sozinho quando o resultado entra e a próxima rodada assume
-        if (!s.ended && s.state == null && at > now - 6 * H) evs.add(Ev(at, "⚽", "Jogo" + (s.rival?.let { " vs $it" } ?: ""), s.title + (s.human?.let { if (it == "Sim") " • rival humano" else " • rival CPU" } ?: ""), s.slot, C.PRIMARY,
+        // jogo: fica pendente (sem limite de tempo) até o app LER o Resultado e a próxima rodada assumir
+        if (!s.ended && s.state == null && true) evs.add(Ev(at, "⚽", "Jogo" + (s.rival?.let { " vs $it" } ?: ""), s.title + (s.human?.let { if (it == "Sim") " • rival humano" else " • rival CPU" } ?: ""), s.slot, C.PRIMARY,
             "O jogo já começou: abra o Resultado para o app aprender com ele.", "S${s.slot}: Central → card do slot → Resultado do jogo (role a tela inteira)"))
     }
     for (w in data.work) {
-        // treino/obra: ficam até 36 h depois do fim, ou até você passar pela tela e o app registrar a troca (o horário muda)
-        for (seat in w.seats) seat.endAt?.takeIf { it > now - 36 * H }?.let {
+        // treino/obra: ficam pendentes (sem limite de tempo) até você passar pela tela e o app registrar a troca (o horário muda)
+        for (seat in w.seats) seat.endAt?.let {
             evs.add(Ev(it, "🏋", "Treino ${Timers.roleLabel(seat.role)} termina", seat.name ?: "treinador ocupado", w.slot, C.OK,
                 "Terminou: colete o treino e ponha o próximo jogador (treinador parado é evolução perdida).", "S${w.slot}: Menu ☰ → Treino (${Timers.roleLabel(seat.role)})"))
         }
-        for (c in w.cards) c.endAt?.takeIf { it > now - 36 * H }?.let {
+        for (c in w.cards) c.endAt?.let {
             evs.add(Ev(it, "🏟", "Obra do estádio termina: ${c.label}", "nível ${c.level ?: "?"}", w.slot, C.GOLD,
                 "A obra terminou: colete e comece a próxima melhoria.", "S${w.slot}: Menu ☰ → Estádio (${c.label})"))
         }
@@ -2628,7 +2628,7 @@ private fun AgendaTab() {
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
         PageTitle("📅", "Agenda", "${sorted.size} eventos")
-        Text("Tudo o que tem hora nos seus 4 slots. Toque num evento para abrir o OSM com o caminho. O que passou do horário fica no topo até você fazer (some sozinho quando o app lê a tela).", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        Text("Tudo o que tem hora nos seus 4 slots. Toque num evento para abrir o OSM com o caminho. O que passou do horário continua no topo, como pendente, até o app ler a tela correspondente no OSM (Resultado, Treino, Estádio).", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
         if (sorted.isEmpty()) {
             EmptyState("📅", "Nada agendado ainda", "Passe pelo Calendário, pelo Treinamento e pelo Estádio no OSM com a captura ligada: jogos, fim de treino e de obra aparecem aqui.")
         }

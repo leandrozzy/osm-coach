@@ -173,8 +173,11 @@ object Fixtures {
 
     /** Próximo jogo de verdade: sem resultado, não anulado pela eliminação da copa e que ainda não aconteceu. */
     fun next(ms: List<MatchEntity>, now: Long, curRound: Int? = null, curAt: Long? = null): MatchEntity? =
-        ms.filter { it.round != null && it.result == null && !void(it, ms) && !happened(it, now, curRound, curAt) }
-            .minByOrNull { it.round!! }
+        ms.filter {
+            // o jogo da rodada atual NÃO sai por horário: o rival só muda quando o app LEU o resultado (ou outra tela mostrou a rodada seguinte)
+            val stay = curRound != null && it.round == curRound && it.result == null && it.scoreMine == null
+            it.round != null && it.result == null && !void(it, ms) && (stay || !happened(it, now, curRound, curAt))
+        }.minByOrNull { it.round!! }
 
     /**
      * Alerta "Registrar resultado" (Hoje, Diretor e notificação): só o jogo da rodada atual depois do horário
