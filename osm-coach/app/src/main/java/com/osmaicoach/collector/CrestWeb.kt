@@ -65,8 +65,9 @@ object CrestWeb {
             try {
                 while (true) {
                     val next = synchronized(lock) { queue.firstOrNull()?.also { queue.remove(it) } } ?: break
-                    try { fetch(ctx, next) } catch (e: Exception) { Diag.lastError = "Escudo da web: " + (e.message ?: "erro") }
-                    delay(2500)
+                    var slow = false
+                    try { slow = fetch(ctx, next) } catch (e: Exception) { Diag.lastError = "Escudo da web: " + (e.message ?: "erro"); slow = true }
+                    if (slow) delay(2500)   // só o TheSportsDB tem limite (~30/min); o repositório não
                 }
             } finally { synchronized(lock) { worker = false } }
         }
@@ -92,12 +93,14 @@ object CrestWeb {
         if (code in 200..299) Pair(code, c.inputStream.use { it.readBytes() }) else Pair(code, null)
     } catch (e: Exception) { Pair(-1, null) }
 
-    private fun fetch(ctx: Context, team: String) {
+    /** true = consultou o TheSportsDB (precisa do intervalo entre pedidos). O repositório football-logos vem 1º: sem limite e em vetor. */
+    private fun fetch(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
+        if (fetchRepo(ctx, team)) return false
         val queries = listOf(team, team.split(' ').filter { it.length > 3 || it.any(Char::isDigit) }.joinToString(" ")).distinct().filter { it.length >= 3 }
         for (q in queries) {
             val (code, body) = get(SEARCH + java.net.URLEncoder.encode(q, "UTF-8"), true)
-            if (code == 429) { Diag.log("Escudo da web: limite de consultas, tento depois"); return }
+            if (code == 429) { Diag.log("Escudo da web: limite de consultas, tento depois"); return true }
             if (body == null) continue
             val arr = runCatching { JSONObject(String(body)).optJSONArray("teams") }.getOrNull() ?: continue
             for (i in 0 until arr.length()) {
@@ -113,12 +116,12 @@ object CrestWeb {
                 f.writeBytes(bytes)
                 Diag.log("Escudo real de $team ← $name")
                 UiBus.bump()
-                return
+                return true
             }
         }
-        if (fetchRepo(ctx, team)) return
         markMiss(fd, team)
         Diag.log("Escudo real de $team: não encontrado na web (uso o recorte do jogo)")
+        return true
     }
 
     // ------------------------------------------------------------ 2ª fonte: repositório football-logos (SVG, licença MIT)

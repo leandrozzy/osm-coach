@@ -82,15 +82,30 @@ object SlotRules {
             ?: runCatching { suggestLeagueFlag(repo, slot) }.getOrNull()
 
     /** País de cada jogador do meu elenco (nome do Atlas pela bandeira); null = Atlas ainda não conhece. */
-    suspend fun playerCountries(repo: Repo, slot: Int): Map<String, String?> {
+    suspend fun playerCountries(repo: Repo, slot: Int, filesDir: java.io.File? = null): Map<String, String?> {
         val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val imgs = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val isos = repo.dao.plan(slot, "natiso")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val atlas = Atlas.load(repo, Atlas.Kind.NAT)
         val out = HashMap<String, String?>()
-        // 1º a miniatura nítida recortada na caixa real da bandeira (miolo 8×5 × Atlas); 2º a assinatura lida do Plantel
-        if (imgs != null) for (k in imgs.keys()) out[k] = Atlas.nameOfThumb(repo, imgs.optString(k))
+        var changed = false
+        if (imgs != null) for (k in imgs.keys()) {
+            // 1º o país já identificado (fica guardado por jogador); 2º identifica agora (bandeiras do Flagpedia + Atlas); 3º só o Atlas pela miniatura
+            var iso = isos.optString(k).takeIf { it.isNotEmpty() }
+            if (iso == null && filesDir != null) {
+                iso = FlagIdent.identify(filesDir, imgs.optString(k), atlas)
+                if (iso != null) { isos.put(k, iso); changed = true }
+            }
+            out[k] = iso?.let { atlasNameOf(atlas, it) ?: Flags.countryName(it) } ?: Atlas.nameOfThumb(repo, imgs.optString(k))
+        }
+        if (changed) repo.dao.putPlan(PlanEntity(slot, "natiso", isos.toString(), System.currentTimeMillis()))
         if (rich != null) for (k in rich.keys()) if (out[k] == null) out[k] = Atlas.nameOf(repo, rich.optString(k))
         return out
     }
+
+    /** Nome do Atlas (gentílico) de um ISO, para o resto do app que compara pelo nome do Atlas; null se o Atlas não tem esse país. */
+    private fun atlasNameOf(atlas: Map<String, String>, iso: String): String? =
+        atlas.keys.filter { Flags.iso(it) == iso }.minByOrNull { it.length }
 
     data class FlagInfo(val name: String?, val rich: String?, val img: String? = null)
 

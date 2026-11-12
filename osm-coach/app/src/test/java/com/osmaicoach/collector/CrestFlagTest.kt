@@ -149,4 +149,26 @@ class CrestFlagTest {
         assertNull(CrestWeb.pickPath("Sporting X", paths))            // mesmo nome em 2 países: ambíguo
         assertNull(CrestWeb.pickPath("Austria", paths))               // seleção nacional não é clube
     }
+
+    @Test fun nomeDoPaisEmVezDoGentilico() {
+        assertEquals("Brasil", Flags.countryLabel("Brasileiro"))
+        assertEquals("Noruega", Flags.countryLabel("Norueguês"))
+        assertEquals("Alemanha", Flags.countryLabel("Alemão"))
+        assertEquals("Inglaterra", Flags.countryLabel("Inglês"))
+        assertEquals("Costa Rica", Flags.countryLabel("Costa-riquenho"))
+        assertEquals("Samoa", Flags.countryLabel("Samoano"))
+        assertEquals("fr", Flags.iso("Guadalupino")?.let { "fr" })   // território conhecido (gp), não nulo
+    }
+
+    @Test fun corNomeadaDistingueFrancaDeIrlandaMesmoComBrilhoDiferente() {
+        // França do OSM (azul claro brilhante | branco | vermelho vivo) × França real (azul marinho | branco | vermelho) × Irlanda (verde | branco | laranja)
+        fun tri(a: Int, b: Int, c: Int): FlagIdent.Cells {
+            val px = IntArray(48 * 32) { i -> when ((i % 48) / 16) { 0 -> a; 1 -> b; else -> c } }
+            return FlagIdent.cells(px, 48, 0, 0, 48, 32, 16, 10)
+        }
+        val osmFr = tri(0xFF3C50BE.toInt(), 0xFFFFFFFF.toInt(), 0xFFEA3A2A.toInt())
+        val fr = tri(0xFF002654.toInt(), 0xFFFFFFFF.toInt(), 0xFFCE1126.toInt())
+        val ie = tri(0xFF169B62.toInt(), 0xFFFFFFFF.toInt(), 0xFFFF883E.toInt())
+        assertTrue(FlagIdent.dist(osmFr, fr) < FlagIdent.dist(osmFr, ie))
+    }
 }

@@ -29,7 +29,22 @@ nz:nova zelandia,neozelandes;al:albania,albanes;am:armenia,armenio;az:azerbaijao
 ba:bosnia,bosnia e herzegovina,bosnio;ge:georgia,georgiano;kz:cazaquistao,cazaque;xk:kosovo,kosovar;
 cy:chipre,cipriota;mt:malta,maltes;md:moldavia,moldavo;me:montenegro,montenegrino;mk:macedonia do norte,macedonia,macedonio;
 uz:uzbequistao,uzbeque;tj:tadjiquistao,tadjique;kg:quirguistao,quirguiz;tm:turcomenistao,turcomeno;mn:mongolia,mongol;kh:camboja,cambojano;pk:paquistao,paquistanes;bd:bangladesh;lk:sri lanka;np:nepal,nepales;af:afeganistao,afegao;ye:iemen;om:oma,omanense;kw:kuwait,kuwaitiano;bh:bahrein;ps:palestina,palestino;ly:libia,libio;sd:sudao,sudanes;et:etiopia,etiope;ug:uganda,ugandense;tz:tanzania,tanzaniano;rw:ruanda;mg:madagascar,malgaxe;na:namibia,namibio;bw:botsuana;mu:mauricia;lr:liberia,liberiano;sl:serra leoa;gm:gambia,gambiano;cg:congo brazzaville,congoles;gq:guine equatorial;cf:republica centro africana;td:chade;ne:niger;mr:mauritania;ss:sudao do sul;ar2:;au2:;aw:aruba;cw:curacao;sr:suriname,surinames;gy:guiana;bb:barbados;bs:bahamas;bz:belize;pr:porto rico;sg:singapura;tw:taiwan;hk:hong kong;nc:nova caledonia;fj:fiji;pg:papua nova guine;li:liechtenstein;ad:andorra,andorrano;sm:san marino;fo:ilhas faroe,ilhas feroe,faroes;lu2:;
-gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galês,gales;gb-nir:irlanda do norte;gb:reino unido,britanico;
+gb-eng:inglaterra,ingles;
+bs:bahamas,bahamiano;ag:antigua e barbuda,antiguano;bd:bangladechiano;bb:barbados,barbadiano;bh:bahrein,bareinita;bz:belize,belizenho,belizenh0;
+bj:benim,beninense;bm:bermudas,bermudense;mm:myanmar,birmanes;bn:brunei,bruneano;bw:botsuana,botsuano,botsuan0;bi:burundi,burundiano;
+bt:butao,butanes;vu:vanuatu,canuatuense;cf:republica centro-africana,centro-africano;td:chade,chadiano;lk:cingales;km:comores,comorense;
+cg:congoles (republica do congo);ci:costa-marfinense;cr:costa-riquenho;cw:curacao,curacauense,holandes (antilhas);dm:dominica,dominiques;
+ae:emiratico;er:eritreia,eritreu;ee:estonio;et:etiopia,etiopio;fo:ilhas faroe,faroense;fj:fiji,fijano,fijjano;fi:filandes;gi:gibraltar,gibraltino;
+gd:granada,granadino;gp:guadalupe,guadalupino;gu:guam,guames;gy:guiana,guianense;aw:aruba,holandes (aruba);hk:hong kong,honcongues;
+je:jersey,ingles (jersey);iq:iraguiano;jo:jordano;la:laos,laociano;ls:lesoto,lesotiano;lv:letonio;li:liechtenstein,liechtensteinense;
+mo:macau,macaense;mw:malawi,malauiano;fk:malvinas,malvinense;my:malasio;mq:martinica,martinicano;mu:mauricia,mauriciano;mr:mauritania,mauritano;
+ms:monserrate,monserratense;nc:nova caledonia,neocaledonio;ne:niger,nigerino;kp:norte-corean0,norte-coreano;gb-nir:norte-irlandes;
+pg:papua-nova guine,papuasio;pl:polaco;pf:polinesia francesa,polinesio;pr:porto rico,porto-riquenho;re:reuniao;rw:ruanda,ruandes;
+sb:ilhas salomao,salomonico;ws:samoa,samoano;lc:santa lucia,santa-luciense;sl:serra leoa,serra-leones;sg:singapura,singapurano;so:somalia,somali;
+sz:suazilandia,suazi;ss:sudao do sul,sul-sudanes;kn:sao cristovao e neves;st:sao tome e principe,sao tomee principe;sm:sao marino,sao-marinhense;
+tw:taiwan,taiwanes;tj:tajique;tl:timor-leste;tt:trinitario;tv:tuvalu,tuvaluano;ua:ucranian0;uz:usbeque;vc:sao vicente e granadinas,vicentino;
+ye:iemen,lemenita,iemenita;ca:canadian0;qa:catarian0;by:bielorruss0;cz:checo;
+gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galês,gales;gb-nir:irlanda do norte;gb:reino unido,britanico;
 """
 
     private val LEAGUES = listOf("brasileirao" to "br", "eredivisie" to "nl", "ligue 1" to "fr", "premier league" to "gb-eng",
@@ -132,20 +147,33 @@ gb-eng:inglaterra,ingles;gb-sct:escocia,escoces;gb-wls:pais de gales,gales,galê
     }
 
     /**
-     * Imagem de bandeira de cada jogador: a do BANCO do país (a mais nítida já vista entre todos os jogadores/slots daquele país) quando o país
-     * foi identificado; senão a própria miniatura (se nítida); senão nada (o Elenco cai no emoji do país).
+     * Imagem de bandeira de cada jogador (só usada quando a bandeira real do Flagpedia ainda não está no aparelho): a do BANCO do país (a mais
+     * nítida já vista, por código ISO) quando o país foi identificado; senão a própria miniatura se nítida; senão nada.
      */
-    fun withBank(imgs: Map<String, String>, countries: Map<String, String?>, bank: Map<String, String>): Map<String, String> {
-        val best = HashMap<String, String>()
-        for ((c, v) in bank) best[c] = v
+    fun withBank(imgs: Map<String, String>, isos: Map<String, String>, bank: Map<String, String>): Map<String, String> {
+        val best = HashMap<String, String>(bank)
         for ((k, v) in imgs) {
-            val c = countries[k] ?: continue
+            val c = isos[k] ?: continue
             val cur = best[c]
             if (cur == null || (imgQuality(v) ?: 0f) > (imgQuality(cur) ?: 0f)) best[c] = v
         }
-        val sharp = sharpen(imgs, emptyMap())
-        val out = HashMap(sharp)
-        for ((k, c) in countries) { if (c != null) best[c]?.let { out[k] = it } }
+        val out = HashMap(sharpen(imgs, emptyMap()))
+        for ((k, c) in isos) best[c]?.let { out[k] = it }
         return out
+    }
+
+    /** Nome do país em português do Brasil a partir do código ISO ("br" → "Brasil", "no" → "Noruega"); null se não souber. */
+    fun countryName(iso: String?): String? {
+        val c = iso?.lowercase() ?: return null
+        when (c) { "gb-eng" -> return "Inglaterra"; "gb-sct" -> return "Escócia"; "gb-wls" -> return "País de Gales"; "gb-nir" -> return "Irlanda do Norte"; "xk" -> return "Kosovo" }
+        if (c.length != 2) return null
+        val n = runCatching { java.util.Locale("", c.uppercase()).getDisplayCountry(java.util.Locale("pt", "BR")) }.getOrNull()
+        return n?.takeIf { it.isNotBlank() && !it.equals(c, true) }
+    }
+
+    /** Texto do país para a tela: o NOME do país ("Brasil") em vez do gentílico do Atlas ("Brasileiro"); sem ISO conhecido, devolve o texto original. */
+    fun countryLabel(atlasName: String?): String? {
+        if (atlasName.isNullOrBlank()) return null
+        return countryName(iso(atlasName)) ?: atlasName
     }
 }

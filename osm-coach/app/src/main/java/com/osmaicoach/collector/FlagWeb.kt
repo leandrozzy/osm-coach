@@ -54,4 +54,34 @@ object FlagWeb {
         f.writeBytes(bytes)
         return true
     }
+
+    @Volatile private var allStarted = false
+
+    /**
+     * Baixa TODAS as bandeiras do Flagpedia (~250, ~3 KB cada, uma vez só): servem de referência para descobrir o país de cada jogador
+     * (`FlagIdent`) e de imagem nítida para o Elenco. Roda em segundo plano; não repete enquanto o app está aberto.
+     */
+    fun ensureAll(ctx: Context) {
+        if (allStarted || FlagIdent.refsReady(ctx.filesDir)) return
+        if (Settings.get(ctx, "web_crests", "1") != "1") return
+        allStarted = true
+        AppScope.scope.launch {
+            try {
+                val c = URL("https://flagcdn.com/en/codes.json").openConnection() as HttpURLConnection
+                c.connectTimeout = 10000; c.readTimeout = 15000
+                if (c.responseCode !in 200..299) { allStarted = false; return@launch }
+                val j = org.json.JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+                val codes = j.keys().asSequence().filter { it.length == 2 || it.startsWith("gb-") }.toList()
+                var ok = 0
+                for (iso in codes) {
+                    if (file(ctx.filesDir, iso) != null) { ok++; continue }
+                    if (runCatching { fetch(ctx, iso) }.getOrDefault(false)) ok++
+                    delay(60)
+                }
+                Diag.log("Bandeiras do Flagpedia: $ok de ${codes.size} no aparelho")
+                UiBus.bump()
+                if (ok < 200) allStarted = false
+            } catch (e: Exception) { allStarted = false; Diag.lastError = "Bandeiras da web: " + (e.message ?: "erro") }
+        }
+    }
 }

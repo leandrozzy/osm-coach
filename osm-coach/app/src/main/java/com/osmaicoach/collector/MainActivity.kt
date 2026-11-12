@@ -1341,6 +1341,7 @@ data class SlotData(
     val flagRich: Map<String, String> = emptyMap(),
     /** Bandeira NÍTIDA de cada jogador (recorte da captura inteira, WebP base64). */
     val flagImg: Map<String, String> = emptyMap(),
+    val isos: Map<String, String> = emptyMap(),
     /** Emblema da liga do slot (Atlas), se o nome da competição casa com uma liga aprendida. */
     val leagueRich: String? = null,
     /** Véspera do jogo: (feito?, texto) na ordem em que se faz. Vazio = jogo longe. */
@@ -1420,7 +1421,9 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     Director.resolveTacticLogs(repo, slot)
     val tplan = dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
     val imgMap = runCatching { repo.dao.plan(slot, "natimg3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
-    val countriesMap = runCatching { SlotRules.playerCountries(repo, slot) }.getOrDefault(emptyMap())
+    FlagWeb.ensureAll(ctx)
+    val countriesMap = runCatching { SlotRules.playerCountries(repo, slot, ctx.filesDir) }.getOrDefault(emptyMap())
+    val isoMap = runCatching { repo.dao.plan(slot, "natiso")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val bankMap = runCatching { repo.dao.plan(0, "natbank")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
@@ -1451,7 +1454,7 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
         logsAll = dao.tacticLogs(slot),
         reports = dao.matchReports(slot),
         fitness = repo.fitness(slot),
-        countries = countriesMap, flagRich = richMap, flagImg = Flags.withBank(imgMap, countriesMap, bankMap), leagueRich = leagueRichV, eve = eveList,
+        countries = countriesMap, flagRich = richMap, flagImg = Flags.withBank(imgMap, isoMap, bankMap), isos = isoMap, leagueRich = leagueRichV, eve = eveList,
         rivalProfile = repo.rivalProfile(slot),
         board = repo.boardMessages(slot),
         trainScreen = dao.plan(slot, "trainscreen")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } },
@@ -3681,8 +3684,8 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            FlagBadge(Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey])
-                            Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (d.countries[p.nameKey]?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            FlagBadge(d.isos[p.nameKey] ?: Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey])
+                            Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (Flags.countryLabel(d.countries[p.nameKey])?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         val ft = d.fitness[p.nameKey]
                         if (ft != null) {

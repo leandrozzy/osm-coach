@@ -722,13 +722,21 @@ class FramePipeline private constructor(private val ctx: Context) {
             val d = ys.mapNotNull { (k, y) -> prev[k]?.let { Math.abs(it - y) } }
             if (d.size >= 2 && d.sorted()[d.size / 2] > 0.003f) return
         }
+        FlagWeb.ensureAll(ctx)   // bandeiras de referência (Flagpedia) para descobrir o país
+        val mine = repo.dao.playersOf(slot).filter { it.owner == "MY" }
+        // chave do jogador = a MESMA do banco (o OCR varia "Fabinho II"/"Fabinho I|": chaves soltas deixavam bandeiras borradas sem par)
+        fun canon(p: PlayerRead): String {
+            val k = Txt.key(p.name)
+            return mine.firstOrNull { it.nameKey == k }?.nameKey
+                ?: mine.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, k, p.age, p.strength) }?.nameKey ?: k
+        }
         val cur = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
         var refQ = 0f
         for (k in cur.keys()) refQ = maxOf(refQ, Flags.imgQuality(cur.optString(k)) ?: 0f)
         var n = 0
         for (p in players) {
             val x = p.natX ?: continue; val y = p.natY ?: continue
-            val key = Txt.key(p.name)
+            val key = canon(p)
             if (key.isBlank()) continue
             val old = Flags.imgQuality(cur.optString(key))
             val t = thumb(bmp, x, y, 0.040f, 0.062f, 48, 32, refine = true) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
@@ -745,10 +753,11 @@ class FramePipeline private constructor(private val ctx: Context) {
     /** Banco global de bandeiras (plano `natbank`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
     private suspend fun updateFlagBank(imgs: JSONObject) {
         val bank = repo.dao.plan(0, "natbank")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val atlas = Atlas.load(repo, Atlas.Kind.NAT)
         var ch = 0
         for (k in imgs.keys()) {
             val v = imgs.optString(k)
-            val c = Atlas.nameOfThumb(repo, v) ?: continue
+            val c = FlagIdent.identify(ctx.filesDir, v, atlas) ?: continue   // banco por código ISO do país
             val old = Flags.imgQuality(bank.optString(c))
             val q = Flags.imgQuality(v) ?: 0f
             if (old == null || q > old * 1.08f + 1f) { bank.put(c, v); ch++ }
