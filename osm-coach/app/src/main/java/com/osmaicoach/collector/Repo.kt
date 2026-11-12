@@ -1119,6 +1119,15 @@ class Repo(private val ctx: Context) {
 
     suspend fun timers(slot: Int): List<Timers.Entry> = Timers.parse(slot, dao.plan(slot, "timers")?.json)
 
+    /** O aviso do fim já foi dado, mas o cronômetro FICA (Agenda "passou do horário", Fresh pede reler a tela) até uma leitura nova da tela trazer o estado real. */
+    suspend fun markTimerFired(slot: Int, key: String) {
+        val j = planJson(slot, "timers")
+        val o = j.optJSONObject(key) ?: return
+        if (o.optBoolean("fired", false)) return
+        o.put("fired", true)
+        dao.putPlan(PlanEntity(slot, "timers", j.toString(), System.currentTimeMillis()))
+    }
+
     suspend fun removeTimer(slot: Int, key: String) {
         val j = planJson(slot, "timers")
         if (!j.has(key)) return

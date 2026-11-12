@@ -14,7 +14,7 @@ object Timers {
         "stad_Capacidade", "stad_Relvado", "stad_Treino", "scout", "mission_new", "mission_week", "lawyer", "doctor"
     )
 
-    data class Entry(val slot: Int, val key: String, val at: Long, val label: String) {
+    data class Entry(val slot: Int, val key: String, val at: Long, val label: String, val fired: Boolean = false) {
         val training: Boolean get() = key.startsWith("train_")
         val scout: Boolean get() = key == "scout"
         val mission: Boolean get() = key.startsWith("mission_")
@@ -36,7 +36,7 @@ object Timers {
         return KEYS.mapNotNull { k ->
             val o = j.optJSONObject(k) ?: return@mapNotNull null
             val at = o.optLong("at", 0L).takeIf { it > 0 } ?: return@mapNotNull null
-            Entry(slot, k, at, o.optString("label", k))
+            Entry(slot, k, at, o.optString("label", k), o.optBoolean("fired", false))
         }.sortedBy { it.at }
     }
 

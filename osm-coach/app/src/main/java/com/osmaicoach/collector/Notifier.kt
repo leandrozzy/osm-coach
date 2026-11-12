@@ -188,7 +188,8 @@ object Notifier {
         val repo = Repo(ctx)
         val e = repo.timers(slot).firstOrNull { it.key == key } ?: return
         if (e.at > System.currentTimeMillis() + MIN) return
-        repo.removeTimer(slot, key)
+        if (e.fired) return   // já avisou; o cronômetro continua na Agenda até a tela ser lida de novo
+        repo.markTimerFired(slot, key)
         if (!enabled(ctx, "timers") || !canPost(ctx)) return
         ensureChannels(ctx)
         val f = repo.fieldMap(slot)
