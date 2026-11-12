@@ -34,6 +34,16 @@ object Arts {
 
     private fun dir(ctx: Context): File = File(ctx.filesDir, "arts").apply { mkdirs() }
 
+    /** Desenho novo (v2, 12/11): apaga as artes do modelo antigo (e a lista de ids vistos) uma única vez; as de eventos recentes são refeitas por `auto`. */
+    suspend fun migrate(ctx: Context) {
+        val sp = ctx.getSharedPreferences("arts", Context.MODE_PRIVATE)
+        if (sp.getInt("ver", 1) >= 2) return
+        val repo = Repo(ctx)
+        runCatching { dir(ctx).listFiles()?.forEach { it.delete() } }
+        repo.dao.deletePlan(0, "arts"); repo.dao.deletePlan(0, "artsseen")
+        sp.edit().putInt("ver", 2).putInt("new", 0).apply()
+    }
+
     // ------------------------------------------------------------------ guardado (plano global `arts`, ids vistos em `artsseen`)
     suspend fun items(repo: Repo): List<Item> {
         val arr = runCatching { JSONArray(repo.dao.plan(0, "arts")?.json ?: "[]") }.getOrDefault(JSONArray())
@@ -67,37 +77,54 @@ object Arts {
 
     // ------------------------------------------------------------------ o que pode virar arte
     private fun played(ms: List<MatchEntity>) = ms.filter { it.round != null && it.result in listOf("V", "E", "D") }.sortedBy { it.round }
+    private fun num(s: String?): Int? = s?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }
 
-    /** Eventos deste slot que dão arte. O id é estável (não repete a mesma arte). */
+    /**
+     * Eventos deste slot que dão arte (o id é estável: não repete). Só slot COM competição: livre/procurando/pré-época não tem nada.
+     * Contratação só de quem ESTÁ no elenco e não foi lançado como vendido logo depois (o OCR já fez compra/venda falsa do mesmo nome).
+     * Competição em andamento: contratação, goleada (3+ gols de diferença), 3+ vitórias seguidas, liderança. Encerrada: campeão, objetivo alcançado.
+     * Campanha e resumo da temporada só à mão. Batalhas/crews o app não lê ainda.
+     */
     suspend fun candidates(repo: Repo, slot: Int): List<Cand> {
         val f = repo.fieldMap(slot)
         if (f[K.TEAM]?.value == null) return emptyList()
+        if (f[K.SLOT_STATE]?.value in listOf("vazio", "procurando", "preepoca")) return emptyList()
+        val over = Hints.competitionOver(repo, slot, f)
+        runCatching { repo.cleanLedger(slot) }
         val out = ArrayList<Cand>()
-        val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
-        for (e in ledger.filter { it.type == "buy" || it.type == "sell" }.sortedByDescending { it.at }.take(12)) {
-            val buy = e.type == "buy"
-            out.add(Cand("${e.type}|$slot|${e.key}|${e.at}", slot, if (buy) "BUY" else "SELL", (if (buy) "Contratação: " else "Despedida: ") + e.name, e.at, e.key))
-        }
+        val keys = repo.dao.playersOf(slot).filter { it.owner == "MY" }.map { it.nameKey }.toSet()
         val ms = played(repo.dao.matchesOf(slot))
         val last = ms.lastOrNull()
-        if (last != null && last.result == "V") {
-            val streak = ms.reversed().takeWhile { it.result == "V" }.size
-            val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
-            if (streak >= 3) out.add(Cand("streak|$slot|$streak|${last.round}", slot, "STREAK", "$streak vitórias seguidas", last.updatedAt))
-            else if (diff >= 3) out.add(Cand("win|$slot|${last.round}", slot, "WIN", "Goleada na J${last.round}: ${last.scoreMine}×${last.scoreOpp}", last.updatedAt))
-        }
-        if (ms.size >= 3) out.add(Cand("camp|$slot|${ms.size}", slot, "CAMP", "Campanha até a J${ms.last().round}", System.currentTimeMillis()))
-        if (ms.isNotEmpty() && Hints.competitionOver(repo, slot, f)) {
-            out.add(Cand("season|$slot|${Txt.key(f[K.COMPETITION]?.value.orEmpty())}", slot, "SEASON", "Fim da temporada", System.currentTimeMillis()))
+        val pos = num(f[K.LEAGUE_POS]?.value)
+        val obj = num(f[K.MY_OBJECTIVE]?.value)
+        if (!over) {
+            val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
+            for (e in ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.take(8)) {
+                out.add(Cand("buy|$slot|${e.key}|${e.at}", slot, "BUY", "Contratação: " + e.name, e.at, e.key))
+            }
+            if (last != null && last.result == "V") {
+                val streak = ms.reversed().takeWhile { it.result == "V" }.size
+                val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
+                if (streak >= 3) out.add(Cand("streak|$slot|$streak|${last.round}", slot, "STREAK", "$streak vitórias seguidas", last.updatedAt))
+                if (diff >= 3) out.add(Cand("win|$slot|${last.round}", slot, "GOLEADA", "Goleada na J${last.round}: ${last.scoreMine}×${last.scoreOpp}", last.updatedAt))
+            }
+            if (pos == 1 && ms.size >= 3) out.add(Cand("leader|$slot|${ms.last().round}", slot, "LEADER", "Líder da liga na J${ms.last().round}", System.currentTimeMillis()))
+            if (ms.size >= 3) out.add(Cand("camp|$slot|${ms.size}", slot, "CAMP", "Campanha até a J${ms.last().round}", System.currentTimeMillis()))
+        } else if (ms.isNotEmpty()) {
+            val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
+            if (pos == 1) out.add(Cand("title|$slot|$comp", slot, "TITLE", "Campeão da liga", System.currentTimeMillis()))
+            else if (pos != null && obj != null && pos <= obj) out.add(Cand("obj|$slot|$comp", slot, "OBJECTIVE", "Objetivo alcançado: ${pos}º lugar", System.currentTimeMillis()))
+            out.add(Cand("season|$slot|$comp", slot, "SEASON", "Resumo da temporada", System.currentTimeMillis()))
         }
         return out
     }
 
     /**
-     * Depois de Encerrar a leitura: cria as artes dos eventos NOVOS de cada slot (contratação, despedida, goleada/sequência, fim de temporada).
-     * Na 1ª vez só vale o que aconteceu nas últimas 24 h (não despeja o histórico). Campanha só à mão. Devolve quantas criou.
+     * Depois de Encerrar a leitura: cria as artes dos eventos NOVOS de cada slot (contratação, goleada, sequência, liderança, título, objetivo).
+     * Na 1ª vez só vale o que aconteceu nas últimas 24 h (não despeja o histórico). Campanha/resumo só à mão. Devolve quantas criou.
      */
     suspend fun auto(ctx: Context): Int {
+        migrate(ctx)
         val repo = Repo(ctx)
         val firstRun = seen(repo) == null
         val seenSet = seen(repo) ?: mutableSetOf()
@@ -107,7 +134,7 @@ object Arts {
             for (c in candidates(repo, slot)) {
                 if (c.id in seenSet) continue
                 seenSet.add(c.id)
-                if (c.kind == "CAMP") continue
+                if (c.kind == "CAMP" || c.kind == "SEASON") continue
                 if (firstRun && now - c.at > 24 * 3600_000L) continue
                 if (made >= 6) continue
                 if (runCatching { make(ctx, c) }.getOrNull() != null) made++
@@ -127,18 +154,11 @@ object Arts {
     fun clearUnseen(ctx: Context) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putInt("new", 0).apply() }
 
     // ------------------------------------------------------------------ montar e desenhar
-    class Spec(
-        val team: String, val comp: String?, val slot: Int, val crest: Bitmap?, val banner: String,
-        val big1: String, val big2: String, val rows: List<Pair<String, String>>, val flag: Bitmap?,
-        val number: String?, val numberLabel: String?, val footer: String, val c1: Int, val c2: Int, val player: Boolean
-    )
-
     private fun bmp(f: File?): Bitmap? = f?.takeIf { it.exists() }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
 
     suspend fun make(ctx: Context, c: Cand): Item? {
         val repo = Repo(ctx)
-        val spec = spec(ctx, repo, c) ?: return null
-        val b = render(spec)
+        val b = draw(ctx, repo, c) ?: return null
         val f = File(dir(ctx), "${System.currentTimeMillis()}_${c.slot}.png")
         f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         b.recycle()
@@ -151,70 +171,71 @@ object Arts {
         return item
     }
 
-    private suspend fun spec(ctx: Context, repo: Repo, c: Cand): Spec? {
-        val slot = c.slot
-        val f = repo.fieldMap(slot)
-        val team = f[K.TEAM]?.value ?: return null
-        val comp = f[K.COMPETITION]?.value
-        val crest = bmp(CrestWeb.find(ctx.filesDir, team) ?: CrestCut.find(ctx.filesDir, team))
-        val (c1, c2) = palette(crest, slot)
-        val ms = played(repo.dao.matchesOf(slot))
-        when (c.kind) {
-            "BUY", "SELL", "PLAYER" -> {
-                val key = c.key ?: return null
-                val p = repo.dao.playersOf(slot).firstOrNull { it.owner == "MY" && it.nameKey == key }
-                val e = Ledger.parse(repo.dao.plan(slot, "ledger")?.json).filter { it.key == key }.maxByOrNull { it.at }
-                val name = p?.name ?: e?.name ?: return null
-                val parts = name.trim().split(Regex("\\s+"))
-                val first = if (parts.size > 1) parts.dropLast(1).joinToString(" ") else ""
-                val last = parts.last()
-                val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
-                val rows = ArrayList<Pair<String, String>>()
-                Flags.countryName(iso)?.let { rows.add("País" to it) }
-                (p?.age ?: e?.age)?.let { rows.add("Idade" to "$it anos") }
-                (p?.cat ?: p?.posCode)?.let { rows.add("Posição" to posLabel(p?.cat, p?.posCode)) }
-                (p?.valueText ?: e?.price?.let { fmtM(it) })?.let { rows.add("Valor" to it) }
-                val str = (p?.strength ?: e?.strength)?.toString()
-                val (banner, foot) = when (c.kind) {
-                    "BUY" -> "CONTRATAÇÃO CONFIRMADA" to "Bem-vindo ao $team!"
-                    "SELL" -> "DESPEDIDA" to "Obrigado, $last! Boa sorte."
-                    else -> "DESTAQUE DO ELENCO" to "$team • orgulho do clube"
-                }
-                return Spec(team, comp, slot, crest, banner, first, last, rows, bmp(FlagWeb.file(ctx.filesDir, iso)), str, "FORÇA", foot, c1, c2, true)
-            }
-            "WIN", "STREAK" -> {
-                val last = ms.lastOrNull() ?: return null
-                val streak = ms.reversed().takeWhile { it.result == "V" }.size
-                val rows = ArrayList<Pair<String, String>>()
-                rows.add("Jogo" to (if (last.home == true) "em casa" else if (last.home == false) "fora" else "—"))
-                last.opponent?.let { rows.add("Rival" to it) }
-                if (streak >= 2) rows.add("Sequência" to "$streak vitórias")
-                val big = if (c.kind == "STREAK") "$streak" else "${last.scoreMine ?: 0} × ${last.scoreOpp ?: 0}"
-                val sub = if (c.kind == "STREAK") "VITÓRIAS SEGUIDAS" else "J${last.round} • ${last.opponent.orEmpty()}"
-                return Spec(team, comp, slot, crest, if (c.kind == "STREAK") "EM CHAMAS!" else "VITÓRIA!", sub, big, rows, null, null, null, "Vamos pra cima, $team!", c1, c2, false)
-            }
-            else -> {   // CAMP, SEASON
-                if (ms.isEmpty()) return null
-                val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
-                val gf = ms.sumOf { it.scoreMine ?: 0 }; val ga = ms.sumOf { it.scoreOpp ?: 0 }
-                val aprov = Math.round(100f * (3 * v + e) / (3 * ms.size))
-                val rows = listOf("Jogos" to "${ms.size}", "Gols" to "$gf × $ga", "Aproveitamento" to "$aprov%")
-                val season = c.kind == "SEASON"
-                return Spec(team, comp, slot, crest, if (season) "FIM DE TEMPORADA" else "CAMPANHA ATÉ AGORA", comp.orEmpty(), "${v}V ${e}E ${d}D", rows, null, null, null,
-                    if (season) "Obrigado, torcida! Até a próxima." else "A jornada continua!", c1, c2, false)
-            }
-        }
-    }
-
     private fun posLabel(cat: String?, code: String?): String {
         val base = when (cat) { "GOL" -> "Goleiro"; "DEF" -> "Defensor"; "MEI" -> "Meio-campista"; "ATA" -> "Atacante"; else -> "" }
         return if (base.isNotEmpty() && !code.isNullOrBlank()) "$base ($code)" else base.ifEmpty { code.orEmpty() }
     }
 
-    /** Cores do time: o tom mais presente do escudo vira o fundo escuro; o segundo (ou dourado) vira o destaque. */
-    fun palette(crest: Bitmap?, slot: Int): Pair<Int, Int> {
-        val fallback = intArrayOf(140, 215, 355, 275)[(slot - 1).coerceIn(0, 3)].toFloat()
-        var h1 = fallback; var h2: Float? = null
+    private suspend fun draw(ctx: Context, repo: Repo, c: Cand): Bitmap? {
+        val slot = c.slot
+        val f = repo.fieldMap(slot)
+        val team = f[K.TEAM]?.value ?: return null
+        val comp = f[K.COMPETITION]?.value
+        val crest = bmp(CrestWeb.find(ctx.filesDir, team) ?: CrestCut.find(ctx.filesDir, team))
+        val th = theme(crest, slot)
+        val ms = played(repo.dao.matchesOf(slot))
+        val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
+        val gf = ms.sumOf { it.scoreMine ?: 0 }; val ga = ms.sumOf { it.scoreOpp ?: 0 }
+        val aprov = if (ms.isEmpty()) 0 else Math.round(100f * (3 * v + e) / (3 * ms.size))
+        val last = ms.lastOrNull()
+        return when (c.kind) {
+            "BUY", "PLAYER" -> {
+                val key = c.key ?: return null
+                val p = repo.dao.playersOf(slot).firstOrNull { it.owner == "MY" && it.nameKey == key } ?: return null
+                val parts = p.name.trim().split(Regex("\\s+"))
+                val first = if (parts.size > 1) parts.dropLast(1).joinToString(" ") else ""
+                val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val rows = ArrayList<Triple<String, String, Bitmap?>>()
+                Flags.countryName(iso)?.let { rows.add(Triple("País", it, bmp(FlagWeb.file(ctx.filesDir, iso)))) }
+                p.age?.let { rows.add(Triple("Idade", "$it anos", null)) }
+                posLabel(p.cat, p.posCode).takeIf { it.isNotBlank() }?.let { rows.add(Triple("Posição", it, null)) }
+                p.valueText?.let { rows.add(Triple("Valor", it, null)) }
+                val buy = c.kind == "BUY"
+                ArtsDraw.player(th, team, comp, if (buy) "CONTRATAÇÃO CONFIRMADA" else "DESTAQUE DO ELENCO", first, parts.last(), rows, p.strength?.toString(),
+                    if (buy) "Bem-vindo ao $team!" else "$team • orgulho do clube", slot, crest)
+            }
+            "GOLEADA" -> {
+                val m = last ?: return null
+                val opp = bmp(CrestWeb.find(ctx.filesDir, m.opponent) ?: CrestCut.find(ctx.filesDir, m.opponent))
+                val rows = ArrayList<Pair<String, String>>()
+                rows.add("Jogo" to (if (m.home == true) "em casa" else if (m.home == false) "fora" else "—"))
+                val streak = ms.reversed().takeWhile { it.result == "V" }.size
+                if (streak >= 2) rows.add("Sequência" to "$streak vitórias")
+                ArtsDraw.match(th, team, comp, "GOLEADA!", crest, opp, m.scoreMine ?: 0, m.scoreOpp ?: 0, "J${m.round} • ${m.opponent.orEmpty()}", rows, "Vamos pra cima, $team!", slot)
+            }
+            "STREAK" -> {
+                val streak = ms.reversed().takeWhile { it.result == "V" }.size
+                ArtsDraw.stats(th, team, comp, "EM CHAMAS!", "$streak", "VITÓRIAS SEGUIDAS", listOf("Gols marcados" to "$gf", "Gols sofridos" to "$ga", "Aproveitamento" to "$aprov%"), "Vamos pra cima, $team!", slot, crest)
+            }
+            "LEADER" -> ArtsDraw.stats(th, team, comp, "LÍDER DA LIGA!", "1º", "NA RODADA ${last?.round ?: ""}", listOf("Jogos" to "${ms.size}", "Campanha" to "${v}V ${e}E ${d}D", "Aproveitamento" to "$aprov%"), "No topo da tabela!", slot, crest)
+            "TITLE", "OBJECTIVE" -> {
+                val pos = num(f[K.LEAGUE_POS]?.value)
+                val title = c.kind == "TITLE"
+                ArtsDraw.trophyCard(th, team, comp, if (title) "CAMPEÃO DA LIGA!" else "OBJETIVO ALCANÇADO!", if (title) "CAMPEÃO" else "${pos ?: ""}º LUGAR",
+                    (comp ?: "") + " • ${v}V ${e}E ${d}D", "Obrigado, torcida!", slot, crest)
+            }
+            else -> {   // CAMP, SEASON (à mão)
+                if (ms.isEmpty()) return null
+                ArtsDraw.stats(th, team, comp, if (c.kind == "SEASON") "RESUMO DA TEMPORADA" else "CAMPANHA ATÉ AGORA", "${v}V ${e}E ${d}D", comp.orEmpty(),
+                    listOf("Jogos" to "${ms.size}", "Gols" to "$gf × $ga", "Aproveitamento" to "$aprov%"), if (c.kind == "SEASON") "Obrigado, torcida!" else "A jornada continua!", slot, crest)
+            }
+        }
+    }
+
+    /** Cores do time: o tom mais presente do escudo vira o fundo escuro e a camisa; o segundo (ou dourado/verde) vira o destaque. */
+    internal fun theme(crest: Bitmap?, slot: Int): ArtsDraw.Theme {
+        var h1 = intArrayOf(140, 215, 355, 275)[(slot - 1).coerceIn(0, 3)].toFloat()
+        var h2: Float? = null
         if (crest != null) {
             val s = Bitmap.createScaledBitmap(crest, 32, 32, true)
             val w = FloatArray(12)
@@ -234,136 +255,10 @@ object Arts {
                 if (sec != null) h2 = sec * 30f + 15f
             }
         }
-        val bg = Color.HSVToColor(floatArrayOf(h1, 0.85f, 0.30f))
-        val accent = Color.HSVToColor(floatArrayOf(h2 ?: if (h1 in 35f..75f) 140f else 48f, 0.9f, 1f))
-        return Pair(bg, accent)
-    }
-
-    private fun darker(c: Int, f: Float): Int = Color.rgb((Color.red(c) * f).toInt(), (Color.green(c) * f).toInt(), (Color.blue(c) * f).toInt())
-
-    private fun face(): Typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC)
-
-    private fun fit(p: Paint, text: String, maxW: Float, size: Float) {
-        p.textSize = size
-        while (p.measureText(text) > maxW && p.textSize > 16f) p.textSize -= 2f
-    }
-
-    private fun drawFit(c: Canvas, b: Bitmap, box: RectF) {
-        val s = Math.min(box.width() / b.width, box.height() / b.height)
-        val w = b.width * s; val h = b.height * s
-        val l = box.left + (box.width() - w) / 2f; val t = box.top + (box.height() - h) / 2f
-        c.drawBitmap(b, null, RectF(l, t, l + w, t + h), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-    }
-
-    fun render(s: Spec): Bitmap {
-        val out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
-        val c = Canvas(out)
-        val ap = Paint(Paint.ANTI_ALIAS_FLAG)
-        ap.shader = LinearGradient(0f, 0f, 0f, H.toFloat(), darker(s.c1, 1.15f), darker(s.c1, 0.35f), Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), ap)
-        ap.shader = RadialGradient(W * 0.82f, H * 0.14f, W * 0.75f, Color.argb(95, Color.red(s.c2), Color.green(s.c2), Color.blue(s.c2)), Color.TRANSPARENT, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), ap)
-        ap.shader = null
-        // listras diagonais do canto inferior
-        for ((i, a) in listOf(150, 90, 50).withIndex()) {
-            ap.color = Color.argb(a, Color.red(s.c2), Color.green(s.c2), Color.blue(s.c2))
-            val x0 = -60f + i * 120f
-            val path = Path().apply { moveTo(x0, H.toFloat()); lineTo(x0 + 260f, H.toFloat()); lineTo(x0 + 560f, H - 360f); lineTo(x0 + 400f, H - 360f); close() }
-            c.drawPath(path, ap)
-        }
-        // topo: escudo + clube
-        s.crest?.let { drawFit(c, it, RectF(56f, 50f, 246f, 240f)) }
-        val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE }
-        fit(tp, s.team.uppercase(), W - 300f - 56f, 66f)
-        c.drawText(s.team.uppercase(), 276f, 130f, tp)
-        tp.typeface = Typeface.create("sans-serif-condensed", Typeface.NORMAL); tp.color = s.c2
-        fit(tp, (s.comp ?: "Slot ${s.slot}"), W - 300f - 56f, 36f)
-        c.drawText(s.comp ?: "Slot ${s.slot}", 276f, 186f, tp)
-        // faixa (pincelada) com o título
-        val bannerTop = 290f; val bannerH = 130f
-        ap.color = s.c2
-        c.drawPath(Path().apply { moveTo(30f, bannerTop + 14f); lineTo(W - 120f, bannerTop); lineTo(W - 90f, bannerTop + bannerH); lineTo(50f, bannerTop + bannerH - 12f); close() }, ap)
-        ap.color = Color.argb(110, 255, 255, 255)
-        c.drawRect(60f, bannerTop + 6f, W - 140f, bannerTop + 14f, ap)
-        val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = darker(s.c1, 0.35f) }
-        fit(bp, s.banner, W - 260f, 84f)
-        c.drawText(s.banner, 76f, bannerTop + bannerH / 2f + bp.textSize * 0.34f, bp)
-
-        if (s.player) {
-            // camisa com a força + informações
-            drawShirt(c, RectF(50f, 470f, 560f, 980f), s)
-            var y = 540f
-            val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif-condensed", Typeface.NORMAL); color = Color.argb(190, 255, 255, 255); textSize = 30f }
-            val vp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE }
-            for ((k, v) in s.rows.take(4)) {
-                var tx = 610f
-                if (k == "País" && s.flag != null) { drawFit(c, s.flag, RectF(610f, y - 44f, 690f, y + 8f)); tx = 706f }
-                c.drawText(k.uppercase(), tx, y - 30f, lp)
-                fit(vp, v, W - tx - 40f, 50f)
-                c.drawText(v, tx, y + 14f, vp)
-                ap.color = Color.argb(70, 255, 255, 255); c.drawRect(610f, y + 40f, W - 40f, y + 43f, ap)
-                y += 112f
-            }
-            // nome
-            val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE }
-            if (s.big1.isNotBlank()) { fit(np, s.big1.uppercase(), W - 120f, 76f); c.drawText(s.big1.uppercase(), 60f, 1050f, np) }
-            np.color = s.c2
-            fit(np, s.big2.uppercase(), W - 110f, 190f)
-            c.drawText(s.big2.uppercase(), 56f, 1215f, np)
-        } else {
-            val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE }
-            if (s.big1.isNotBlank()) { fit(np, s.big1.uppercase(), W - 120f, 64f); np.textAlign = Paint.Align.CENTER; c.drawText(s.big1.uppercase(), W / 2f, 560f, np) }
-            np.color = s.c2; np.textAlign = Paint.Align.CENTER
-            fit(np, s.big2, W - 100f, 330f)
-            c.drawText(s.big2, W / 2f, 800f, np)
-            val lp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create("sans-serif-condensed", Typeface.NORMAL); color = Color.argb(190, 255, 255, 255); textSize = 30f }
-            val vp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE }
-            var y = 900f
-            for ((k, v) in s.rows.take(3)) {
-                lp.textAlign = Paint.Align.LEFT; vp.textAlign = Paint.Align.RIGHT
-                c.drawText(k.uppercase(), 140f, y, lp)
-                fit(vp, v, 560f, 46f); c.drawText(v, W - 140f, y, vp)
-                ap.color = Color.argb(70, 255, 255, 255); c.drawRect(140f, y + 18f, W - 140f, y + 21f, ap)
-                y += 92f
-            }
-        }
-        // rodapé
-        ap.color = Color.argb(150, 0, 0, 0); c.drawRect(0f, H - 100f, W.toFloat(), H.toFloat(), ap)
-        val fp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE }
-        fit(fp, s.footer, W - 340f, 46f)
-        c.drawText(s.footer, 40f, H - 36f, fp)
-        fp.typeface = Typeface.create("sans-serif-condensed", Typeface.NORMAL); fp.textSize = 28f; fp.color = Color.argb(170, 255, 255, 255); fp.textAlign = Paint.Align.RIGHT
-        c.drawText("OSM Coach • S${s.slot}", W - 36f, H - 38f, fp)
-        return out
-    }
-
-    private fun drawShirt(c: Canvas, box: RectF, s: Spec) {
-        fun px(x: Float) = box.left + box.width() * x
-        fun py(y: Float) = box.top + box.height() * y
-        val path = Path().apply {
-            moveTo(px(0.30f), py(0.05f)); lineTo(px(0.40f), py(0.05f)); quadTo(px(0.50f), py(0.17f), px(0.60f), py(0.05f)); lineTo(px(0.70f), py(0.05f))
-            lineTo(px(0.97f), py(0.22f)); lineTo(px(0.85f), py(0.43f)); lineTo(px(0.75f), py(0.35f)); lineTo(px(0.75f), py(0.96f))
-            lineTo(px(0.25f), py(0.96f)); lineTo(px(0.25f), py(0.35f)); lineTo(px(0.15f), py(0.43f)); lineTo(px(0.03f), py(0.22f)); close()
-        }
-        val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color = Color.argb(90, 0, 0, 0)
-        c.save(); c.translate(10f, 14f); c.drawPath(path, p); c.restore()
-        p.color = s.c2
-        c.drawPath(path, p)
-        // faixa central e mangas na cor do clube
-        p.color = s.c1
-        c.drawRect(px(0.42f), py(0.17f), px(0.58f), py(0.96f), p)
-        p.style = Paint.Style.STROKE; p.strokeWidth = 10f; p.color = darker(s.c1, 0.6f)
-        c.drawPath(path, p)
-        p.style = Paint.Style.FILL
-        s.crest?.let { drawFit(c, it, RectF(px(0.28f), py(0.20f), px(0.40f), py(0.34f))) }
-        s.number?.let { n ->
-            val np = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face(); color = Color.WHITE; textAlign = Paint.Align.CENTER; textSize = 190f }
-            while (np.measureText(n) > box.width() * 0.34f && np.textSize > 40f) np.textSize -= 6f
-            c.drawText(n, px(0.50f), py(0.66f), np)
-            np.textSize = 36f; np.color = Color.argb(220, 255, 255, 255)
-            c.drawText(s.numberLabel.orEmpty(), px(0.50f), py(0.76f), np)
-        }
+        val bg = Color.HSVToColor(floatArrayOf(h1, 0.85f, 0.34f))
+        val kit = Color.HSVToColor(floatArrayOf(h1, 0.88f, 0.80f))
+        val accent = Color.HSVToColor(floatArrayOf(h2 ?: if (h1 in 35f..75f) 140f else 48f, 0.95f, 1f))
+        return ArtsDraw.Theme(bg, accent, kit)
     }
 
     // ------------------------------------------------------------------ galeria e compartilhamento

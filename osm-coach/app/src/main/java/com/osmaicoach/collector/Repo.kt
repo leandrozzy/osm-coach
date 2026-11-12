@@ -2110,8 +2110,22 @@ class Repo(private val ctx: Context) {
         val weeks: List<Weekly.Week>, val falling: List<Triple<String, Double, Double>> = emptyList()
     )
 
+    /** Limpa do livro de caixa as compras/vendas que foram erro de leitura (ver `Ledger.sanitize`); grava só se mudou. */
+    suspend fun cleanLedger(slot: Int) {
+        val p = dao.plan(slot, "ledger") ?: return
+        val all = Ledger.parse(p.json)
+        val keys = dao.playersOf(slot).filter { it.owner == "MY" }.map { it.nameKey }.toSet()
+        if (keys.size < 14) return   // elenco ainda mal lido: não limpa nada
+        val clean = Ledger.sanitize(all, keys)
+        if (clean.size != all.size) {
+            dao.putPlan(PlanEntity(slot, "ledger", Ledger.toJson(clean), System.currentTimeMillis()))
+            Diag.log("Livro de caixa S$slot: ${all.size - clean.size} lançamento(s) de erro de leitura removido(s)")
+        }
+    }
+
     /** Tudo o que a tela de Evolução mostra. */
     suspend fun progress(slot: Int, now: Long = System.currentTimeMillis()): ProgressData {
+        runCatching { cleanLedger(slot) }
         // só a competição atual (tlog_R*); as arquivadas ficam para o aprendizado
         val logs = dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { p -> runCatching { org.json.JSONObject(p.json).put("at", p.at) }.getOrNull() }
         val mine = dao.playersOf(slot).filter { it.owner == "MY" }

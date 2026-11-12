@@ -3556,7 +3556,7 @@ internal fun PlayerFlagDialog(p: PlayerEntity, onDone: () -> Unit) {
 internal val CORE_SLOTS = mapOf("GOL" to 1, "DEF" to 4, "MEI" to 4, "ATA" to 3)
 internal val TRAINER_ROLE = mapOf("avançados" to "ATA", "médios" to "MEI", "defesas" to "DEF", "guarda-redes" to "GOL", "universal" to "UNI")
 
-internal fun fmtM(m: Double?): String = if (m == null) "?" else if (m >= 1.0) "%.1fM".format(m).replace('.', ',') else "%.0fK".format(m * 1000)
+internal fun fmtM(m: Double?): String = if (m == null) "?" else if (m < 0) "-" + fmtM(-m) else if (m >= 1.0) "%.1fM".format(m).replace('.', ',') else "%.0fK".format(m * 1000)
 
 /** Número grande de passo (1, 2, 3…) com título. */
 @Composable

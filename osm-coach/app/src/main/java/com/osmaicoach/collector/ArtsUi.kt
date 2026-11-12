@@ -151,7 +151,7 @@ internal fun ArtsTab() {
         }
         ArtsData(Arts.items(repo), cands, teams)
     }
-    LaunchedEffect(Unit) { Arts.clearUnseen(ctx) }
+    LaunchedEffect(Unit) { Arts.clearUnseen(ctx); withContext(Dispatchers.IO) { Arts.migrate(ctx) }; UiBus.version++ }
     var preview by remember { mutableStateOf<Arts.Item?>(null) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
@@ -159,7 +159,7 @@ internal fun ArtsTab() {
         PageTitle("🎨", "Artes", "${d.items.size} imagens")
         Text(
             "Imagens de divulgação dos seus times, desenhadas pelo app com o que ele já leu do jogo (sem foto de jogador, sem IA, sem custo). " +
-                "Depois de Encerrar a leitura, o app cria sozinho as de contratação, despedida (venda confirmada), goleada/sequência e fim de temporada.",
+                "Depois de Encerrar a leitura, o app cria sozinho as de contratação, goleada, sequência de vitórias, liderança, título e objetivo alcançado. Slot sem liga não gera nada.",
             fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 8.dp)
         )
         CtaButton(if (busy) "Criando…" else "🎨 Criar artes novas agora", Modifier.fillMaxWidth(), !busy) {
@@ -172,7 +172,7 @@ internal fun ArtsTab() {
         }
         msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
         Title("Suas artes")
-        if (d.items.isEmpty()) EmptyState("🎨", "Nenhuma arte ainda", "Quando o app confirmar uma contratação, venda, goleada ou o fim da temporada, a arte aparece aqui. Ou crie uma abaixo.")
+        if (d.items.isEmpty()) EmptyState("🎨", "Nenhuma arte ainda", "Quando o app confirmar uma contratação, goleada, sequência, liderança, título ou objetivo, a arte aparece aqui. Ou crie uma abaixo.")
         for (row in d.items.chunked(2)) {
             Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (it in row) ArtTile(it, Modifier.weight(1f)) { preview = it }

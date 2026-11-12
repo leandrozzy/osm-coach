@@ -25,3 +25,25 @@ class ImpactTest {
         assertEquals(1, Impact.listed(listOf(p("MY", true), p("MY", false), p("MY", null), p("RIVAL", true))).size)
     }
 }
+
+class LedgerSanitizeTest {
+    private fun e(t: String, k: String, at: Long) = Ledger.Entry(t, k, k, at, 1.0, false, 70, 25)
+    private val h = 3600_000L
+
+    @Test fun sellOfPlayerStillInSquadIsDropped() {
+        val l = listOf(e("buy", "a", 0), e("sell", "a", 100 * h), e("sell", "b", 100 * h))
+        val out = Ledger.sanitize(l, setOf("a"))
+        assertTrue(out.none { it.type == "sell" && it.key == "a" })   // a ainda está no elenco
+        assertTrue(out.any { it.type == "sell" && it.key == "b" })    // b saiu de verdade
+    }
+
+    @Test fun sellThenBuyBackWithin72hIsReadingNoise() {
+        val l = listOf(e("sell", "z", 10 * h), e("buy", "z", 12 * h))
+        assertTrue(Ledger.sanitize(l, setOf("z")).isEmpty())
+    }
+
+    @Test fun realSaleKept() {
+        val l = listOf(e("buy", "q", 0), e("sell", "q", 500 * h))
+        assertEquals(2, Ledger.sanitize(l, emptySet()).size)
+    }
+}

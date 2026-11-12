@@ -682,6 +682,27 @@ class FramePipeline private constructor(private val ctx: Context) {
      * Linha do Plantel cujo NOME o OCR leu mas cuja idade/força/valor se perdeu (a linha inteira some do elenco): relê só a faixa da linha,
      * ampliada 2×, e completa o jogador (12/11: Ba e N'Guessan sumiam do S2). Até 4 linhas por quadro; só entra se a releitura achou força E valor.
      */
+    private suspend fun repairNames(bmp: Bitmap, ex: Extraction): Extraction {
+        if (ex.nameless.isEmpty() || ex.players.size < 3) return ex
+        val have = ex.players.map { Txt.key(it.name) }.toSet()
+        val add = ArrayList<PlayerRead>()
+        for (p in ex.nameless.take(3)) {
+            val y = p.natY ?: continue
+            val x0 = (0.04f * bmp.width).toInt(); val x1 = (0.34f * bmp.width).toInt()
+            val y0 = ((y - 0.035f) * bmp.height).toInt().coerceAtLeast(0); val y1 = ((y + 0.035f) * bmp.height).toInt().coerceAtMost(bmp.height)
+            if (x1 - x0 < 20 || y1 - y0 < 12) continue
+            val crop = Bitmap.createBitmap(bmp, x0, y0, x1 - x0, y1 - y0)
+            val big = Bitmap.createScaledBitmap(crop, crop.width * 4, crop.height * 4, true)
+            val r = OcrEngine.read(big)
+            crop.recycle(); big.recycle()
+            val nm = PlayerName.clean(r.tokens.filter { Txt.letters(it.text) >= 1 && it.text.trim().toIntOrNull() == null }.sortedBy { it.l }.joinToString(" ") { it.text.trim() }, 2)
+            if (nm != null && Txt.key(nm) !in have) add.add(p.copy(name = nm))
+        }
+        if (add.isEmpty()) return ex
+        Diag.log("Plantel: ${add.size} nome(s) refeito(s) por recorte: " + add.joinToString { it.name })
+        return ex.copy(players = ex.players + add)
+    }
+
     private suspend fun repairRows(bmp: Bitmap, ocr: OcrResult, ex: Extraction): Extraction {
         if (ex.players.size < 3) return ex
         val rowYs = ex.players.mapNotNull { it.natY }
@@ -754,9 +775,10 @@ class FramePipeline private constructor(private val ctx: Context) {
         // lista em movimento (rolagem) = bandeira borrada: compara a altura das linhas com o quadro anterior e só recorta com a lista parada
         val ys = players.mapNotNull { p -> p.natY?.let { Txt.key(p.name) to it } }.toMap()
         val prev = lastRowY.put(slot, ys)
+        var moving = false
         if (prev != null) {
             val d = ys.mapNotNull { (k, y) -> prev[k]?.let { Math.abs(it - y) } }
-            if (d.size >= 2 && d.sorted()[d.size / 2] > 0.003f) return
+            if (d.size >= 2 && d.sorted()[d.size / 2] > 0.003f) moving = true
         }
         FlagWeb.ensureAll(ctx)   // bandeiras de referência (Flagpedia) para descobrir o país
         val mine = repo.dao.playersOf(slot).filter { it.owner == "MY" }
@@ -777,6 +799,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             val key = canon(p)
             if (key.isBlank()) continue
             val old = Flags.imgQuality(cur.optString(key))
+            // lista rolando: só tenta quem ainda NÃO tem miniatura (jogador novo, ex. N'Guessan), e só se nítida o bastante
+            if (moving && old != null) continue
             val t = thumb(bmp, x, y, 0.040f, 0.062f, 48, 32, refine = true) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
             // sem imagem boa ainda: só entra se não for bem mais borrada que as já guardadas; depois só troca por uma mais nítida
             val ok = if (old == null) (refQ <= 0f || t.first >= refQ * 0.6f) else t.first > old * 1.08f + 1f
@@ -925,6 +949,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             var ex = parse(ocr, type, img, now)
             if (type == ScreenType.SQUAD) ex = runCatching { repairStrength(bmp, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) ex = runCatching { repairRows(bmp, ocr, ex) }.getOrDefault(ex)
+            if (type == ScreenType.SQUAD) ex = runCatching { repairNames(bmp, ex) }.getOrDefault(ex)
             Diag.parsed.incrementAndGet()
 
             // Rolando a lista o cabeçalho some: reaproveita o dono lido por último (mesmo tipo e slot, até 10 min).

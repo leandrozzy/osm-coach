@@ -363,13 +363,14 @@ object Parsers {
         }
 
         val players = ArrayList<PlayerRead>()
+        val nameless = ArrayList<PlayerRead>()
         val ageToks = o.tokens.filter { (intTok(it) ?: 0) in 15..45 && abs(it.xc - ageX) <= 0.035f && it.yc > 0.05f }
         for (a in ageToks) {
             val band = o.tokens.filter { abs(it.yc - a.yc) <= 0.04f }
             val rawName = band.filter { it.xc in 0.04f..0.34f && Txt.letters(it.text) >= 1 && intTok(it) == null }
                 .sortedBy { it.l }.joinToString(" ") { it.text.trim() }.trim()
             // nome curto de verdade existe ("Ba", "Wu"): aceita 2 letras, mas só se a linha tem força e valor (abaixo)
-            val name = PlayerName.clean(rawName, 2) ?: continue
+            val name = PlayerName.clean(rawName, 2)
             val posTok = band.firstOrNull { abs(it.xc - posX) <= 0.035f && it.text.trim().length in 1..4 && it.text.trim().all { c -> c.isLetter() } }
             fun col(x: Float): Int? = band.mapNotNull { if (abs(it.xc - x) <= 0.03f) intTok(it) else null }.firstOrNull { it in 1..130 }
             val sectionCat = sections.filter { it.first <= a.yc }.maxByOrNull { it.first }?.second
@@ -382,10 +383,10 @@ object Parsers {
             }?.takeIf { it in 30..120 }
             val value = band.filter { it.xc > 0.85f }.mapNotNull { Money.extract(it.text) }.firstOrNull()
             if (strength == null && value == null) continue
-            if (Txt.letters(name) < 3 && (strength == null || value == null)) continue
-            players.add(
+            if (name != null && Txt.letters(name) < 3 && (strength == null || value == null)) continue
+            (if (name == null) nameless else players).add(
                 PlayerRead(
-                    name = name,
+                    name = name ?: "",
                     age = intTok(a),
                     posCode = posTok?.text?.trim()?.uppercase(),
                     cat = cat,
@@ -412,11 +413,15 @@ object Parsers {
             ScreenType.SQUAD,
             fields = f,
             players = players,
+            nameless = if (strength_ok(nameless)) nameless else emptyList(),
             ownerTeam = owner?.text?.trim(),
             ownerNick = nick?.text?.trim(),
             needsAi = needsAi
         )
     }
+
+    /** Só vale refazer o nome de linhas que tenham força E valor (linha de verdade, não lixo). */
+    private fun strength_ok(l: List<PlayerRead>): Boolean = l.isNotEmpty() && l.all { it.strength != null && it.valueText != null }
 
     // ---------------------------------------------------------------- CALENDÁRIO
     data class Orient(val mine: Int, val opp: Int, val conf: Double)

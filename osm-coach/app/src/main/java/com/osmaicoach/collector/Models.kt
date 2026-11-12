@@ -142,7 +142,9 @@ data class Extraction(
     /** Estádio: obra em andamento por card ("Relvado" -> fim) ou null = card lido sem obra (limpa o aviso). */
     val timers: Map<String, Long?> = emptyMap(),
     /** Calendário no topo: faixa com o escudo + nome de TODOS os clubes da liga (centro do escudo na captura, 0..1). */
-    val crests: List<CrestSpot> = emptyList()
+    val crests: List<CrestSpot> = emptyList(),
+    /** Plantel: linhas com idade, força e valor lidos mas SEM nome legível (o OCR perde nomes curtos, ex. "Ba"): a faixa do nome é relida ampliada. */
+    val nameless: List<PlayerRead> = emptyList()
 )
 
 data class CrestSpot(val team: String, val x: Float, val y: Float)

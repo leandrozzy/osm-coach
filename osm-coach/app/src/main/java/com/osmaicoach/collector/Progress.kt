@@ -71,6 +71,27 @@ object Ledger {
         val balance: Double get() = received - spent
     }
 
+    /**
+     * Tira do livro de caixa o que foi ERRO DE LEITURA (o OCR perdia a linha do jogador e o app lançava "venda" e depois "compra" do mesmo nome):
+     * (1) venda de quem ainda está no elenco e não foi recomprado; (2) venda e compra do mesmo jogador com menos de 72 h de distância (sumiu e voltou).
+     */
+    fun sanitize(list: List<Entry>, currentKeys: Set<String>): List<Entry> {
+        val week = 72 * 3600_000L
+        val byKey = list.groupBy { it.key }
+        return list.filter { e ->
+            val same = byKey[e.key].orEmpty()
+            when (e.type) {
+                "sell" -> {
+                    val laterBuy = same.any { it.type == "buy" && it.at > e.at }
+                    val flap = same.any { it.type == "buy" && it.at > e.at && it.at - e.at < week }
+                    !(flap || (e.key in currentKeys && !laterBuy))
+                }
+                "buy" -> same.none { it.type == "sell" && it.at < e.at && e.at - it.at < week }
+                else -> true
+            }
+        }
+    }
+
     fun parse(json: String?): MutableList<Entry> {
         val out = ArrayList<Entry>()
         val arr = try { JSONArray(json ?: "[]") } catch (e: Exception) { JSONArray() }
