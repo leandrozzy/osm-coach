@@ -3474,7 +3474,7 @@ internal fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onFlag: ()
                         AppScope.scope.launch(Dispatchers.IO) {
                             val now = System.currentTimeMillis()
                             val it = runCatching { Arts.make(ctx, Arts.Cand("player|$slot|${p.nameKey}|$now", slot, "PLAYER", "Destaque: ${p.name}", now, p.nameKey)) }.getOrNull()
-                            withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, if (it != null) "Arte criada: veja a aba Artes." else "Não consegui criar a arte.", android.widget.Toast.LENGTH_LONG).show() }
+                            withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, if (it != null) "Arte criada: veja a aba Artes." else (ArtsAi.lastError ?: "Não consegui criar a arte."), android.widget.Toast.LENGTH_LONG).show() }
                         }
                         onDone()
                     },

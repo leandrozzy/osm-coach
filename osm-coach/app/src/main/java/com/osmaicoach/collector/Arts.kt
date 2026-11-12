@@ -120,24 +120,26 @@ object Arts {
     }
 
     /**
-     * Depois de Encerrar a leitura: cria as artes dos eventos NOVOS de cada slot (contratação, goleada, sequência, liderança, título, objetivo).
-     * Na 1ª vez só vale o que aconteceu nas últimas 24 h (não despeja o histórico). Campanha/resumo só à mão. Devolve quantas criou.
+     * Depois de Encerrar a leitura: cria as artes dos eventos NOVOS de cada slot (contratação, goleada, sequência, liderança, título, objetivo), uma de cada vez
+     * (a IA gratuita atende uma por vez), no máximo 3 por rodada. Na 1ª vez só vale o que aconteceu nas últimas 24 h. Campanha/resumo só à mão.
+     * Se o serviço de imagem falhar, para e deixa o evento para a próxima vez (não marca como visto). Devolve quantas criou.
      */
     suspend fun auto(ctx: Context): Int {
         migrate(ctx)
+        if (ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getBoolean("auto_off", false)) return 0
         val repo = Repo(ctx)
         val firstRun = seen(repo) == null
         val seenSet = seen(repo) ?: mutableSetOf()
         val now = System.currentTimeMillis()
         var made = 0
-        for (slot in 1..4) {
+        var failed = false
+        loop@ for (slot in 1..4) {
             for (c in candidates(repo, slot)) {
                 if (c.id in seenSet) continue
-                seenSet.add(c.id)
-                if (c.kind == "CAMP" || c.kind == "SEASON") continue
-                if (firstRun && now - c.at > 24 * 3600_000L) continue
-                if (made >= 6) continue
-                if (runCatching { make(ctx, c) }.getOrNull() != null) made++
+                if (c.kind == "CAMP" || c.kind == "SEASON") { seenSet.add(c.id); continue }
+                if (firstRun && now - c.at > 24 * 3600_000L) { seenSet.add(c.id); continue }
+                if (made >= 3) break@loop
+                if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; seenSet.add(c.id) } else { failed = true; break@loop }
             }
         }
         putSeen(repo, seenSet)
@@ -147,18 +149,32 @@ object Arts {
             Diag.log("Artes: $made nova(s) criada(s)")
             UiBus.bump()
         }
+        if (failed) Diag.log("Artes: " + (ArtsAi.lastError ?: "falhou"))
         return made
     }
 
     fun unseenCount(ctx: Context): Int = ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getInt("new", 0)
     fun clearUnseen(ctx: Context) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putInt("new", 0).apply() }
+    fun autoOn(ctx: Context): Boolean = !ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getBoolean("auto_off", false)
+    fun setAuto(ctx: Context, on: Boolean) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putBoolean("auto_off", !on).apply() }
+
+    /** Refaz a arte de um item com outra cena da IA ("Gerar outra"). */
+    suspend fun regenerate(ctx: Context, item: Item): Item? = make(ctx, candOf(item), reroll = (item.at % 1000).toInt() + 1)
+
+    private fun candOf(item: Item): Cand {
+        val p = item.id.split("|")
+        val key = if (item.kind == "BUY" || item.kind == "PLAYER") p.getOrNull(2) else null
+        return Cand(item.id, item.slot, item.kind, item.title, item.at, key)
+    }
 
     // ------------------------------------------------------------------ montar e desenhar
     private fun bmp(f: File?): Bitmap? = f?.takeIf { it.exists() }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
 
-    suspend fun make(ctx: Context, c: Cand): Item? {
+    /** Cria a arte (cena da IA + acabamento do app) e guarda. null = falhou (motivo em `ArtsAi.lastError`). */
+    suspend fun make(ctx: Context, c: Cand, reroll: Int = 0): Item? {
+        ArtsAi.lastError = null
         val repo = Repo(ctx)
-        val b = draw(ctx, repo, c) ?: return null
+        val b = draw(ctx, repo, c, reroll) ?: return null
         val f = File(dir(ctx), "${System.currentTimeMillis()}_${c.slot}.png")
         f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         b.recycle()
@@ -166,6 +182,7 @@ object Arts {
         val all = items(repo).filter { it.id != c.id }
         val keep = (listOf(item) + all).take(60)
         for (old in all.drop(59)) runCatching { File(old.file).delete() }
+        for (old in items(repo).filter { it.id == c.id }) runCatching { File(old.file).delete() }
         saveItems(repo, keep)
         UiBus.bump()
         return item
@@ -176,60 +193,69 @@ object Arts {
         return if (base.isNotEmpty() && !code.isNullOrBlank()) "$base ($code)" else base.ifEmpty { code.orEmpty() }
     }
 
-    private suspend fun draw(ctx: Context, repo: Repo, c: Cand): Bitmap? {
+    private suspend fun draw(ctx: Context, repo: Repo, c: Cand, reroll: Int): Bitmap? {
         val slot = c.slot
         val f = repo.fieldMap(slot)
         val team = f[K.TEAM]?.value ?: return null
         val comp = f[K.COMPETITION]?.value
         val crest = bmp(CrestWeb.find(ctx.filesDir, team) ?: CrestCut.find(ctx.filesDir, team))
         val th = theme(crest, slot)
+        val colors = ArtsAi.colorWords(crest, slot)
         val ms = played(repo.dao.matchesOf(slot))
         val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
         val gf = ms.sumOf { it.scoreMine ?: 0 }; val ga = ms.sumOf { it.scoreOpp ?: 0 }
         val aprov = if (ms.isEmpty()) 0 else Math.round(100f * (3 * v + e) / (3 * ms.size))
         val last = ms.lastOrNull()
-        return when (c.kind) {
+        val rec = "${v}V ${e}E ${d}D"
+        val seed = (c.id.hashCode() and 0xFFFFF) + reroll * 104729
+        var kit = ""; var look = ""
+        var oppCrest: Bitmap? = null
+        val banner: String; val big: String; val info: String; val plate: Pair<String, String>?; val foot: String
+        when (c.kind) {
             "BUY", "PLAYER" -> {
                 val key = c.key ?: return null
                 val p = repo.dao.playersOf(slot).firstOrNull { it.owner == "MY" && it.nameKey == key } ?: return null
-                val parts = p.name.trim().split(Regex("\\s+"))
-                val first = if (parts.size > 1) parts.dropLast(1).joinToString(" ") else ""
                 val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
-                val rows = ArrayList<Triple<String, String, Bitmap?>>()
-                Flags.countryName(iso)?.let { rows.add(Triple("País", it, bmp(FlagWeb.file(ctx.filesDir, iso)))) }
-                p.age?.let { rows.add(Triple("Idade", "$it anos", null)) }
-                posLabel(p.cat, p.posCode).takeIf { it.isNotBlank() }?.let { rows.add(Triple("Posição", it, null)) }
-                p.valueText?.let { rows.add(Triple("Valor", it, null)) }
-                val buy = c.kind == "BUY"
-                ArtsDraw.player(th, team, comp, if (buy) "CONTRATAÇÃO CONFIRMADA" else "DESTAQUE DO ELENCO", first, parts.last(), rows, p.strength?.toString(),
-                    if (buy) "Bem-vindo ao $team!" else "$team • orgulho do clube", slot, crest)
+                val country = Flags.countryName(iso)
+                kit = ArtsAi.kitFor(ctx, repo, team, comp)
+                look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
+                banner = if (c.kind == "BUY") "CONTRATAÇÃO CONFIRMADA" else "DESTAQUE DO ELENCO"
+                big = p.name.trim().split(Regex("\\s+")).last()
+                info = listOfNotNull(country, p.age?.let { "$it anos" }, posLabel(p.cat, p.posCode).takeIf { it.isNotBlank() }).joinToString("  •  ")
+                plate = p.strength?.let { "FORÇA" to it.toString() }
+                foot = if (c.kind == "BUY") "Bem-vindo ao $team!" else "$team • orgulho do clube"
             }
             "GOLEADA" -> {
                 val m = last ?: return null
-                val opp = bmp(CrestWeb.find(ctx.filesDir, m.opponent) ?: CrestCut.find(ctx.filesDir, m.opponent))
-                val rows = ArrayList<Pair<String, String>>()
-                rows.add("Jogo" to (if (m.home == true) "em casa" else if (m.home == false) "fora" else "—"))
+                oppCrest = bmp(CrestWeb.find(ctx.filesDir, m.opponent) ?: CrestCut.find(ctx.filesDir, m.opponent))
+                kit = ArtsAi.kitFor(ctx, repo, team, comp)
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
-                if (streak >= 2) rows.add("Sequência" to "$streak vitórias")
-                ArtsDraw.match(th, team, comp, "GOLEADA!", crest, opp, m.scoreMine ?: 0, m.scoreOpp ?: 0, "J${m.round} • ${m.opponent.orEmpty()}", rows, "Vamos pra cima, $team!", slot)
+                banner = "GOLEADA!"; big = "${m.scoreMine ?: 0} × ${m.scoreOpp ?: 0}"
+                info = "J${m.round} • ${m.opponent.orEmpty()}"
+                plate = if (streak >= 2) "SEQUÊNCIA" to "$streak vitórias" else "JOGO" to (if (m.home == true) "em casa" else if (m.home == false) "fora" else "—")
+                foot = "Vamos pra cima, $team!"
             }
             "STREAK" -> {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
-                ArtsDraw.stats(th, team, comp, "EM CHAMAS!", "$streak", "VITÓRIAS SEGUIDAS", listOf("Gols marcados" to "$gf", "Gols sofridos" to "$ga", "Aproveitamento" to "$aprov%"), "Vamos pra cima, $team!", slot, crest)
+                banner = "EM CHAMAS!"; big = "$streak"; info = "VITÓRIAS SEGUIDAS"; plate = "APROVEITAMENTO" to "$aprov%"; foot = "Vamos pra cima, $team!"
             }
-            "LEADER" -> ArtsDraw.stats(th, team, comp, "LÍDER DA LIGA!", "1º", "NA RODADA ${last?.round ?: ""}", listOf("Jogos" to "${ms.size}", "Campanha" to "${v}V ${e}E ${d}D", "Aproveitamento" to "$aprov%"), "No topo da tabela!", slot, crest)
-            "TITLE", "OBJECTIVE" -> {
+            "LEADER" -> { banner = "LÍDER DA LIGA!"; big = "1º"; info = "NA RODADA ${last?.round ?: ""}" + (comp?.let { " • $it" } ?: ""); plate = "CAMPANHA" to rec; foot = "No topo da tabela!" }
+            "TITLE" -> { banner = "CAMPEÃO DA LIGA!"; big = "CAMPEÃO"; info = comp.orEmpty(); plate = "CAMPANHA" to rec; foot = "Obrigado, torcida!" }
+            "OBJECTIVE" -> {
                 val pos = num(f[K.LEAGUE_POS]?.value)
-                val title = c.kind == "TITLE"
-                ArtsDraw.trophyCard(th, team, comp, if (title) "CAMPEÃO DA LIGA!" else "OBJETIVO ALCANÇADO!", if (title) "CAMPEÃO" else "${pos ?: ""}º LUGAR",
-                    (comp ?: "") + " • ${v}V ${e}E ${d}D", "Obrigado, torcida!", slot, crest)
+                banner = "OBJETIVO ALCANÇADO!"; big = "${pos ?: ""}º LUGAR"; info = comp.orEmpty(); plate = "CAMPANHA" to rec; foot = "Obrigado, torcida!"
             }
             else -> {   // CAMP, SEASON (à mão)
                 if (ms.isEmpty()) return null
-                ArtsDraw.stats(th, team, comp, if (c.kind == "SEASON") "RESUMO DA TEMPORADA" else "CAMPANHA ATÉ AGORA", "${v}V ${e}E ${d}D", comp.orEmpty(),
-                    listOf("Jogos" to "${ms.size}", "Gols" to "$gf × $ga", "Aproveitamento" to "$aprov%"), if (c.kind == "SEASON") "Obrigado, torcida!" else "A jornada continua!", slot, crest)
+                banner = if (c.kind == "SEASON") "RESUMO DA TEMPORADA" else "CAMPANHA ATÉ AGORA"; big = rec
+                info = (comp?.let { "$it  •  " } ?: "") + "gols $gf × $ga"; plate = "APROVEITAMENTO" to "$aprov%"
+                foot = if (c.kind == "SEASON") "Obrigado, torcida!" else "A jornada continua!"
             }
         }
+        val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, kit, look), seed) ?: return null
+        val out = ArtsDraw.poster(th, scene, crest, oppCrest, banner, big, info, plate, foot)
+        scene.recycle()
+        return out
     }
 
     /** Cores do time: o tom mais presente do escudo vira o fundo escuro e a camisa; o segundo (ou dourado/verde) vira o destaque. */

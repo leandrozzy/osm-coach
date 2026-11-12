@@ -158,17 +158,23 @@ internal fun ArtsTab() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
         PageTitle("🎨", "Artes", "${d.items.size} imagens")
         Text(
-            "Imagens de divulgação dos seus times, desenhadas pelo app com o que ele já leu do jogo (sem foto de jogador, sem IA, sem custo). " +
-                "Depois de Encerrar a leitura, o app cria sozinho as de contratação, goleada, sequência de vitórias, liderança, título e objetivo alcançado. Slot sem liga não gera nada.",
+            "Cartazes dos seus times: a cena (atleta fictício, estádio, taça) é gerada por uma IA gratuita (Pollinations, sem chave, precisa de internet; só o texto do pedido é enviado: " +
+                "cores do time e tipo de arte) e o app escreve por cima o nome, escudo, bandeira e números, sempre certos. Depois de Encerrar a leitura o app cria sozinho (até 3 por vez) " +
+                "as de contratação, goleada, sequência de vitórias, liderança, título e objetivo alcançado. Slot sem liga não gera nada.",
             fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 8.dp)
         )
-        CtaButton(if (busy) "Criando…" else "🎨 Criar artes novas agora", Modifier.fillMaxWidth(), !busy) {
-            busy = true
+        var autoOn by remember { mutableStateOf(Arts.autoOn(ctx)) }
+        CtaButton(if (busy) "Gerando com IA… pode levar 1 min" else "🎨 Criar artes novas agora", Modifier.fillMaxWidth(), !busy) {
+            busy = true; msg = null
             scope.launch {
                 val n = withContext(Dispatchers.IO) { runCatching { Arts.auto(ctx) }.getOrDefault(0) }
-                msg = if (n > 0) "Criei $n arte(s) nova(s)." else "Nada novo para criar. Use \"Criar uma arte\" abaixo para escolher um evento."
+                msg = if (n > 0) "Criei $n arte(s) nova(s)." else (ArtsAi.lastError ?: "Nada novo para criar. Use \"Criar uma arte\" abaixo para escolher um evento.")
                 busy = false
             }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Criar sozinho depois de Encerrar", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = autoOn, onCheckedChange = { autoOn = it; Arts.setAuto(ctx, it) })
         }
         msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
         Title("Suas artes")
@@ -191,8 +197,15 @@ internal fun ArtsTab() {
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(c.title, fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 2)
                         OutlinedButton(
-                            onClick = { scope.launch { withContext(Dispatchers.IO) { runCatching { Arts.make(ctx, c) } } } },
-                            enabled = !done, modifier = Modifier.height(36.dp)
+                            onClick = {
+                                busy = true; msg = "Gerando “${c.title}” com IA…"
+                                scope.launch {
+                                    val it = withContext(Dispatchers.IO) { runCatching { Arts.make(ctx, c) }.getOrNull() }
+                                    msg = if (it != null) "Pronto: ${c.title}." else (ArtsAi.lastError ?: "Não consegui criar.")
+                                    busy = false
+                                }
+                            },
+                            enabled = !done && !busy, modifier = Modifier.height(36.dp)
                         ) { Text(if (done) "✓ feita" else "Criar", fontSize = 12.5.sp) }
                     }
                 }
@@ -238,6 +251,19 @@ private fun ArtPreview(item: Arts.Item, onDone: () -> Unit) {
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
                 ) { Text("💾 Baixar na galeria") }
+                var again by remember { mutableStateOf(false) }
+                OutlinedButton(
+                    onClick = {
+                        again = true
+                        scope.launch {
+                            val n = withContext(Dispatchers.IO) { runCatching { Arts.regenerate(ctx, item) }.getOrNull() }
+                            again = false
+                            android.widget.Toast.makeText(ctx, if (n != null) "Nova arte criada." else (ArtsAi.lastError ?: "Não consegui gerar outra."), android.widget.Toast.LENGTH_LONG).show()
+                            if (n != null) onDone()
+                        }
+                    },
+                    enabled = !again, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                ) { Text(if (again) "Gerando…" else "🎲 Gerar outra cena") }
                 OutlinedButton(
                     onClick = { scope.launch { withContext(Dispatchers.IO) { runCatching { Arts.share(ctx, item) } } } },
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
