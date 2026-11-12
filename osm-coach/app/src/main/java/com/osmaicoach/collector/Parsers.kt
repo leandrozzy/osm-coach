@@ -368,7 +368,8 @@ object Parsers {
             val band = o.tokens.filter { abs(it.yc - a.yc) <= 0.04f }
             val rawName = band.filter { it.xc in 0.04f..0.34f && Txt.letters(it.text) >= 1 && intTok(it) == null }
                 .sortedBy { it.l }.joinToString(" ") { it.text.trim() }.trim()
-            val name = PlayerName.clean(rawName) ?: continue
+            // nome curto de verdade existe ("Ba", "Wu"): aceita 2 letras, mas só se a linha tem força e valor (abaixo)
+            val name = PlayerName.clean(rawName, 2) ?: continue
             val posTok = band.firstOrNull { abs(it.xc - posX) <= 0.035f && it.text.trim().length in 1..4 && it.text.trim().all { c -> c.isLetter() } }
             fun col(x: Float): Int? = band.mapNotNull { if (abs(it.xc - x) <= 0.03f) intTok(it) else null }.firstOrNull { it in 1..130 }
             val sectionCat = sections.filter { it.first <= a.yc }.maxByOrNull { it.first }?.second
@@ -381,6 +382,7 @@ object Parsers {
             }?.takeIf { it in 30..120 }
             val value = band.filter { it.xc > 0.85f }.mapNotNull { Money.extract(it.text) }.firstOrNull()
             if (strength == null && value == null) continue
+            if (Txt.letters(name) < 3 && (strength == null || value == null)) continue
             players.add(
                 PlayerRead(
                     name = name,

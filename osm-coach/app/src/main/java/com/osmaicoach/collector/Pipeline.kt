@@ -272,7 +272,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 // o fim do calendário é sempre "Última rodada" + "Resumo da época": o quadro anterior é a última rodada
                 val endText = Txt.norm(ocr.fullText).contains("resumo da epoca")
                 if (ex.matches.size < 3 && !(cur != null && endText)) return
-                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (gap || endText) pd.endSeen = true }
+                (cur ?: Pending(slot, type, null)).also { pd -> pending = pd; ex.matches.forEach { m -> pd.seen.add("${m.round}"); m.round?.let { r -> if (r > pd.maxRound) pd.maxRound = r } }; if (endText || (gap && pd.maxRound >= (repo.fieldMap(slot)[K.ROUND_TOTAL]?.value?.toIntOrNull() ?: Int.MAX_VALUE))) pd.endSeen = true }
             }
             ScreenType.SQUAD -> {
                 // rolada a lista, o título do time sai da tela: quadro sem dono continua a leitura em andamento (antes era descartado e o plantel nunca "chegava ao fim")
@@ -292,7 +292,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         // quadro "igual" = as MESMAS linhas nas MESMAS alturas (texto + altura em faixas de 0,02): rolar uma linha desloca todas as alturas,
         // então um quadro que só ganhou 1 jogador novo embaixo NÃO é igual (antes valia ≥85% dos nomes e o plantel "terminava" no 1º goleiro)
         val names = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) + "@" + Math.round(it.yc * 50f) }.toSet()
-        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.75f
+        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.6f   // o OCR oscila entre quadros parados
         if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
         pd.still = if (same) pd.still + 1 else 0
         // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
@@ -323,8 +323,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             ScreenType.MARKET -> pd.endSeen
             ScreenType.CALENDAR -> {
                 // o total do OSM ("43") inclui jogos de copa ainda sem data/rival que o calendário nem lista: vale chegar à última rodada OU ao fim da lista
-                val total = f[K.ROUND_TOTAL]?.value?.toIntOrNull()
-                pd.endSeen || (total != null && pd.maxRound >= total)
+                // só o fim visto (texto "Resumo da época" ou lista parada embaixo): ter lido a rodada 43 antes não prova que a tela chegou ao fim (print 12/11)
+                pd.endSeen
             }
             ScreenType.RESULT -> pd.endSeen && pd.ratings
             else -> false

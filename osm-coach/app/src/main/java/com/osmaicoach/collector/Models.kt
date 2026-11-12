@@ -639,7 +639,7 @@ object PlayerName {
     }
 
     /** Nome limpo, ou null se o que sobrou não é um nome de jogador. */
-    fun clean(raw: String): String? {
+    fun clean(raw: String, minLetters: Int = 3): String? {
         var t = raw.trim()
         for (p in PHRASES) t = p.replace(t, " ")
         val out = ArrayList<String>()
@@ -655,10 +655,11 @@ object PlayerName {
             out.add(w)
         }
         if (out.isEmpty()) return null
-        if (out.any { garbled(it) }) return null
+        // apóstrofo/hífen separam partes do nome ("N'Guessan", "O'Neill", "Al-Hakim"): cada parte é testada sozinha ("NGuessan" colado parecia lixo de OCR)
+        if (out.any { w -> w.split('\'', '’', '-').any { garbled(it) } }) return null
         val name = out.joinToString(" ")
         // todo nome do OSM tem pelo menos uma maiúscula ("de Paula" inclusive); "ohl" é pedaço de leitura
-        if (Txt.letters(name) < 3 || name.none { it.isUpperCase() }) return null
+        if (Txt.letters(name) < minLetters || name.none { it.isUpperCase() }) return null
         return name
     }
 }

@@ -2158,15 +2158,21 @@ class Repo(private val ctx: Context) {
             val cats = seenNow.mapNotNull { it.cat }.toSet()
             val fullPass = seenNow.size >= 14 && cats.containsAll(listOf("ATA", "MEI", "DEF", "GOL"))
             if (!fullPass || seenNow.size < mine.size * 0.5) continue
-            val gone = mine.filter { seenAt.optLong(it.nameKey, 0L) < since }
+            val notSeen = mine.filter { seenAt.optLong(it.nameKey, 0L) < since }
+            // Sumir de UMA leitura completa não prova venda (o OCR perde linhas: Ba/N'Guessan no S2, 12/11). Só sai do elenco depois de
+            // 2 leituras completas seguidas sem ele (plano `squadmiss`: nameKey → passadas completas sem o jogador).
+            val miss = planJson(slot, "squadmiss")
+            val missNew = org.json.JSONObject()
+            for (p in notSeen) missNew.put(p.nameKey, miss.optInt(p.nameKey, 0) + 1)
+            dao.putPlan(PlanEntity(slot, "squadmiss", missNew.toString(), now))
+            val gone = notSeen.filter { missNew.optInt(it.nameKey, 0) >= 2 }
             if (gone.isEmpty() || gone.size > 20) continue
             val ledger = Ledger.parse(dao.plan(slot, "ledger")?.json)
             for (p in gone) {
                 dao.deletePlayer(slot, "MY", p.nameKey)
                 removed++
-                // saiu do elenco numa leitura completa: venda (pelo último valor do plantel)
-                // fantasma de OCR (nome ilegível, sem valor) não é venda
-                if (!looksGarbled(p.name) && p.valueText != null) {
+                // o livro de caixa só ganha a venda quando o jogador ESTAVA À VENDA (setas lidas); sem isso não dá para saber se foi venda ou erro de leitura
+                if (p.forSale == true && !looksGarbled(p.name) && p.valueText != null) {
                     Ledger.add(ledger, Ledger.Entry("sell", p.nameKey, p.name, now, Money.parse(p.valueText), true, p.strength, p.age))
                 }
             }
@@ -2174,7 +2180,7 @@ class Repo(private val ctx: Context) {
             val sold = gone.filter { it.forSale == true && !looksGarbled(it.name) }
             val rest = gone - sold.toSet()
             if (sold.isNotEmpty()) learn(slot, "elenco", "Vendido (estava à venda): ${sold.joinToString { it.name }}.", now)
-            if (rest.isNotEmpty()) learn(slot, "elenco", "Elenco conferido: ${rest.joinToString { it.name }} não apareceu na leitura completa e saiu da lista.", now)
+            if (rest.isNotEmpty()) learn(slot, "elenco", "Elenco conferido: ${rest.joinToString { it.name }} sumiu de 2 leituras completas seguidas e saiu da lista (sem venda confirmada: não entra no caixa).", now)
         }
         return removed
     }
