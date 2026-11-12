@@ -197,8 +197,9 @@ internal fun ArtsTab() {
                     Text(if (on) "cria sozinho" else "só à mão", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(end = 6.dp))
                     androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; Arts.setSlotOn(ctx, slot, it) })
                 }
-                val cs = d.cands[slot].orEmpty()
-                if (cs.isEmpty()) Text("Sem eventos ainda.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+                val cs = if (on) d.cands[slot].orEmpty() else emptyList()
+                if (!on) Text("Slot desligado: não cria artes (nem sozinho nem pelo botão de cima). Ligue o interruptor para voltar a criar.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+                else if (cs.isEmpty()) Text("Sem eventos ainda.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 for (c in cs) {
                     val done = d.items.any { it.id == c.id }
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {

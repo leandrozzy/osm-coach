@@ -356,7 +356,8 @@ object Arts {
             }
         }
         val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, kit, look), seed) ?: return null
-        val out = ArtsDraw.poster(th, scene, crest, oppCrest, banner, big, info, plate, foot)
+        val hero = c.kind in listOf("EXPECT", "STREAK", "LEADER", "CAMP", "SEASON")
+        val out = ArtsDraw.poster(th, scene, crest, oppCrest, banner, big, info, plate, foot, heroCrest = hero)
         scene.recycle()
         return out
     }

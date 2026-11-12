@@ -75,10 +75,11 @@ internal object ArtsDraw {
         val x = when (align) { 'c' -> x0 - w / 2f; 'r' -> x0 - w; else -> x0 }
         val sh = txtPaint(size, true, skew, scale); sh.color = black(150); sh.maskFilter = BlurMaskFilter(10f, BlurMaskFilter.Blur.NORMAL)
         c.drawText(s, x + 4f, y + 6f, sh)
+        // borda escura por cópias deslocadas (contorno de verdade mostraria as sobreposições internas da fonte)
+        val ed = txtPaint(size, true, skew, scale); ed.color = argb(255, 90, 45, 0)
+        for ((dx, dy) in listOf(-2f to 0f, 2f to 0f, 0f to -2f, 0f to 2f)) c.drawText(s, x + dx, y + dy, ed)
         val f = txtPaint(size, true, skew, scale); f.shader = lin(0f, y - size * 0.78f, 0f, y + size * 0.05f, GOLD, GPOS)
         c.drawText(s, x, y, f)
-        val o = txtPaint(size, true, skew, scale); o.style = Paint.Style.STROKE; o.strokeWidth = 2f; o.color = argb(255, 70, 30, 0)
-        c.drawText(s, x, y, o)
         return w
     }
 
@@ -91,11 +92,11 @@ internal object ArtsDraw {
     }
 
     private fun ring(c: Canvas, cx: Float, cy: Float, crest: Bitmap?, th: Theme, r: Float = 104f) {
-        val k = r / 104f
+        // fundo branco (qualquer escudo aparece com as próprias cores), aro dourado fino e escudo GRANDE ocupando o anel
+        c.drawCircle(cx, cy, r + 6f, P(color = black(120), blur = 6f))
         c.drawCircle(cx, cy, r, P(color = Color.WHITE))
-        c.drawCircle(cx, cy, 92f * k, P(color = th.kit))
-        c.drawCircle(cx, cy, 92f * k, P(color = Color.WHITE, stroke = 8f * k))
-        image(c, crest, RectF(cx - 67f * k, cy - 71f * k, cx + 69f * k, cy + 65f * k))
+        c.drawCircle(cx, cy, r - 5f, P(shader = lin(0f, cy - r, 0f, cy + r, GOLD, GPOS), stroke = 5f))
+        image(c, crest, RectF(cx - 0.80f * r, cy - 0.84f * r, cx + 0.80f * r, cy + 0.80f * r))
     }
 
     /** Cena preenchendo o cartaz (corte central) + vinheta + véu escuro (na cor do time) a partir de [fade]. */
@@ -144,7 +145,7 @@ internal object ArtsDraw {
      */
     fun poster(
         th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, big: String, info: String,
-        plate: Pair<String, String>?, footer: String, versus: Boolean = false
+        plate: Pair<String, String>?, footer: String, versus: Boolean = false, heroCrest: Boolean = false
     ): Bitmap {
         val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
@@ -153,9 +154,13 @@ internal object ArtsDraw {
             // dois escudos grandes com "VS" no meio (dia de jogo)
             ring(c, 250f, 500f, crest, th, 150f); ring(c, W - 250f, 500f, oppCrest, th, 150f)
             gold(c, "VS", W / 2f, 560f, 130f, align = 'c', skew = -0.1f)
+        } else if (heroCrest) {
+            // sem pessoa na cena: o escudo do time é o foco, grande no centro, com brilho
+            c.drawCircle(540f, 400f, 250f, P(color = withA(th.accent, 90), blur = 50f))
+            ring(c, 540f, 400f, crest, th, 190f)
         } else {
-            ring(c, 125f, 125f, crest, th)
-            if (oppCrest != null) ring(c, W - 125f, 125f, oppCrest, th)
+            ring(c, 140f, 140f, crest, th, 120f)
+            if (oppCrest != null) ring(c, W - 140f, 140f, oppCrest, th, 120f)
         }
         banner(c, banner, 704f, 104f, shade(th.bg, 0.45f))
         gold(c, big.uppercase(), W / 2f, 990f, 200f, maxw = W - 100f, align = 'c', skew = -0.08f, scale = 0.86f)
@@ -188,8 +193,8 @@ internal object ArtsDraw {
         val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
         sceneBase(c, th, scene, 560f)
-        ring(c, 125f, 125f, crest, th)
-        if (oppCrest != null) ring(c, W - 125f, 125f, oppCrest, th)
+        ring(c, 140f, 140f, crest, th, 120f)
+        if (oppCrest != null) ring(c, W - 140f, 140f, oppCrest, th, 120f)
         banner(c, banner, 600f, 104f, shade(th.bg, 0.45f))
         var y = 740f
         if (!dots.isNullOrEmpty()) {
@@ -204,17 +209,20 @@ internal object ArtsDraw {
             }
             y += 130f
         }
-        for (r in rows.take(5)) {
-            val box = RectF(60f, y, W - 60f, y + 96f)
+        val shown = rows.take(5)
+        val step = minOf(112f, (1232f - y) / maxOf(1, shown.size))
+        val hh = step - 16f
+        for (r in shown) {
+            val box = RectF(60f, y, W - 60f, y + hh)
             c.drawRoundRect(box, 18f, 18f, P(color = argb(150, 8, 12, 20)))
             c.drawRoundRect(box, 18f, 18f, P(color = white(70), stroke = 2f))
-            text(c, r.label, 92f, y + 62f, 42f, Color.WHITE, maxw = 560f, skew = -0.1f, scale = 0.95f)
-            gold(c, r.value, W - 92f, y + 66f, 50f, maxw = 380f, align = 'r', skew = -0.1f)
+            text(c, r.label, 92f, y + hh * 0.64f, 42f * hh / 96f, Color.WHITE, maxw = 560f, skew = -0.1f, scale = 0.95f)
+            gold(c, r.value, W - 92f, y + hh * 0.68f, 50f * hh / 96f, maxw = 380f, align = 'r', skew = -0.1f)
             if (r.frac != null) {
-                c.drawRoundRect(RectF(92f, y + 80f, W - 92f, y + 88f), 4f, 4f, P(color = white(70)))
-                c.drawRoundRect(RectF(92f, y + 80f, 92f + (W - 184f) * r.frac.coerceIn(0f, 1f), y + 88f), 4f, 4f, P(shader = lin(92f, 0f, W - 92f, 0f, GOLD, GPOS)))
+                c.drawRoundRect(RectF(92f, y + hh - 16f, W - 92f, y + hh - 8f), 4f, 4f, P(color = white(70)))
+                c.drawRoundRect(RectF(92f, y + hh - 16f, 92f + (W - 184f) * r.frac.coerceIn(0f, 1f), y + hh - 8f), 4f, 4f, P(shader = lin(92f, 0f, W - 92f, 0f, GOLD, GPOS)))
             }
-            y += 112f
+            y += step
         }
         gold(c, footer, W / 2f, 1290f, 60f, maxw = W - 90f, align = 'c', skew = -0.16f, scale = 0.92f)
         return out

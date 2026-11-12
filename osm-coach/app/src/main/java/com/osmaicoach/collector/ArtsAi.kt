@@ -97,14 +97,15 @@ object ArtsAi {
             "TITLE", "OBJECTIVE" -> "Product photograph of a large shiny golden football championship trophy cup with two handles standing on a dark pedestal, " +
                 "dramatic spotlight from above, floating golden particles and confetti, dark $colors smoky background, stadium floodlights bokeh, luxury advertising style, " +
                 "ultra realistic, sharp, no text, no letters, no logos, no watermark. The trophy fills the upper two thirds of the frame and the bottom third is dark"
-            "EXPECT" -> "$STYLE. Empty football stadium at dusk, golden hour light beams cutting through mist over the pitch, dramatic sky, hopeful and epic atmosphere, " +
-                "$colors tones, floodlights just turning on. The bottom third of the frame is dark"
+            "EXPECT" -> "$STYLE. Inside a large football stadium seen from the touchline at dusk: green grass pitch with white lines in the foreground, tall stands all around " +
+                "and bright floodlight towers, golden hour light beams cutting through mist over the pitch, hopeful and epic atmosphere, $colors tones. " +
+                "Stadium interior only, no mountains, no landscape, no hills. The bottom third of the frame is dark"
             "MATCHDAY" -> "$STYLE. Football stadium tunnel entrance at night, two lines of fictional players in silhouette walking out toward bright floodlights, " +
                 "smoke and lens flare, $colors glow. The bottom third of the frame is dark smoke"
             "COMPARE" -> "$STYLE. Two fictional football players facing each other tense in a night stadium, close shot, different colored jerseys, floodlights, " +
                 "smoke, dark $colors color grading. The bottom third of the frame is dark smoke"
-            "STARS" -> "$STYLE. Three fictional footballers standing side by side in dramatic backlight wearing $shirt, faces in shadow, stadium floodlights, " +
-                "smoke and sparks, dark $colors color grading. The players fill the upper half of the frame and the bottom half is dark smoke"
+            "STARS" -> "$STYLE. Wide shot of three fictional footballers standing side by side, full heads and shoulders visible with space around them, centered in the frame, " +
+                "wearing $shirt, dramatic backlight, stadium floodlights, smoke and sparks, dark $colors color grading. The players fill the upper half of the frame and the bottom half is dark smoke"
             "MOMENT" -> "$STYLE. Football fans waving flags and holding $colors flares in a packed night stadium, smoke, floodlights, energetic atmosphere, " +
                 "dark $colors color grading. The bottom half of the frame is dark smoke"
             else -> "$STYLE. Wide cinematic view of a packed football stadium at night with bright floodlights, $colors flags and flares in the stands, smoke, " +
