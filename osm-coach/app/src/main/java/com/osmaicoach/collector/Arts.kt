@@ -280,7 +280,8 @@ object Arts {
                 oppCrest = bmp(CrestWeb.find(ctx.filesDir, m.opponent) ?: CrestCut.find(ctx.filesDir, m.opponent))
                 kit = ArtsAi.kitFor(ctx, repo, team, comp)
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
-                banner = "GOLEADA!"; big = "${m.scoreMine ?: 0} × ${m.scoreOpp ?: 0}"
+                // quem joga em casa fica à ESQUERDA (placar e escudos)
+                banner = "GOLEADA!"; big = if (m.home == false) "${m.scoreOpp ?: 0} × ${m.scoreMine ?: 0}" else "${m.scoreMine ?: 0} × ${m.scoreOpp ?: 0}"
                 info = "J${m.round} • ${m.opponent.orEmpty()}"
                 plate = if (streak >= 2) "SEQUÊNCIA" to "$streak vitórias" else "JOGO" to (if (m.home == true) "em casa" else if (m.home == false) "fora" else "—")
                 foot = "Vamos pra cima, $team!"
@@ -322,24 +323,27 @@ object Arts {
                 val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
                 val round = num(f[K.ROUND]?.value)
                 if (c.kind == "COMPARE") {
+                    val away = f[K.HOME]?.value?.lowercase() == "fora"   // em casa fica à esquerda: fora, o rival vai para a esquerda
                     fun side(a: String, b: String, label: String): ArtsDraw.Row? {
                         val x = f[a]?.value?.toIntOrNull() ?: return null; val y = f[b]?.value?.toIntOrNull() ?: return null
-                        return ArtsDraw.Row(label, "$x × $y", x / (x + y).toFloat())
+                        val (l, r) = if (away) y to x else x to y
+                        return ArtsDraw.Row(label, "$l × $r", l / (l + r).toFloat())
                     }
                     val rowsC = listOfNotNull(side(K.MY_ATK, K.RIVAL_ATK, "Ataque"), side(K.MY_MID, K.RIVAL_MID, "Meio-campo"), side(K.MY_DEF, K.RIVAL_DEF, "Defesa"), side(K.MY_GOL, K.RIVAL_GOL, "Goleiro")) +
-                        listOfNotNull(if (my != null && rv != null) ArtsDraw.Row("Força geral", "$my × $rv", my / (my + rv).toFloat()) else null)
+                        listOfNotNull(if (my != null && rv != null) { val (l, r) = if (away) rv to my else my to rv; ArtsDraw.Row("Força geral", "$l × $r", l / (l + r).toFloat()) } else null)
                     val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
-                    val outC = ArtsDraw.list(th, scene, crest, oppCrest, "LADO A LADO", rowsC, "Quem leva a melhor?")
+                    val outC = ArtsDraw.list(th, scene, if (away) oppCrest else crest, if (away) crest else oppCrest, "LADO A LADO", rowsC, "Quem leva a melhor?")
                     scene.recycle(); return outC
                 }
                 val prob = runCatching { Director.winProb(repo, slot) }.getOrNull()
                 val home = f[K.HOME]?.value
-                banner = "DIA DE JOGO"; big = if (my != null && rv != null) "$my × $rv" else "J${round ?: ""}"
+                val awayM = f[K.HOME]?.value?.lowercase() == "fora"   // em casa à esquerda
+                banner = "DIA DE JOGO"; big = if (my != null && rv != null) (if (awayM) "$rv × $my" else "$my × $rv") else "J${round ?: ""}"
                 info = listOfNotNull(round?.let { "Rodada $it" }, home?.lowercase(), if (f[K.RIVAL_HUMAN]?.value == "Sim") "rival humano" else "rival CPU").joinToString("  •  ")
                 plate = prob?.let { "CHANCE DE VITÓRIA" to "${it.win}%" }
                 foot = "Hoje é dia de decidir!"
                 val sceneV = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
-                val outV = ArtsDraw.poster(th, sceneV, crest, oppCrest, banner, big, info, plate, foot, versus = true)
+                val outV = ArtsDraw.poster(th, sceneV, if (awayM) oppCrest else crest, if (awayM) crest else oppCrest, banner, big, info, plate, foot, versus = true)
                 sceneV.recycle(); return outV
             }
             "LEADER" -> { banner = "LÍDER DA LIGA!"; big = "1º"; info = "NA RODADA ${last?.round ?: ""}" + (comp?.let { " • $it" } ?: ""); plate = "CAMPANHA" to rec; foot = "No topo da tabela!" }
@@ -357,7 +361,8 @@ object Arts {
         }
         val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, kit, look), seed) ?: return null
         val hero = c.kind in listOf("EXPECT", "STREAK", "LEADER", "CAMP", "SEASON")
-        val out = ArtsDraw.poster(th, scene, crest, oppCrest, banner, big, info, plate, foot, heroCrest = hero)
+        val awayG = c.kind == "GOLEADA" && last?.home == false
+        val out = ArtsDraw.poster(th, scene, if (awayG) oppCrest else crest, if (awayG) crest else oppCrest, banner, big, info, plate, foot, heroCrest = hero)
         scene.recycle()
         return out
     }
