@@ -189,4 +189,18 @@ object CrestWeb {
         UiBus.bump()
         return true
     }
+
+    /** Situação dos escudos dos [names]: (com escudo real, sem escudo real na web, ainda na fila). */
+    fun stats(filesDir: File, names: Collection<String>): Triple<Int, Int, Int> {
+        var found = 0; var missed = 0; var pending = 0
+        for (n in names) when {
+            find(filesDir, n) != null -> found++
+            missedRecently(filesDir, n) -> missed++
+            else -> pending++
+        }
+        return Triple(found, missed, pending)
+    }
+
+    /** Esquece os "não achei" para tentar de novo (ex.: depois de uma queda de rede). */
+    fun clearMisses(filesDir: File) { runCatching { missFile(filesDir).delete() } }
 }

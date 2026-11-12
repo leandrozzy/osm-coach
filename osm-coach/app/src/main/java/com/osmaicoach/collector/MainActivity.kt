@@ -5845,7 +5845,29 @@ private fun SettingsTab() {
                 webCrests = it
                 Settings.put(ctx, "web_crests", if (it) "1" else "0")
             }
-            Text("Só o NOME do clube é enviado (TheSportsDB, gratuito). Quem não for achado continua com o recorte do jogo. Cada clube é buscado uma vez e vale para os 4 slots.", fontSize = 13.sp, color = C.MUTED)
+            Text("Só o NOME do clube é enviado (repositório football-logos e TheSportsDB, gratuitos). Quem não for achado continua com o recorte do jogo. Cada clube é buscado uma vez e vale para os 4 slots.", fontSize = 13.sp, color = C.MUTED)
+            // progresso em tempo real: bandeiras do Flagpedia (países) e escudos reais dos clubes que o app já conhece (calendários, rivais, os 4 times)
+            val prTick = rememberTick(1000L)
+            val clubs = rememberLoaded(emptyList<String>(), prTick / 3, UiBus.version) {
+                val r = Repo(ctx)
+                (1..4).flatMap { s ->
+                    val f = r.fieldMap(s)
+                    listOfNotNull(f[K.TEAM]?.value, f[K.RIVAL_TEAM]?.value) + r.dao.matchesOf(s).mapNotNull { it.opponent }
+                }.map { it.trim() }.filter { Txt.key(it).length >= 3 }.distinctBy { Txt.key(it) }
+            }
+            LaunchedEffect(webCrests, clubs.size) {
+                if (webCrests) { FlagWeb.ensureAll(ctx); clubs.forEach { CrestWeb.request(ctx, it) } }
+            }
+            val fl = FlagWeb.progress(ctx.filesDir).also { prTick.let { _ -> } }
+            val cr = CrestWeb.stats(ctx.filesDir, clubs)
+            val flPct = if (fl.second > 0) fl.first * 100 / fl.second else 0
+            val crDone = cr.first + cr.second
+            val crPct = if (clubs.isNotEmpty()) crDone * 100 / clubs.size else 0
+            Text("Bandeiras: ${fl.first} de ${fl.second}" + if (flPct >= 100) " ✅" else "", fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+            Bar(flPct)
+            Text("Escudos: ${cr.first} reais de ${clubs.size} clubes" + (if (cr.third > 0) " • buscando ${cr.third}" else if (clubs.isNotEmpty()) " ✅" else "") + (if (cr.second > 0) " • ${cr.second} sem escudo real (uso o recorte do jogo)" else ""), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+            Bar(crPct)
+            if (cr.second > 0) GhostButton("Tentar de novo os que faltaram") { CrestWeb.clearMisses(ctx.filesDir); UiBus.bump() }
         }
         val atlasTick = rememberTick(4000L)
         val atlasCounts = rememberLoaded(Pair(0, 0), atlasTick, UiBus.version) { Pair(Atlas.count(Repo(ctx), Atlas.Kind.NAT), Atlas.count(Repo(ctx), Atlas.Kind.LEAGUE)) }

@@ -73,6 +73,7 @@ object FlagWeb {
                 val j = org.json.JSONObject(c.inputStream.bufferedReader().use { it.readText() })
                 val codes = j.keys().asSequence().filter { it.length == 2 || it.startsWith("gb-") }.toList()
                 var ok = 0
+                File(ctx.filesDir, "flags").apply { mkdirs() }.let { File(it, "_total.txt").writeText(codes.size.toString()) }
                 for (iso in codes) {
                     if (file(ctx.filesDir, iso) != null) { ok++; continue }
                     if (runCatching { fetch(ctx, iso) }.getOrDefault(false)) ok++
@@ -83,5 +84,12 @@ object FlagWeb {
                 if (ok < 200) allStarted = false
             } catch (e: Exception) { allStarted = false; Diag.lastError = "Bandeiras da web: " + (e.message ?: "erro") }
         }
+    }
+
+    /** (baixadas, total) das bandeiras do Flagpedia; o total só é conhecido depois da 1ª lista (até lá, 254). */
+    fun progress(filesDir: File): Pair<Int, Int> {
+        val have = File(filesDir, "flags").listFiles()?.count { it.name.endsWith(".png") } ?: 0
+        val total = runCatching { File(filesDir, "flags/_total.txt").readText().trim().toInt() }.getOrDefault(254)
+        return Pair(minOf(have, total), total)
     }
 }
