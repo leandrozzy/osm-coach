@@ -160,7 +160,7 @@ internal fun ArtsTab() {
         Text(
             "Cartazes dos seus times: a cena (atleta fictício, estádio, taça) é gerada por uma IA gratuita (Pollinations, sem chave, precisa de internet; só o texto do pedido é enviado: " +
                 "cores do time e tipo de arte) e o app escreve por cima o nome, escudo, bandeira e números, sempre certos. Depois de Encerrar a leitura o app cria sozinho (até 3 por vez) " +
-                "as de contratação, goleada, sequência de vitórias, liderança, título e objetivo alcançado. Slot sem liga não gera nada.",
+                "as de contratação, goleada, sequência de vitórias, liderança, título e objetivo, e também expectativa da temporada, craques, momento do time, dia de jogo e lado a lado. Escolha abaixo em quais slots criar sozinho. Slot sem liga não gera nada.",
             fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 8.dp)
         )
         var autoOn by remember { mutableStateOf(Arts.autoOn(ctx)) }
@@ -189,13 +189,21 @@ internal fun ArtsTab() {
         if (d.teams.isEmpty()) Text("Nenhum slot com time lido ainda.", fontSize = 13.sp, color = C.MUTED)
         for ((slot, team) in d.teams.toSortedMap()) {
             Panel {
-                Text("S$slot • $team", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                var on by remember(slot) { mutableStateOf(Arts.slotOn(ctx, slot)) }
+                var confirmDel by remember(slot) { mutableStateOf(false) }
+                val mine = d.items.count { it.slot == slot }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("S$slot • $team", fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text(if (on) "cria sozinho" else "só à mão", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(end = 6.dp))
+                    androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; Arts.setSlotOn(ctx, slot, it) })
+                }
                 val cs = d.cands[slot].orEmpty()
                 if (cs.isEmpty()) Text("Sem eventos ainda.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 for (c in cs) {
                     val done = d.items.any { it.id == c.id }
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(c.title, fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 2)
+                        TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { Arts.dismiss(Repo(ctx), listOf(c.id)) } } }, modifier = Modifier.height(36.dp)) { Text("✕", fontSize = 15.sp, color = C.MUTED) }
                         OutlinedButton(
                             onClick = {
                                 busy = true; msg = "Gerando “${c.title}” com IA…"
@@ -209,6 +217,23 @@ internal fun ArtsTab() {
                         ) { Text(if (done) "✓ feita" else "Criar", fontSize = 12.5.sp) }
                     }
                 }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { scope.launch { withContext(Dispatchers.IO) { Arts.clearList(Repo(ctx), slot) }; msg = "Lista do S$slot esvaziada." } },
+                        enabled = cs.isNotEmpty(), modifier = Modifier.weight(1f)
+                    ) { Text("Limpar lista", fontSize = 12.5.sp) }
+                    OutlinedButton(
+                        onClick = { confirmDel = true }, enabled = mine > 0, modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)
+                    ) { Text("🗑 Apagar artes ($mine)", fontSize = 12.5.sp) }
+                }
+                if (confirmDel) androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmDel = false }, containerColor = C.SURFACE,
+                    title = { Text("Apagar as artes do S$slot?", fontWeight = FontWeight.Bold) },
+                    text = { Text("As $mine imagens deste slot serão apagadas do app (as que você já baixou na galeria ficam). Isso não pode ser desfeito.", fontSize = 13.sp) },
+                    confirmButton = { TextButton(onClick = { confirmDel = false; scope.launch { val n = withContext(Dispatchers.IO) { Arts.deleteSlot(Repo(ctx), slot) }; msg = "$n arte(s) do S$slot apagada(s)." } }) { Text("Apagar", color = C.BAD) } },
+                    dismissButton = { TextButton(onClick = { confirmDel = false }) { Text("Cancelar") } }
+                )
             }
         }
         Text("As artes ficam só no aparelho. \"Baixar\" salva na galeria (Pictures/OSM Coach); \"Compartilhar\" abre o menu do Android.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))

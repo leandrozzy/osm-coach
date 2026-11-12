@@ -336,6 +336,16 @@ internal fun NotificationsPanel() {
         }
         OutlinedButton(
             onClick = {
+                // só os avisos do próprio app: desliga o calendário (apaga os lembretes que o app criou lá) e a nuvem (ntfy)
+                cal = false; push = false
+                Settings.put(ctx, "cal_on", "0"); Settings.put(ctx, "push_on", "0")
+                pushScope.launch(Dispatchers.IO) { CalendarSync.disable(ctx.applicationContext); Push.disable(ctx.applicationContext) }
+                Toast.makeText(ctx, "Pronto: só os avisos do app. Os lembretes do calendário foram apagados.", Toast.LENGTH_LONG).show()
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+        ) { Text("Usar só os avisos do app (desliga calendário e nuvem)", fontSize = 13.sp) }
+        OutlinedButton(
+            onClick = {
                 if (!cal) {
                     Toast.makeText(ctx, "Ligue os lembretes no calendário primeiro.", Toast.LENGTH_SHORT).show()
                 } else pushScope.launch {

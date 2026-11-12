@@ -30,7 +30,7 @@ object Arts {
     const val H = 1350
 
     data class Item(val id: String, val slot: Int, val kind: String, val title: String, val at: Long, val file: String)
-    data class Cand(val id: String, val slot: Int, val kind: String, val title: String, val at: Long, val key: String? = null)
+    data class Cand(val id: String, val slot: Int, val kind: String, val title: String, val at: Long, val key: String? = null, val auto: Boolean = true)
 
     private fun dir(ctx: Context): File = File(ctx.filesDir, "arts").apply { mkdirs() }
 
@@ -75,6 +75,36 @@ object Arts {
         repo.dao.putPlan(PlanEntity(0, "artsseen", arr.toString(), System.currentTimeMillis()))
     }
 
+    // ------------------------------------------------------------------ escolhas do usuário: slots ligados e eventos dispensados
+    fun slotOn(ctx: Context, slot: Int): Boolean = !ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getBoolean("slot_off_$slot", false)
+    fun setSlotOn(ctx: Context, slot: Int, on: Boolean) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putBoolean("slot_off_$slot", !on).apply() }
+
+    private suspend fun dismissed(repo: Repo): MutableSet<String> {
+        val arr = runCatching { JSONArray(repo.dao.plan(0, "artsdismiss")?.json ?: "[]") }.getOrDefault(JSONArray())
+        return (0 until arr.length()).map { arr.optString(it) }.toMutableSet()
+    }
+
+    /** Tira eventos da lista "Criar uma arte" (não somem as artes já feitas). */
+    suspend fun dismiss(repo: Repo, ids: Collection<String>) {
+        val d = dismissed(repo); d.addAll(ids)
+        val arr = JSONArray(); d.toList().takeLast(600).forEach { arr.put(it) }
+        repo.dao.putPlan(PlanEntity(0, "artsdismiss", arr.toString(), System.currentTimeMillis()))
+        UiBus.bump()
+    }
+
+    /** Esvazia a lista de eventos do slot. */
+    suspend fun clearList(repo: Repo, slot: Int) { dismiss(repo, candidates(repo, slot, includeDismissed = true).map { it.id }) }
+
+    /** Apaga as artes JÁ FEITAS deste slot (arquivos e lista). Devolve quantas. */
+    suspend fun deleteSlot(repo: Repo, slot: Int): Int {
+        val all = items(repo)
+        val mine = all.filter { it.slot == slot }
+        for (i in mine) runCatching { File(i.file).delete() }
+        saveItems(repo, all.filter { it.slot != slot })
+        UiBus.bump()
+        return mine.size
+    }
+
     // ------------------------------------------------------------------ o que pode virar arte
     private fun played(ms: List<MatchEntity>) = ms.filter { it.round != null && it.result in listOf("V", "E", "D") }.sortedBy { it.round }
     private fun num(s: String?): Int? = s?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }
@@ -85,7 +115,7 @@ object Arts {
      * Competição em andamento: contratação, goleada (3+ gols de diferença), 3+ vitórias seguidas, liderança. Encerrada: campeão, objetivo alcançado.
      * Campanha e resumo da temporada só à mão. Batalhas/crews o app não lê ainda.
      */
-    suspend fun candidates(repo: Repo, slot: Int): List<Cand> {
+    suspend fun candidates(repo: Repo, slot: Int, includeDismissed: Boolean = false): List<Cand> {
         val f = repo.fieldMap(slot)
         if (f[K.TEAM]?.value == null) return emptyList()
         if (f[K.SLOT_STATE]?.value in listOf("vazio", "procurando", "preepoca")) return emptyList()
@@ -109,14 +139,33 @@ object Arts {
                 if (diff >= 3) out.add(Cand("win|$slot|${last.round}", slot, "GOLEADA", "Goleada na J${last.round}: ${last.scoreMine}×${last.scoreOpp}", last.updatedAt))
             }
             if (pos == 1 && ms.size >= 3) out.add(Cand("leader|$slot|${ms.last().round}", slot, "LEADER", "Líder da liga na J${ms.last().round}", System.currentTimeMillis()))
-            if (ms.size >= 3) out.add(Cand("camp|$slot|${ms.size}", slot, "CAMP", "Campanha até a J${ms.last().round}", System.currentTimeMillis()))
+            if (ms.size >= 3) out.add(Cand("camp|$slot|${ms.size}", slot, "CAMP", "Campanha até a J${ms.last().round}", System.currentTimeMillis(), auto = false))
+            // começo e meio de campeonato: expectativa, craques, momento, dia de jogo e lado a lado
+            val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
+            val now = System.currentTimeMillis()
+            if (ms.size <= 1) out.add(Cand("expect|$slot|$comp", slot, "EXPECT", "Expectativa da temporada", now))
+            if (repo.dao.playersOf(slot).count { it.owner == "MY" && it.strength != null } >= 3)
+                out.add(Cand("stars|$slot|${ms.size / 5}", slot, "STARS", "Craques do time", now, auto = ms.size <= 1 || ms.size % 5 == 0))
+            if (ms.size >= 5) out.add(Cand("moment|$slot|${ms.size}", slot, "MOMENT", "Momento do time (últimos 5)", now, auto = ms.size % 5 == 0))
+            val round = num(f[K.ROUND]?.value)
+            val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
+            val rival = f[K.RIVAL_TEAM]?.value
+            if (round != null && rival != null && f[K.RIVAL_STRENGTH]?.value?.toIntOrNull() != null && f[K.MY_STRENGTH]?.value?.toIntOrNull() != null) {
+                val soon = matchAt != null && matchAt > now && matchAt - now <= 24 * 3600_000L
+                out.add(Cand("match|$slot|$round", slot, "MATCHDAY", "Dia de jogo: J$round vs $rival", now, auto = soon))
+                val sectors = listOf(K.MY_ATK to K.RIVAL_ATK, K.MY_MID to K.RIVAL_MID, K.MY_DEF to K.RIVAL_DEF, K.MY_GOL to K.RIVAL_GOL)
+                if (sectors.count { (a, b) -> f[a]?.value?.toIntOrNull() != null && f[b]?.value?.toIntOrNull() != null } >= 2)
+                    out.add(Cand("cmp|$slot|$round", slot, "COMPARE", "Lado a lado: J$round vs $rival", now, auto = soon))
+            }
         } else if (ms.isNotEmpty()) {
             val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
             if (pos == 1) out.add(Cand("title|$slot|$comp", slot, "TITLE", "Campeão da liga", System.currentTimeMillis()))
             else if (pos != null && obj != null && pos <= obj) out.add(Cand("obj|$slot|$comp", slot, "OBJECTIVE", "Objetivo alcançado: ${pos}º lugar", System.currentTimeMillis()))
-            out.add(Cand("season|$slot|$comp", slot, "SEASON", "Resumo da temporada", System.currentTimeMillis()))
+            out.add(Cand("season|$slot|$comp", slot, "SEASON", "Resumo da temporada", System.currentTimeMillis(), auto = false))
         }
-        return out
+        if (includeDismissed) return out
+        val gone = dismissed(repo)
+        return out.filter { it.id !in gone }
     }
 
     /**
@@ -134,9 +183,10 @@ object Arts {
         var made = 0
         var failed = false
         loop@ for (slot in 1..4) {
+            if (!slotOn(ctx, slot)) continue
             for (c in candidates(repo, slot)) {
                 if (c.id in seenSet) continue
-                if (c.kind == "CAMP" || c.kind == "SEASON") { seenSet.add(c.id); continue }
+                if (!c.auto) { if (c.kind == "CAMP" || c.kind == "SEASON") seenSet.add(c.id); continue }
                 if (firstRun && now - c.at > 24 * 3600_000L) { seenSet.add(c.id); continue }
                 if (made >= 3) break@loop
                 if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; seenSet.add(c.id) } else { failed = true; break@loop }
@@ -238,6 +288,59 @@ object Arts {
             "STREAK" -> {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 banner = "EM CHAMAS!"; big = "$streak"; info = "VITÓRIAS SEGUIDAS"; plate = "APROVEITAMENTO" to "$aprov%"; foot = "Vamos pra cima, $team!"
+            }
+            "EXPECT" -> {
+                val str = f[K.MY_STRENGTH]?.value
+                val obj2 = num(f[K.MY_OBJECTIVE]?.value)
+                val rows = League.table(repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, "va").filter { it.value != null }
+                val rank = rows.sortedByDescending { it.value }.indexOfFirst { League.key(it.club) == League.key(team) }.takeIf { it >= 0 }?.plus(1)
+                val tier = if (rank == null) null else if (rank <= maxOf(1, rows.size / 4)) "FAVORITO" else if (rank <= rows.size * 6 / 10) "NA BRIGA" else "AZARÃO"
+                banner = "EXPECTATIVA DA TEMPORADA"
+                big = tier ?: (obj2?.let { "META: TOP $it" } ?: "VAI COMEÇAR!")
+                info = listOfNotNull(rank?.let { "${it}º elenco mais valioso de ${rows.size}" }, obj2?.let { "objetivo: ${it}º lugar" }, comp).joinToString("  •  ")
+                plate = str?.let { "FORÇA DO TIME" to it }
+                foot = "Que comece a temporada!"
+            }
+            "STARS" -> {
+                val top = repo.dao.playersOf(slot).filter { it.owner == "MY" && it.strength != null }.sortedByDescending { it.strength }.take(4)
+                val rowsS = top.map { ArtsDraw.Row(it.name + (it.posCode?.let { p -> "  •  $p" } ?: ""), it.strength.toString(), it.strength!! / 100f) }
+                val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, ArtsAi.kitFor(ctx, repo, team, comp), ""), seed) ?: return null
+                val outS = ArtsDraw.list(th, scene, crest, null, "CRAQUES DO TIME", rowsS, "Quem vai decidir a temporada!")
+                scene.recycle(); return outS
+            }
+            "MOMENT" -> {
+                val l5 = ms.takeLast(5)
+                val a5 = if (l5.isEmpty()) 0 else Math.round(100f * (3 * l5.count { it.result == "V" } + l5.count { it.result == "E" }) / (3 * l5.size))
+                val rowsM = listOf(ArtsDraw.Row("Aproveitamento", "$a5%", a5 / 100f), ArtsDraw.Row("Gols marcados × sofridos", "${l5.sumOf { it.scoreMine ?: 0 }} × ${l5.sumOf { it.scoreOpp ?: 0 }}"))
+                val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
+                val outM = ArtsDraw.list(th, scene, crest, null, "MOMENTO DO TIME", rowsM, "Cinco jogos, uma história!", dots = l5.joinToString("") { it.result.orEmpty() })
+                scene.recycle(); return outM
+            }
+            "MATCHDAY", "COMPARE" -> {
+                val rival = f[K.RIVAL_TEAM]?.value ?: return null
+                oppCrest = bmp(CrestWeb.find(ctx.filesDir, rival) ?: CrestCut.find(ctx.filesDir, rival))
+                val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
+                val round = num(f[K.ROUND]?.value)
+                if (c.kind == "COMPARE") {
+                    fun side(a: String, b: String, label: String): ArtsDraw.Row? {
+                        val x = f[a]?.value?.toIntOrNull() ?: return null; val y = f[b]?.value?.toIntOrNull() ?: return null
+                        return ArtsDraw.Row(label, "$x × $y", x / (x + y).toFloat())
+                    }
+                    val rowsC = listOfNotNull(side(K.MY_ATK, K.RIVAL_ATK, "Ataque"), side(K.MY_MID, K.RIVAL_MID, "Meio-campo"), side(K.MY_DEF, K.RIVAL_DEF, "Defesa"), side(K.MY_GOL, K.RIVAL_GOL, "Goleiro")) +
+                        listOfNotNull(if (my != null && rv != null) ArtsDraw.Row("Força geral", "$my × $rv", my / (my + rv).toFloat()) else null)
+                    val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
+                    val outC = ArtsDraw.list(th, scene, crest, oppCrest, "LADO A LADO", rowsC, "Quem leva a melhor?")
+                    scene.recycle(); return outC
+                }
+                val prob = runCatching { Director.winProb(repo, slot) }.getOrNull()
+                val home = f[K.HOME]?.value
+                banner = "DIA DE JOGO"; big = if (my != null && rv != null) "$my × $rv" else "J${round ?: ""}"
+                info = listOfNotNull(round?.let { "Rodada $it" }, home?.lowercase(), if (f[K.RIVAL_HUMAN]?.value == "Sim") "rival humano" else "rival CPU").joinToString("  •  ")
+                plate = prob?.let { "CHANCE DE VITÓRIA" to "${it.win}%" }
+                foot = "Hoje é dia de decidir!"
+                val sceneV = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
+                val outV = ArtsDraw.poster(th, sceneV, crest, oppCrest, banner, big, info, plate, foot, versus = true)
+                sceneV.recycle(); return outV
             }
             "LEADER" -> { banner = "LÍDER DA LIGA!"; big = "1º"; info = "NA RODADA ${last?.round ?: ""}" + (comp?.let { " • $it" } ?: ""); plate = "CAMPANHA" to rec; foot = "No topo da tabela!" }
             "TITLE" -> { banner = "CAMPEÃO DA LIGA!"; big = "CAMPEÃO"; info = comp.orEmpty(); plate = "CAMPANHA" to rec; foot = "Obrigado, torcida!" }

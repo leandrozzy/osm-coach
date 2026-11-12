@@ -20,7 +20,7 @@ class ArtsAiTest {
     }
 
     @Test fun promptNeverAsksForRealPersonOrText() {
-        for (k in listOf("BUY", "GOLEADA", "STREAK", "LEADER", "TITLE", "CAMP")) {
+        for (k in listOf("BUY", "GOLEADA", "STREAK", "LEADER", "TITLE", "CAMP", "EXPECT", "MATCHDAY", "COMPARE", "STARS", "MOMENT")) {
             val p = ArtsAi.prompt(k, "red and white", "a red jersey with a white chest band, white collar football jersey", "short neat dark hair, clean shaven")
             assertTrue(k, p.contains("no text") && p.contains("red and white"))
         }

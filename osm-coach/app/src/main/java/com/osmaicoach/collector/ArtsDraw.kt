@@ -90,12 +90,26 @@ internal object ArtsDraw {
         c.drawBitmap(b, null, RectF(l, t, l + w, t + h), P())
     }
 
-    private fun ring(c: Canvas, cx: Float, cy: Float, crest: Bitmap?, th: Theme) {
-        c.drawCircle(cx, cy, 104f, P(color = Color.WHITE))
-        c.drawCircle(cx, cy, 92f, P(color = th.kit))
-        c.drawCircle(cx, cy, 92f, P(color = Color.WHITE, stroke = 8f))
-        image(c, crest, RectF(cx - 67f, cy - 71f, cx + 69f, cy + 65f))
+    private fun ring(c: Canvas, cx: Float, cy: Float, crest: Bitmap?, th: Theme, r: Float = 104f) {
+        val k = r / 104f
+        c.drawCircle(cx, cy, r, P(color = Color.WHITE))
+        c.drawCircle(cx, cy, 92f * k, P(color = th.kit))
+        c.drawCircle(cx, cy, 92f * k, P(color = Color.WHITE, stroke = 8f * k))
+        image(c, crest, RectF(cx - 67f * k, cy - 71f * k, cx + 69f * k, cy + 65f * k))
     }
+
+    /** Cena preenchendo o cartaz (corte central) + vinheta + véu escuro (na cor do time) a partir de [fade]. */
+    private fun sceneBase(c: Canvas, th: Theme, scene: Bitmap, fade: Float) {
+        val s = max(W / scene.width, H / scene.height)
+        val sw = W / s; val sh = H / s
+        val sx = (scene.width - sw) / 2f; val sy = (scene.height - sh) / 2f
+        c.drawBitmap(scene, android.graphics.Rect(sx.toInt(), sy.toInt(), (sx + sw).toInt(), (sy + sh).toInt()), RectF(0f, 0f, W, H), P())
+        c.drawRect(0f, 0f, W, H, P(shader = RadialGradient(W / 2f, H * 0.42f, H * 0.78f, intArrayOf(black(0), black(150)), floatArrayOf(0.55f, 1f), Shader.TileMode.CLAMP)))
+        val veil = shade(th.bg, 0.30f)
+        c.drawRect(0f, fade, W, H, P(shader = lin(0f, fade, 0f, H, intArrayOf(withA(veil, 0), withA(veil, 205), withA(veil, 245)), floatArrayOf(0f, 0.35f, 1f))))
+    }
+
+    class Row(val label: String, val value: String, val frac: Float? = null)
 
     private fun banner(c: Canvas, txt: String, y: Float, h: Float, dark: Int) {
         val rnd = java.util.Random(4)
@@ -130,21 +144,19 @@ internal object ArtsDraw {
      */
     fun poster(
         th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, big: String, info: String,
-        plate: Pair<String, String>?, footer: String
+        plate: Pair<String, String>?, footer: String, versus: Boolean = false
     ): Bitmap {
         val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
-        // cena preenchendo o cartaz (corte central)
-        val s = max(W / scene.width, H / scene.height)
-        val sw = W / s; val sh = H / s
-        val sx = (scene.width - sw) / 2f; val sy = (scene.height - sh) / 2f
-        c.drawBitmap(scene, android.graphics.Rect(sx.toInt(), sy.toInt(), (sx + sw).toInt(), (sy + sh).toInt()), RectF(0f, 0f, W, H), P())
-        // vinheta + véu escuro (na cor do time) embaixo para o texto
-        c.drawRect(0f, 0f, W, H, P(shader = RadialGradient(W / 2f, H * 0.42f, H * 0.78f, intArrayOf(black(0), black(150)), floatArrayOf(0.55f, 1f), Shader.TileMode.CLAMP)))
-        val veil = shade(th.bg, 0.30f)
-        c.drawRect(0f, 690f, W, H, P(shader = lin(0f, 690f, 0f, H, intArrayOf(withA(veil, 0), withA(veil, 205), withA(veil, 245)), floatArrayOf(0f, 0.35f, 1f))))
-        ring(c, 125f, 125f, crest, th)
-        if (oppCrest != null) ring(c, W - 125f, 125f, oppCrest, th)
+        sceneBase(c, th, scene, 690f)
+        if (versus) {
+            // dois escudos grandes com "VS" no meio (dia de jogo)
+            ring(c, 250f, 500f, crest, th, 150f); ring(c, W - 250f, 500f, oppCrest, th, 150f)
+            gold(c, "VS", W / 2f, 560f, 130f, align = 'c', skew = -0.1f)
+        } else {
+            ring(c, 125f, 125f, crest, th)
+            if (oppCrest != null) ring(c, W - 125f, 125f, oppCrest, th)
+        }
         banner(c, banner, 704f, 104f, shade(th.bg, 0.45f))
         gold(c, big.uppercase(), W / 2f, 990f, 200f, maxw = W - 100f, align = 'c', skew = -0.08f, scale = 0.86f)
         text(c, info, W / 2f, 1056f, 46f, Color.WHITE, maxw = W - 120f, align = 'c', skew = 0f, scale = 1f, bold = false)
@@ -164,6 +176,45 @@ internal object ArtsDraw {
             gold(c, lab, x0, 1176f, 56f)
             gold(c, v, x0 + lp.measureText(lab) + 28f, 1180f, 76f, skew = -0.1f)
             laurel(c, l - 8f, 1160f, -1f); laurel(c, r + 8f, 1160f, 1f)
+        }
+        gold(c, footer, W / 2f, 1290f, 60f, maxw = W - 90f, align = 'c', skew = -0.16f, scale = 0.92f)
+        return out
+    }
+
+    /**
+     * Cartaz em lista (craques, lado a lado, momento): linhas em vidro com valor em ouro e barra opcional; [dots] = últimos resultados (V/E/D) em bolinhas.
+     */
+    fun list(th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, rows: List<Row>, footer: String, dots: String? = null): Bitmap {
+        val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        sceneBase(c, th, scene, 560f)
+        ring(c, 125f, 125f, crest, th)
+        if (oppCrest != null) ring(c, W - 125f, 125f, oppCrest, th)
+        banner(c, banner, 600f, 104f, shade(th.bg, 0.45f))
+        var y = 740f
+        if (!dots.isNullOrEmpty()) {
+            val n = dots.length; val gap = 130f; val x0 = W / 2f - (n - 1) * gap / 2f
+            for (i in 0 until n) {
+                val col = when (dots[i]) { 'V' -> argb(255, 46, 196, 92); 'E' -> argb(255, 246, 190, 40); else -> argb(255, 226, 60, 60) }
+                val cx = x0 + i * gap
+                c.drawCircle(cx, y + 44f, 50f, P(color = black(150), blur = 8f))
+                c.drawCircle(cx, y + 44f, 46f, P(color = col))
+                c.drawCircle(cx, y + 44f, 46f, P(color = Color.WHITE, stroke = 5f))
+                text(c, dots[i].toString(), cx, y + 62f, 52f, Color.WHITE, align = 'c', skew = 0f, scale = 1f)
+            }
+            y += 130f
+        }
+        for (r in rows.take(5)) {
+            val box = RectF(60f, y, W - 60f, y + 96f)
+            c.drawRoundRect(box, 18f, 18f, P(color = argb(150, 8, 12, 20)))
+            c.drawRoundRect(box, 18f, 18f, P(color = white(70), stroke = 2f))
+            text(c, r.label, 92f, y + 62f, 42f, Color.WHITE, maxw = 560f, skew = -0.1f, scale = 0.95f)
+            gold(c, r.value, W - 92f, y + 66f, 50f, maxw = 380f, align = 'r', skew = -0.1f)
+            if (r.frac != null) {
+                c.drawRoundRect(RectF(92f, y + 80f, W - 92f, y + 88f), 4f, 4f, P(color = white(70)))
+                c.drawRoundRect(RectF(92f, y + 80f, 92f + (W - 184f) * r.frac.coerceIn(0f, 1f), y + 88f), 4f, 4f, P(shader = lin(92f, 0f, W - 92f, 0f, GOLD, GPOS)))
+            }
+            y += 112f
         }
         gold(c, footer, W / 2f, 1290f, 60f, maxw = W - 90f, align = 'c', skew = -0.16f, scale = 0.92f)
         return out
