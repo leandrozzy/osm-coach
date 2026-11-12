@@ -242,6 +242,17 @@ object PixelProbe {
     /** Fração de pixels vermelhos na caixa (cartão vermelho do plantel). */
     fun redBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, RED)
 
+    /**
+     * Plantel: setas vermelha + verde juntas ao lado da camisa = jogador À VENDA (medido em 3 prints: à venda 269/269 px vermelhos/verdes
+     * na caixa, os outros 0; camisa verde de goleiro só dá verde). null = linha cortada pela rolagem (não dá para afirmar nada).
+     */
+    fun saleArrows(img: Img, yc: Float): Boolean? {
+        if (yc < 0.12f || yc + 0.042f > 0.97f) return null
+        val r = frac(img, 0.026f, 0.046f, yc + 0.006f, yc + 0.042f, RED)
+        val g = frac(img, 0.026f, 0.046f, yc + 0.006f, yc + 0.042f, GREEN)
+        return r >= 0.05f && g >= 0.05f
+    }
+
     /** Barra superior do OSM: pílula azul-clara de moedas + pílula laranja de gemas. Anúncios não têm. */
     fun isOsmTopBar(img: Img): Boolean =
         frac(img, 0.20f, 0.28f, 0.01f, 0.08f, ORANGE) >= 0.08f &&

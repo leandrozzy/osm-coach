@@ -2175,7 +2175,10 @@ class Repo(private val ctx: Context) {
                 }
             }
             dao.putPlan(PlanEntity(slot, "ledger", Ledger.toJson(ledger), now))
-            learn(slot, "elenco", "Elenco conferido: ${gone.joinToString { it.name }} não apareceu na leitura completa e saiu da lista.", now)
+            val sold = gone.filter { it.forSale == true && !looksGarbled(it.name) }
+            val rest = gone - sold.toSet()
+            if (sold.isNotEmpty()) learn(slot, "elenco", "Vendido (estava à venda): ${sold.joinToString { it.name }}.", now)
+            if (rest.isNotEmpty()) learn(slot, "elenco", "Elenco conferido: ${rest.joinToString { it.name }} não apareceu na leitura completa e saiu da lista.", now)
         }
         return removed
     }

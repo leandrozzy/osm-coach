@@ -3787,6 +3787,7 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                            if (p.forSale == true) Text("  🏷 À venda", color = C.WARN, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.clickable { flagEdit = p }, verticalAlignment = Alignment.CenterVertically) {

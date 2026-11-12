@@ -65,6 +65,7 @@ object Hints {
             TacticEngine.recommend(Director.tacticInput(repo, slot))?.rows?.flatten()?.mapNotNull { it?.nameKey }?.toSet()
         }.getOrNull() ?: emptySet()
         val used = Regex("^(\\d)\\s*/\\s*(\\d)$").find(f[K.SELLING]?.value?.trim() ?: "")?.groupValues?.get(1)?.toIntOrNull()
+            ?: repo.playersOf(slot).count { it.owner == "MY" && it.forSale == true }.takeIf { it > 0 }
         val timers = repo.timers(slot)
         val work = Work.of(slot, title, repo.dao.plan(slot, "trainscreen")?.json?.let { JSONObject(it) }, timers, f)
         val allEv = OsmEvents.parse(repo.dao.plan(0, "events")?.json)

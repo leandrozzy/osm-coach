@@ -194,4 +194,21 @@ class CrestFlagTest {
         assertEquals("fr", Flags.iso("Martinicano"))
         assertEquals("fr", Flags.iso("Francês"))
     }
+
+    @Test fun saleArrowsNeedRedAndGreen() {
+        val w = 1000; val h = 500
+        fun img(red: Boolean, green: Boolean): PixelProbe.Img {
+            val px = IntArray(w * h) { rgb(20, 30, 60) }
+            for (y in 200..215) for (x in 30..45) {
+                if (x < 38 && red) px[y * w + x] = rgb(230, 20, 20)
+                if (x >= 38 && green) px[y * w + x] = rgb(20, 220, 40)
+            }
+            return PixelProbe.Img(w, h, px)
+        }
+        val yc = 0.39f
+        assertEquals(true, PixelProbe.saleArrows(img(true, true), yc))
+        assertEquals(false, PixelProbe.saleArrows(img(false, true), yc))   // camisa verde de goleiro
+        assertEquals(false, PixelProbe.saleArrows(img(false, false), yc))
+        assertNull(PixelProbe.saleArrows(img(true, true), 0.95f))           // linha cortada
+    }
 }
