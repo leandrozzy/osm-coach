@@ -1423,7 +1423,8 @@ private suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     val imgMap = runCatching { repo.dao.plan(slot, "natimg3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     FlagWeb.ensureAll(ctx)
     val countriesMap = runCatching { SlotRules.playerCountries(repo, slot, ctx.filesDir) }.getOrDefault(emptyMap())
-    val isoMap = runCatching { repo.dao.plan(slot, "natiso")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
+    val isoMap = (runCatching { repo.dao.plan(slot, "natiso2")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()) +
+        runCatching { FlagManual.all(repo) }.getOrDefault(emptyMap())   // bandeira escolhida à mão vale mais
     val bankMap = runCatching { repo.dao.plan(0, "natbank")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
@@ -3545,7 +3546,7 @@ private fun catColor(cat: String): Color = when (cat) {
 }
 
 @Composable
-private fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onDone: () -> Unit) {
+private fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onFlag: () -> Unit = {}, onDone: () -> Unit) {
     val ctx = LocalContext.current
     fun set(v: Boolean?) {
         AppScope.scope.launch(Dispatchers.IO) {
@@ -3572,6 +3573,8 @@ private fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onDone: () 
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = if (out) C.OK else C.WARN)
                 ) { Text(if (out) "✓ Volta a jogar (tirar o ⛔)" else "⛔ Fora do próximo jogo (lesão/suspensão)") }
+                Text("🏳 Bandeira", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                OutlinedButton(onClick = { onDone(); onFlag() }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Escolher o país deste jogador") }
                 Text("🏋 Treino", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
                 Hint("O app lê os treinos da tela de Treinamento do OSM. Cada slot tem até 5: 1 por treinador de posição (GOL, DEF, MEI, ATA) + 1 universal. Corrija aqui só se a leitura errou.")
                 OutlinedButton(onClick = { set(true) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("🏋 Está treinando") }
@@ -3596,9 +3599,52 @@ private fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onDone: () 
     )
 }
 
+/** Escolha manual do país de um jogador: busca por nome, toque no país. Fica guardada (vale para todos os slots e ligas futuras). */
+@Composable
+private fun PlayerFlagDialog(p: PlayerEntity, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    var q by remember { mutableStateOf("") }
+    val all = remember { FlagManual.countries(ctx.filesDir) }
+    val shown = remember(q) { val k = Txt.norm(q).trim(); all.filter { k.isEmpty() || Txt.norm(it.second).contains(k) }.take(60) }
+    AlertDialog(
+        onDismissRequest = onDone,
+        containerColor = C.SURFACE,
+        title = { Text("Bandeira de ${p.name}", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                if (all.isEmpty()) Text("As bandeiras ainda estão sendo baixadas (Ajustes → Escudos reais da web). Tente de novo em instantes.", fontSize = 13.sp, color = C.MUTED)
+                else {
+                    OutlinedTextField(value = q, onValueChange = { q = it }, singleLine = true, label = { Text("Buscar país") }, modifier = Modifier.fillMaxWidth())
+                    Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(top = 6.dp)) {
+                        for ((iso, name) in shown) {
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    AppScope.scope.launch(Dispatchers.IO) { FlagManual.set(Repo(ctx), p.nameKey, iso) }
+                                    onDone()
+                                }.padding(vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FlagBadge(iso, null, null, 30.dp, 20.dp)
+                                Text(name, fontSize = 15.sp, color = Color.White)
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { AppScope.scope.launch(Dispatchers.IO) { FlagManual.set(Repo(ctx), p.nameKey, null) }; onDone() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text("Voltar ao automático") }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDone) { Text("Cancelar") } }
+    )
+}
+
 @Composable
 private fun SlotSquad(slot: Int, d: SlotData) {
     var trainEdit by remember { mutableStateOf<PlayerEntity?>(null) }
+    var flagEdit by remember { mutableStateOf<PlayerEntity?>(null) }
     val mine = d.players.filter { it.owner == "MY" }
     val counts = HashMap<String, Int>()
     for (p in mine) p.cat?.let { counts[it] = (counts[it] ?: 0) + 1 }
@@ -3687,7 +3733,9 @@ private fun SlotSquad(slot: Int, d: SlotData) {
                             if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            FlagBadge(d.isos[p.nameKey] ?: Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey], soft = true)
+                            Row(Modifier.clickable { flagEdit = p }, verticalAlignment = Alignment.CenterVertically) {
+                                FlagBadge(d.isos[p.nameKey] ?: Flags.iso(d.countries[p.nameKey]), d.flagRich[p.nameKey], null, 30.dp, 20.dp, d.flagImg[p.nameKey], soft = true)
+                            }
                             Text("${p.posCode ?: "?"} • ${p.age ?: "?"} anos • ${p.valueText ?: "?"}" + (Flags.countryLabel(d.countries[p.nameKey])?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         val ft = d.fitness[p.nameKey]
@@ -3719,7 +3767,8 @@ private fun SlotSquad(slot: Int, d: SlotData) {
         }
     }
     val te = trainEdit
-    if (te != null) TrainingDialog(slot, te, te.nameKey in d.unavailable) { trainEdit = null }
+    if (te != null) TrainingDialog(slot, te, te.nameKey in d.unavailable, onFlag = { flagEdit = te }) { trainEdit = null }
+    flagEdit?.let { fe -> PlayerFlagDialog(fe) { flagEdit = null } }
 }
 
 @Composable
@@ -5895,6 +5944,27 @@ private fun SettingsTab() {
             Bar(flPct)
             Text("Escudos: ${cr.first} reais de ${clubs.size} clubes" + (if (cr.third > 0) " • buscando ${cr.third}" else if (clubs.isNotEmpty()) " ✅" else "") + (if (cr.second > 0) " • ${cr.second} sem escudo real (uso o recorte do jogo)" else ""), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
             Bar(crPct)
+            // jogadores sem bandeira confirmada (sem recorte nítido ainda): escolher o país à mão; fica guardado para os 4 slots e ligas futuras
+            var flagFor by remember { mutableStateOf<PlayerEntity?>(null) }
+            val noFlag = rememberLoaded(emptyList<Pair<Int, PlayerEntity>>(), prTick / 3, UiBus.version) {
+                val r = Repo(ctx)
+                val manual = FlagManual.all(r)
+                (1..4).flatMap { s ->
+                    val iso = r.dao.plan(s, "natiso2")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
+                    r.playersOf(s).filter { it.owner == "MY" && it.nameKey !in manual && (iso == null || iso.optString(it.nameKey).isBlank()) }.map { s to it }
+                }
+            }
+            if (noFlag.isNotEmpty()) {
+                Text("Jogadores sem bandeira (toque para escolher o país):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
+                for ((s, pl) in noFlag.take(25)) {
+                    Row(Modifier.fillMaxWidth().clickable { flagFor = pl }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("S$s", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.width(30.dp))
+                        Text(pl.name, fontSize = 14.sp, color = Color.White, modifier = Modifier.weight(1f))
+                        Text("🏳 escolher", fontSize = 13.sp, color = C.PRIMARY)
+                    }
+                }
+            }
+            flagFor?.let { fp -> PlayerFlagDialog(fp) { flagFor = null } }
             if (cr.second > 0) GhostButton("Tentar de novo os que faltaram") { CrestWeb.clearMisses(ctx.filesDir); UiBus.bump() }
             // clubes que nenhuma fonte achou: o app já tentou variações do nome (sem FC/SK, ß→ss, Red Bull→RB…); aqui dá para dizer com que outro nome procurar
             var aliasFor by remember { mutableStateOf<String?>(null) }

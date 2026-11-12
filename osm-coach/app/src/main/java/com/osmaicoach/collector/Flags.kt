@@ -35,11 +35,11 @@ bj:benim,beninense;bm:bermudas,bermudense;mm:myanmar,birmanes;bn:brunei,bruneano
 bt:butao,butanes;vu:vanuatu,canuatuense;cf:republica centro-africana,centro-africano;td:chade,chadiano;lk:cingales;km:comores,comorense;
 cg:congoles (republica do congo);ci:costa-marfinense;cr:costa-riquenho;cw:curacao,curacauense,holandes (antilhas);dm:dominica,dominiques;
 ae:emiratico;er:eritreia,eritreu;ee:estonio;et:etiopia,etiopio;fo:ilhas faroe,faroense;fj:fiji,fijano,fijjano;fi:filandes;gi:gibraltar,gibraltino;
-gd:granada,granadino;gp:guadalupe,guadalupino;gu:guam,guames;gy:guiana,guianense;aw:aruba,holandes (aruba);hk:hong kong,honcongues;
+gd:granada,granadino;fr:guadalupe,guadalupino;gu:guam,guames;gy:guiana,guianense;aw:aruba,holandes (aruba);hk:hong kong,honcongues;
 je:jersey,ingles (jersey);iq:iraguiano;jo:jordano;la:laos,laociano;ls:lesoto,lesotiano;lv:letonio;li:liechtenstein,liechtensteinense;
-mo:macau,macaense;mw:malawi,malauiano;fk:malvinas,malvinense;my:malasio;mq:martinica,martinicano;mu:mauricia,mauriciano;mr:mauritania,mauritano;
+mo:macau,macaense;mw:malawi,malauiano;fk:malvinas,malvinense;my:malasio;fr:martinica,martinicano;mu:mauricia,mauriciano;mr:mauritania,mauritano;
 ms:monserrate,monserratense;nc:nova caledonia,neocaledonio;ne:niger,nigerino;kp:norte-corean0,norte-coreano;gb-nir:norte-irlandes;
-pg:papua-nova guine,papuasio;pl:polaco;pf:polinesia francesa,polinesio;pr:porto rico,porto-riquenho;re:reuniao;rw:ruanda,ruandes;
+pg:papua-nova guine,papuasio;pl:polaco;pf:polinesia francesa,polinesio;pr:porto rico,porto-riquenho;fr:reuniao;rw:ruanda,ruandes;
 sb:ilhas salomao,salomonico;ws:samoa,samoano;lc:santa lucia,santa-luciense;sl:serra leoa,serra-leones;sg:singapura,singapurano;so:somalia,somali;
 sz:suazilandia,suazi;ss:sudao do sul,sul-sudanes;kn:sao cristovao e neves;st:sao tome e principe,sao tomee principe;sm:sao marino,sao-marinhense;
 tw:taiwan,taiwanes;tj:tajique;tl:timor-leste;tt:trinitario;tv:tuvalu,tuvaluano;ua:ucranian0;uz:usbeque;vc:sao vicente e granadinas,vicentino;

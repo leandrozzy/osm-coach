@@ -119,6 +119,16 @@ object FlagIdent {
         // Atlas por ISO (um país pode ter mais de um nome lido, com erros do OCR: vale o mais parecido)
         val atlasBy = HashMap<String, MutableList<Cells>>()
         for ((name, hex) in atlas) { val iso = Flags.iso(name) ?: continue; cellsOfHex(hex)?.let { atlasBy.getOrPut(iso) { ArrayList() }.add(it) } }
+        // 1º o Atlas sozinho, quando é CLARO (parecido ≤0,16 e 0,01 à frente do 2º país): é o nome que o próprio OSM deu à bandeira. Medido: nos 36
+        // conhecidos acertou todos os que passaram por esse critério (EUA incluído, que a soma com a web trocava por Taiwan).
+        run {
+            var a1 = Float.MAX_VALUE; var a2 = Float.MAX_VALUE; var ai: String? = null
+            for ((iso, cs) in atlasBy) {
+                val d = cs.minOf { dist(t85, it) }
+                if (d < a1) { a2 = a1; a1 = d; ai = iso } else if (d < a2) a2 = d
+            }
+            if (ai != null && a1 <= 0.16f && a2 - a1 >= 0.01f) return ai
+        }
         var best = Float.MAX_VALUE; var bi: String? = null
         for (r in rs) {
             val dw = dist(t16, r.c16)

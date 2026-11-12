@@ -188,4 +188,10 @@ class CrestFlagTest {
         for (n in listOf("Fase preliminar", "Oitavos-de-final", "Quartos de final", "Meias finais", "Final", "ASD", "ANNIY", "ANNYEA")) assertTrue(n, Fixtures.notAClub(n))
         for (n in listOf("Flamengo", "Floridsdorfer AC", "Annecy FC", "Fortuna Düsseldorf", "Young Violets Austria Wien")) assertFalse(n, Fixtures.notAClub(n))
     }
+
+    @Test fun territoriosComTricolorFrancesaViramFranca() {
+        assertEquals("fr", Flags.iso("Guadalupino"))
+        assertEquals("fr", Flags.iso("Martinicano"))
+        assertEquals("fr", Flags.iso("Francês"))
+    }
 }

@@ -398,7 +398,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -2128,6 +2128,10 @@ class Repo(private val ctx: Context) {
         val j = planJson(slot, "squadseen")
         for (k in keys) j.put(k, now)
         dao.putPlan(PlanEntity(slot, "squadseen", j.toString(), now))
+        // quantas passadas leram cada nome: o nome mal lido (fantasma) aparece 1× e o verdadeiro dezenas (ver dedupeSlot)
+        val r = planJson(slot, "squadreads")
+        for (k in keys) r.put(k, r.optInt(k, 0) + 1)
+        dao.putPlan(PlanEntity(slot, "squadreads", r.toString(), now))
     }
 
     /** Remove um jogador que não existe (ou já saiu) e impede que a leitura o recrie. */
@@ -2214,7 +2218,26 @@ class Repo(private val ctx: Context) {
             dao.deletePlayer(slot, "MY", bad)
             learn(slot, "elenco", "Nome mal lido removido: \"${left.first { it.nameKey == bad }.name}\" (agora lido como \"${left.first { it.nameKey == keep }.name}\").", now)
         }
-        return drop.size + ghosts.size
+        // fantasma por contagem de leituras: mesma idade, posição, força e valor + nome ainda parecido; o nome lido só 1× (ou nenhuma) contra o
+        // outro lido 3+ vezes mais é erro de OCR ("Lapixdud" no lugar de "Capixaba"). Não depende do intervalo de 10 min das regras acima.
+        val reads = planJson(slot, "squadreads")
+        val gone = HashSet<String>(); for ((b, _) in ghosts) gone.add(b)
+        val rest = left.filter { it.nameKey !in gone }
+        var byReads = 0
+        for (a in rest) {
+            if (a.nameKey in gone) continue
+            val ra = reads.optInt(a.nameKey, 0)
+            if (ra > 1) continue
+            val real = rest.firstOrNull { b ->
+                b.nameKey != a.nameKey && b.nameKey !in gone && a.age != null && a.age == b.age && a.cat != null && a.cat == b.cat &&
+                    a.strength != null && a.strength == b.strength && a.valueText != null && a.valueText == b.valueText &&
+                    Txt.sim(a.nameKey, b.nameKey) >= 0.4 && reads.optInt(b.nameKey, 0) >= ra + 3
+            } ?: continue
+            gone.add(a.nameKey); byReads++
+            dao.deletePlayer(slot, "MY", a.nameKey)
+            learn(slot, "elenco", "Nome mal lido removido: \"${a.name}\" (lido poucas vezes; o jogador é \"${real.name}\").", now)
+        }
+        return drop.size + ghosts.size + byReads
     }
 
     /** Apaga jogadores "fantasma" (nome ilegível) que repetem outro jogador com mesma idade, força e posição. */
