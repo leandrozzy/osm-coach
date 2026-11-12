@@ -678,6 +678,42 @@ class FramePipeline private constructor(private val ctx: Context) {
         return ex.copy(players = ex.players.map { p -> fixed[Txt.key(p.name)]?.let { p.copy(strength = it) } ?: p })
     }
 
+    /**
+     * Linha do Plantel cujo NOME o OCR leu mas cuja idade/força/valor se perdeu (a linha inteira some do elenco): relê só a faixa da linha,
+     * ampliada 2×, e completa o jogador (12/11: Ba e N'Guessan sumiam do S2). Até 4 linhas por quadro; só entra se a releitura achou força E valor.
+     */
+    private suspend fun repairRows(bmp: Bitmap, ocr: OcrResult, ex: Extraction): Extraction {
+        if (ex.players.size < 3) return ex
+        val rowYs = ex.players.mapNotNull { it.natY }
+        val have = ex.players.map { Txt.key(it.name) }.toSet()
+        val sections = listOf("avancad", "medio", "defes", "guarda", "goleir", "ataq")
+        val cands = ocr.tokens.filter { t ->
+            t.xc in 0.04f..0.34f && t.yc in 0.14f..0.96f && Txt.letters(t.text) >= 2 && t.text.firstOrNull()?.isUpperCase() == true &&
+                sections.none { Txt.norm(t.text).startsWith(it) } &&
+                rowYs.none { Math.abs(it - t.yc) <= 0.035f } && PlayerName.clean(t.text, 2) != null
+        }.distinctBy { Math.round(it.yc * 40f) }.take(4)
+        if (cands.isEmpty()) return ex
+        val add = ArrayList<PlayerRead>()
+        for (c in cands) {
+            val y0 = ((c.yc - 0.045f) * bmp.height).toInt().coerceAtLeast(0)
+            val y1 = ((c.yc + 0.045f) * bmp.height).toInt().coerceAtMost(bmp.height)
+            if (y1 - y0 < 16) continue
+            val crop = Bitmap.createBitmap(bmp, 0, y0, bmp.width, y1 - y0)
+            val big = Bitmap.createScaledBitmap(crop, crop.width * 2, crop.height * 2, true)
+            val r = OcrEngine.read(big)
+            crop.recycle(); big.recycle()
+            val fh = (y1 - y0).toFloat() / bmp.height
+            val y0n = y0.toFloat() / bmp.height
+            val toks = r.tokens.map { OcrToken(it.text, it.l, y0n + it.t * fh, it.r, y0n + it.b * fh) }
+            val re = Parsers.squad(OcrResult(emptyList(), toks), null)
+            re.players.filter { Txt.key(it.name) !in have && it.strength != null && it.valueText != null && Math.abs((it.natY ?: 0f) - c.yc) <= 0.04f }
+                .forEach { add.add(it) }
+        }
+        if (add.isEmpty()) return ex
+        Diag.log("Plantel: ${add.size} linha(s) refeita(s) por recorte: " + add.joinToString { it.name })
+        return ex.copy(players = ex.players + add.distinctBy { Txt.key(it.name) })
+    }
+
     /** Miniatura NÍTIDA (WebP, ~44×30) de uma região da captura inteira, em base64; null se quase tudo escuro. */
     private fun thumb(bmp: Bitmap, cx: Float, cy: Float, w: Float, h: Float, outW: Int, outH: Int, refine: Boolean = false): Pair<Float, String>? = try {
         val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)
@@ -888,6 +924,7 @@ class FramePipeline private constructor(private val ctx: Context) {
 
             var ex = parse(ocr, type, img, now)
             if (type == ScreenType.SQUAD) ex = runCatching { repairStrength(bmp, ex) }.getOrDefault(ex)
+            if (type == ScreenType.SQUAD) ex = runCatching { repairRows(bmp, ocr, ex) }.getOrDefault(ex)
             Diag.parsed.incrementAndGet()
 
             // Rolando a lista o cabeçalho some: reaproveita o dono lido por último (mesmo tipo e slot, até 10 min).

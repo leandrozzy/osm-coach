@@ -286,6 +286,8 @@ object Control {
                 try {
                     Notifier.reschedule(ctx.applicationContext)
                     Notifier.directorSummary(ctx.applicationContext)
+                    // artes dos eventos novos (contratação, despedida, goleada, fim de temporada): aba Artes
+                    runCatching { Arts.auto(ctx.applicationContext) }
                 } catch (e: Exception) {
                     Diag.lastError = "Notificações: " + (e.message ?: e.javaClass.simpleName)
                 }

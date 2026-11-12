@@ -640,7 +640,10 @@ class Repo(private val ctx: Context) {
         if (squadBaseAt == 0L) dao.putPlan(PlanEntity(slot, "squadbase", JSONObject().put("at", now).toString(), now))
         val squadBaseOld = squadBaseAt != 0L && now - squadBaseAt > 6 * 3600_000L
         val cm = LinkedHashMap<String, Pair<Int, Int>>()
-        for (p in ex.players) {
+        // nomes corrigidos à mão: a grafia errada que o OCR repete vira o nome certo (plano `namefix`: chave lida → nome certo)
+        val nameFix = planJson(slot, "namefix")
+        for (p0 in ex.players) {
+            val p = nameFix.optString(Txt.key(p0.name)).takeIf { it.isNotBlank() }?.let { p0.copy(name = it) } ?: p0
             var key = Txt.key(p.name)
             if (existing.none { it.nameKey == key }) {
                 val near = existing.firstOrNull { SquadDedupe.samePlayer(it.nameKey, it.age, it.strength, key, p.age, p.strength) }
@@ -2131,6 +2134,24 @@ class Repo(private val ctx: Context) {
     }
 
     /** Remove um jogador que não existe (ou já saiu) e impede que a leitura o recrie. */
+    /** Corrige o nome de um jogador à mão (erro de leitura). A grafia antiga fica em `namefix` e passa a virar o nome certo nas próximas leituras. */
+    suspend fun renamePlayer(slot: Int, oldKey: String, newName: String): Boolean {
+        val nm = newName.trim()
+        val nk = Txt.key(nm)
+        if (nk.length < 2 || nm.none { it.isUpperCase() }) return false
+        val old = dao.player(slot, "MY", oldKey) ?: return false
+        val now = System.currentTimeMillis()
+        if (nk != oldKey) {
+            dao.deletePlayer(slot, "MY", oldKey)
+            dao.putPlayer(old.copy(nameKey = nk, name = nm, updatedAt = now))
+            val fix = planJson(slot, "namefix")
+            fix.put(oldKey, nm)
+            dao.putPlan(PlanEntity(slot, "namefix", fix.toString(), now))
+        } else dao.putPlayer(old.copy(name = nm, updatedAt = now))
+        learn(slot, "elenco", "Nome corrigido à mão: ${old.name} → $nm.", now)
+        return true
+    }
+
     suspend fun removePlayer(slot: Int, nameKey: String) {
         val now = System.currentTimeMillis()
         dao.deletePlayer(slot, "MY", nameKey)
