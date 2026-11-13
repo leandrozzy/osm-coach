@@ -993,6 +993,33 @@ class FramePipeline private constructor(private val ctx: Context) {
                     Diag.log("Competição nova reconhecida: $team → S$open")
                 }
             }
+            // Plantel (com o MEU apelido) ou Calendário de um time que não bate com nenhum slot = competição/batalha nova do slot em pré-época (o Pré-jogo
+            // nem sempre existe: batalha de grupos). E, se o slot JÁ foi reconhecido (pela navegação) mas a central ainda o mostra como pré-época/livre,
+            // qualquer uma dessas telas prova que a competição começou: o slot vira "ativo" (senão o app escondia tudo do slot, S4 13/11).
+            run {
+                val mineNick = ex.ownerNick?.let { Txt.sim(Txt.key(it), Txt.key(MY_NICK)) >= 0.7f } == true
+                val newTeam = when (type) {
+                    ScreenType.PREGAME -> ex.fields[K.TEAM]?.value
+                    ScreenType.SQUAD -> if (mineNick) ex.ownerTeam else null
+                    ScreenType.CALENDAR -> ex.ownerTeam
+                    else -> null
+                }?.takeIf { it.isNotBlank() }
+                if (newTeam != null) {
+                    val sl = asg.slot
+                    if (sl == null && type != ScreenType.PREGAME) {
+                        val open = repo.openSlotFor(newTeam, ocr.fullText)
+                        if (open != null) {
+                            repo.startCompetition(open, newTeam, now)
+                            machine.adopt(open)
+                            asg = Assignment(open, 0.8, "tela da competição nova")
+                            Diag.log("Competição nova reconhecida por ${type.name.lowercase()}: $newTeam → S$open")
+                        }
+                    } else if (sl != null && repo.fieldMap(sl)[K.SLOT_STATE]?.value in setOf("preepoca", "procurando", "vazio")) {
+                        repo.startCompetition(sl, newTeam, now)
+                        Diag.log("Slot S$sl saiu da pré-época: ${type.name.lowercase()} de $newTeam lido")
+                    }
+                }
+            }
             saveMachine(sessionId)
             Diag.currentSlot = machine.current ?: 0
 

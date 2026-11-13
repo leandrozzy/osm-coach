@@ -243,7 +243,7 @@ class Repo(private val ctx: Context) {
             val rows = dao.fieldsOf(c.slot).associateBy { it.fkey }
             val prev = rows[K.SLOT_STATE]?.fvalue
             // pré-época na central, mas o pré-jogo da competição nova já foi lido (jornada 1-2): o slot está ativo
-            if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 99) <= 2) {
+            if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 0) <= 2) {   // rodada ainda não lida = competição recém-começada (batalha): não volta a "pré-época"
                 // o slot segue "ativo", mas o card da central mostra o NOME da competição nova ("Brasileirão UZM"): sem isto o app mostrava
                 // para sempre a liga anterior ("Superliga Uzbeque", lida em 01/11). Total de rodadas da liga antiga sai (o novo vem com o "x/y").
                 if (c.team.isNotBlank()) changed += hubPut(c.slot, K.HUB_TITLE, Txt.titleCase(c.team), now)
