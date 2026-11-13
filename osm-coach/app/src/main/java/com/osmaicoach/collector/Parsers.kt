@@ -364,7 +364,7 @@ object Parsers {
 
         val players = ArrayList<PlayerRead>()
         val nameless = ArrayList<PlayerRead>()
-        val ageToks = o.tokens.filter { (intTok(it) ?: 0) in 15..45 && abs(it.xc - ageX) <= 0.035f && it.yc > 0.05f }
+        val ageToks = o.tokens.filter { (intTok(it) ?: 0) in 15..45 && abs(it.xc - ageX) <= 0.035f && it.yc > 0.115f }   // linha cortada embaixo da barra do topo (ou do nosso botão) tem nome/valor/bandeira ilegíveis: não vale ("Veaii" 73M do Japão era um DD de 7,3M dos EUA)
         for (a in ageToks) {
             val band = o.tokens.filter { abs(it.yc - a.yc) <= 0.04f }
             val rawName = band.filter { it.xc in 0.04f..0.34f && Txt.letters(it.text) >= 1 && intTok(it) == null }

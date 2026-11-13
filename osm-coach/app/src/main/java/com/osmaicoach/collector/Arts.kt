@@ -106,6 +106,12 @@ object Arts {
     }
 
     // ------------------------------------------------------------------ o que pode virar arte
+    /** Jogador visto em 3+ passadas de leitura do Plantel: nome lido uma vez só pode ser erro de OCR (fantasma) e não vira arte. */
+    private suspend fun confirmed(repo: Repo, slot: Int): Set<String> {
+        val j = repo.dao.plan(slot, "squadreads")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptySet()
+        return j.keys().asSequence().filter { j.optInt(it) >= 3 }.toSet()
+    }
+
     private fun played(ms: List<MatchEntity>) = ms.filter { it.round != null && it.result in listOf("V", "E", "D") }.sortedBy { it.round }
     private fun num(s: String?): Int? = s?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }
 
@@ -122,7 +128,8 @@ object Arts {
         val over = Hints.competitionOver(repo, slot, f)
         runCatching { repo.cleanLedger(slot) }
         val out = ArrayList<Cand>()
-        val keys = repo.dao.playersOf(slot).filter { it.owner == "MY" }.map { it.nameKey }.toSet()
+        val sure = confirmed(repo, slot)
+        val keys = repo.dao.playersOf(slot).filter { it.owner == "MY" && it.nameKey in sure }.map { it.nameKey }.toSet()
         val ms = played(repo.dao.matchesOf(slot))
         val last = ms.lastOrNull()
         val pos = num(f[K.LEAGUE_POS]?.value)
@@ -249,8 +256,9 @@ object Arts {
     /** Capa de jornal: contratados recentes (até 3, ainda no elenco) com retrato fictício; fala do treinador é a única parte inventada. */
     private suspend fun news(ctx: Context, repo: Repo, c: Cand, f: Map<String, StoredField>, team: String, comp: String?, crest: Bitmap?, th: ArtsDraw.Theme, colors: String, ms: List<MatchEntity>, seed: Int): Bitmap? {
         val slot = c.slot
+        val sure = confirmed(repo, slot)
         val mine = repo.dao.playersOf(slot).filter { it.owner == "MY" }
-        val keys = mine.map { it.nameKey }.toSet()
+        val keys = mine.map { it.nameKey }.filter { it in sure }.toSet()
         val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
         val buys = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
         if (buys.isEmpty()) return null

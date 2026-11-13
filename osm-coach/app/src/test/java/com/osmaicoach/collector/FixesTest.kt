@@ -75,6 +75,20 @@ class FixesTest {
         assertEquals(listOf(90, 89), ex.players.map { it.strength })
     }
 
+    @Test fun squadRowClippedUnderTopBarIsIgnored() {
+        val rows = ArrayList<OcrLine>()
+        fun row(y: Float, name: String, age: String, pos: String, a: String, d: String, m: String, v: String) {
+            rows += Fx.line(name, 0.07f, y); rows += Fx.line(age, 0.555f, y, 0.03f); rows += Fx.line(pos, 0.62f, y, 0.03f)
+            rows += Fx.line(a, 0.663f, y, 0.025f); rows += Fx.line(d, 0.70f, y, 0.025f); rows += Fx.line(m, 0.737f, y, 0.025f)
+            rows += Fx.line(v, 0.95f, y, 0.04f)
+        }
+        row(0.097f, "Veaii", "26", "DD", "47", "81", "64", "73M")   // linha cortada pela barra do topo
+        row(0.195f, "Cresswell", "24", "DC", "15", "80", "47", "5,8M")
+        val ex = Parsers.squad(Fx.ocr(*rows.toTypedArray()), null)
+        // sem cabeçalho o extrator limpa os campos do time, mas a lista de jogadores existe
+        assertEquals(listOf("Cresswell"), ex.players.map { it.name })
+    }
+
     // ------------------------------------------------------------------ repetidos no elenco
 
     @Test fun samePlayerReadWithDifferentNamesIsMergedButTwinsStay() {
