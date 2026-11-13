@@ -155,6 +155,27 @@ object ArtsAi {
         return lookWords(j)
     }
 
+
+    /** Retrato fictício (cabeça e ombros, rosto centrado) para a capa de jornal; recortado depois em círculo por `ArtsDraw.news`. */
+    fun portraitPrompt(colors: String, kit: String, look: String): String {
+        val shirt = if (kit.isNotBlank()) kit else "$colors football jersey"
+        return "Studio portrait photograph of a fictional male professional footballer (not a real person), $look, face centered in the upper half of the frame, " +
+            "looking at the camera with a calm serious expression, wearing $shirt, head and shoulders, soft studio light, plain dark $colors background, ultra realistic, sharp focus, " +
+            "no text, no letters, no logos, no watermark"
+    }
+
+    /**
+     * Fala do treinador para a capa de jornal (a ÚNICA parte inventada, a pedido do usuário): confiante e ligada aos números do slot. A IA só recebe [facts]
+     * (números e nomes já lidos) e é proibida de criar outros; sem IA ou com resposta ruim, [fallbackQuote] monta a fala só com os mesmos números.
+     */
+    suspend fun quote(ctx: Context, facts: String, fallback: String): String {
+        val q = "Escreva a fala de um treinador de futebol, sempre CONFIANTE, em português do Brasil, com 2 ou 3 frases curtas (no máximo 45 palavras), para uma capa de jornal. " +
+            "Use vários destes números do time dele (e só eles; não invente outros números, nomes, placares nem fatos): $facts. " +
+            "Responda APENAS com a fala, sem aspas, sem título e sem explicação."
+        val t = askText(ctx, q)?.trim()?.trim('"', '“', '”', '*')?.replace(Regex("\\s+"), " ")
+        return if (t != null && t.length in 40..380 && !t.contains("\n")) t else fallback
+    }
+
     // ------------------------------------------------------------------ gerador de imagem (Pollinations)
     private fun url(prompt: String, seed: Int): String =
         "https://image.pollinations.ai/prompt/" + URLEncoder.encode(prompt, "UTF-8").replace("+", "%20") +

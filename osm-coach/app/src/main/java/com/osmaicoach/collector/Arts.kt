@@ -132,6 +132,8 @@ object Arts {
             for (e in ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.take(8)) {
                 out.add(Cand("buy|$slot|${e.key}|${e.at}", slot, "BUY", "Contratação: " + e.name, e.at, e.key))
             }
+            val recent = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
+            if (recent.isNotEmpty()) out.add(Cand("news|$slot|${recent.first().at}", slot, "NEWS", "Capa de jornal: " + recent.joinToString(", ") { it.name }, recent.first().at, auto = false))
             if (last != null && last.result == "V") {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
@@ -243,6 +245,67 @@ object Arts {
         return if (base.isNotEmpty() && !code.isNullOrBlank()) "$base ($code)" else base.ifEmpty { code.orEmpty() }
     }
 
+
+    /** Capa de jornal: contratados recentes (até 3, ainda no elenco) com retrato fictício; fala do treinador é a única parte inventada. */
+    private suspend fun news(ctx: Context, repo: Repo, c: Cand, f: Map<String, StoredField>, team: String, comp: String?, crest: Bitmap?, th: ArtsDraw.Theme, colors: String, ms: List<MatchEntity>, seed: Int): Bitmap? {
+        val slot = c.slot
+        val mine = repo.dao.playersOf(slot).filter { it.owner == "MY" }
+        val keys = mine.map { it.nameKey }.toSet()
+        val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
+        val buys = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
+        if (buys.isEmpty()) return null
+        val kit = ArtsAi.kitFor(ctx, repo, team, comp)
+        val list = ArrayList<ArtsDraw.NewsPlayer>()
+        val shortNames = ArrayList<String>()
+        for (b in buys) {
+            val p = mine.firstOrNull { it.nameKey == b.key } ?: continue
+            val iso = FlagManual.all(repo)[b.key] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(b.key) }.getOrNull() }?.takeIf { it.isNotBlank() }
+            val country = Flags.countryName(iso)
+            val look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
+            val sc = ArtsAi.scene(ArtsAi.portraitPrompt(colors, kit, look), seed + list.size * 31)
+            if (sc == null && list.isEmpty()) return null   // 1º retrato falhou: serviço fora do ar, tenta depois
+            val face = sc?.let { Bitmap.createBitmap(it, (it.width * 0.12f).toInt(), (it.height * 0.04f).toInt(), (it.width * 0.76f).toInt(), (it.width * 0.76f).toInt().coerceAtMost((it.height * 0.9f).toInt())) }
+            val line = listOfNotNull(p.age?.let { "$it ANOS" }, p.posCode, country?.uppercase()).joinToString(" • ")
+            val stats = listOfNotNull(p.strength?.let { "FORÇA $it" }, p.valueText?.takeIf { it.isNotBlank() }?.let { "VALOR: $it" }).joinToString(" • ").ifBlank { "NOVO NO ELENCO" }
+            list.add(ArtsDraw.NewsPlayer(p.name, line, stats, face))
+            shortNames.add(p.name)
+        }
+        if (list.isEmpty()) return null
+        val loc = java.util.Locale("pt", "BR")
+        val now = System.currentTimeMillis()
+        val date = java.text.SimpleDateFormat("EEEE, d 'de' MMMM 'de' yyyy", loc).format(java.util.Date(now)).uppercase(loc)
+        val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
+        val pos = num(f[K.LEAGUE_POS]?.value)
+        val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
+        val side = listOfNotNull(
+            my?.let { "Força do elenco: $it" }, pos?.let { "Posição na liga: ${it}º" },
+            if (ms.isNotEmpty()) "Campanha: ${v}V ${e}E ${d}D" else f[K.MY_VALUE]?.value?.let { "Valor do elenco: $it" }
+        )
+        val rival = f[K.RIVAL_TEAM]?.value
+        val round = num(f[K.ROUND]?.value)
+        val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()?.takeIf { it > 0 }
+        val homeTxt = f[K.HOME]?.value?.lowercase()
+        val whenTxt = matchAt?.let { java.text.SimpleDateFormat("dd/MM HH:mm", loc).format(java.util.Date(it)) }
+        val names = if (shortNames.size == 1) shortNames[0] else shortNames.dropLast(1).joinToString(", ") + " e " + shortNames.last()
+        val sub = "$team oficializa a chegada de $names"
+        val subLine = if (rival != null) "Reforços já à disposição para o jogo contra $rival" + (round?.let { ", pela rodada $it" } ?: "") else "Reforços já à disposição para a sequência da temporada"
+        val footer = if (rival != null) listOfNotNull("PRÓXIMO JOGO: ${team.uppercase()} x ${rival.uppercase()}", round?.let { "RODADA $it" }, whenTxt, homeTxt?.uppercase()).joinToString("  •  ")
+        else "${team.uppercase()}  •  ${comp.orEmpty().uppercase()}".trim(' ', '•')
+        val facts = listOfNotNull(
+            my?.let { "força do time $it" }, rv?.let { "força do rival $it" }, f[K.MY_ATK]?.value?.let { "ataque $it" }, f[K.MY_MID]?.value?.let { "meio-campo $it" },
+            f[K.MY_DEF]?.value?.let { "defesa $it" }, f[K.MY_GOL]?.value?.let { "goleiro $it" }, pos?.let { "${it}º lugar na liga" },
+            if (ms.isNotEmpty()) "campanha ${v}V ${e}E ${d}D" else null, rival?.let { "próximo rival: $it" }, "reforços: $names"
+        ).joinToString("; ")
+        val fallback = "Chegamos fortes" + (my?.let { ", com força $it" } ?: "") + (rv?.let { " contra $it do rival" } ?: "") + ". Os reforços ($names) elevam o nível do grupo e vamos buscar os três pontos."
+        val quote = ArtsAi.quote(ctx, facts, fallback)
+        val paper = "JORNAL DO " + team.uppercase()
+        val headB = comp?.takeIf { it.isNotBlank() }?.uppercase().orEmpty()
+        val headA = if (headB.isNotEmpty()) "ESQUADRÃO REFORÇADO PARA A LIGA:" else "ESQUADRÃO REFORÇADO"
+        val out = ArtsDraw.news(th, crest, paper, headA, headB, sub, subLine, side, "EDIÇÃO ESPECIAL • $date", list, "TREINADOR CONFIANTE", quote, footer)
+        list.forEach { it.portrait?.recycle() }
+        return out
+    }
+
     private suspend fun draw(ctx: Context, repo: Repo, c: Cand, reroll: Int): Bitmap? {
         val slot = c.slot
         val f = repo.fieldMap(slot)
@@ -275,6 +338,7 @@ object Arts {
                 plate = p.strength?.let { "FORÇA" to it.toString() }
                 foot = if (c.kind == "BUY") "Bem-vindo ao $team!" else "$team • orgulho do clube"
             }
+            "NEWS" -> return news(ctx, repo, c, f, team, comp, crest, th, colors, ms, seed)
             "GOLEADA" -> {
                 val m = last ?: return null
                 oppCrest = bmp(CrestWeb.find(ctx.filesDir, m.opponent) ?: CrestCut.find(ctx.filesDir, m.opponent))

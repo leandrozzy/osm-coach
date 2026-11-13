@@ -227,4 +227,107 @@ internal object ArtsDraw {
         gold(c, footer, W / 2f, 1290f, 60f, maxw = W - 90f, align = 'c', skew = -0.16f, scale = 0.92f)
         return out
     }
+
+    class NewsPlayer(val name: String, val line: String, val stats: String, val portrait: Bitmap?)
+
+    private fun wrap(s: String, p: Paint, maxw: Float): List<String> {
+        val out = ArrayList<String>(); var cur = ""
+        for (w in s.split(" ")) {
+            val t = if (cur.isEmpty()) w else "$cur $w"
+            if (p.measureText(t) <= maxw || cur.isEmpty()) cur = t else { out.add(cur); cur = w }
+        }
+        if (cur.isNotEmpty()) out.add(cur)
+        return out
+    }
+
+    /**
+     * Capa de jornal (1600×1120, horizontal): título do jornal com o nome do time, manchete, subtítulo, até 3 contratados com retrato fictício (IA) e dados lidos,
+     * fala do treinador (a única parte inventada, marcada) e rodapé do próximo jogo. Tudo, exceto a fala e os retratos, vem de dados já lidos do jogo.
+     */
+    fun news(
+        th: Theme, crest: Bitmap?, paper: String, headA: String, headB: String, sub: String, subLine: String, side: List<String>, dateLine: String,
+        players: List<NewsPlayer>, quoteHead: String, quote: String, footer: String
+    ): Bitmap {
+        val w = 1600f; val h = 1120f
+        val out = Bitmap.createBitmap(w.toInt(), h.toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val ink = shade(th.bg, 0.95f).let { Color.rgb(min(255, Color.red(it) + 0), min(255, Color.green(it) + 12), min(255, Color.blue(it) + 30)) }
+        val red = shade(th.accent, 0.72f)
+        c.drawColor(argb(255, 243, 240, 232))
+        c.drawRect(0f, 0f, w, h, P(shader = RadialGradient(w / 2f, h / 2f, w * 0.75f, intArrayOf(white(0), argb(70, 150, 130, 100)), floatArrayOf(0.6f, 1f), Shader.TileMode.CLAMP)))
+        val rnd = java.util.Random(7)
+        for (i in 0 until 900) c.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 1f + rnd.nextFloat() * 1.5f, P(color = argb(10 + rnd.nextInt(14), 90, 70, 40)))
+        // título do jornal
+        val tp = txtPaint(1f, true, 0f, 0.72f)
+        var ts = 150f; tp.textSize = ts
+        while (tp.measureText(paper) > 800f && ts > 40f) { ts -= 4f; tp.textSize = ts }
+        tp.color = ink; c.drawText(paper, 56f, 140f, tp)
+        c.drawLine(870f, 40f, 870f, 150f, P(color = argb(120, 60, 60, 60), stroke = 2f))
+        ring(c, 960f, 92f, crest, th, 66f)
+        c.drawLine(1050f, 40f, 1050f, 150f, P(color = argb(120, 60, 60, 60), stroke = 2f))
+        text(c, dateLine, 1070f, 62f, 21f, argb(255, 30, 30, 30), maxw = 500f, skew = 0f, scale = 0.9f)
+        side.take(3).forEachIndexed { i, t ->
+            val sp = txtPaint(17f, false, 0f, 0.95f); sp.color = argb(255, 40, 40, 40)
+            wrap(t, sp, 160f).take(4).forEachIndexed { j, ln -> c.drawText(ln, 1070f + i * 175f, 92f + j * 21f, sp) }
+        }
+        c.drawLine(40f, 168f, w - 40f, 168f, P(color = ink, stroke = 3f))
+        // manchete
+        val hp = txtPaint(1f, true, 0f, 0.74f)
+        var hs = 118f; hp.textSize = hs
+        while (hp.measureText("$headA $headB") > w - 100f && hs > 40f) { hs -= 4f; hp.textSize = hs }
+        val wa = hp.measureText("$headA ")
+        val total = wa + hp.measureText(headB)
+        val hx = (w - total) / 2f
+        hp.color = ink; c.drawText("$headA ", hx, 275f, hp)
+        hp.color = red; c.drawText(headB, hx + wa, 275f, hp)
+        // subtítulo
+        val sp2 = txtPaint(46f, true, 0f, 0.86f); sp2.color = argb(255, 20, 20, 20)
+        var y = 330f
+        for (ln in wrap(sub, sp2, w - 200f).take(2)) { c.drawText(ln, (w - sp2.measureText(ln)) / 2f, y, sp2); y += 50f }
+        val lp = txtPaint(27f, true, 0f, 0.92f); lp.color = ink
+        for (ln in wrap(subLine, lp, w - 300f).take(2)) { c.drawText(ln, (w - lp.measureText(ln)) / 2f, y + 6f, lp); y += 32f }
+        // colunas dos contratados
+        val top = y + 30f
+        val n = max(1, players.size); val colW = (w - 120f) / n
+        players.forEachIndexed { i, p ->
+            val cx = 60f + colW * i + colW / 2f
+            val r = 95f; val cy = top + r + 6f
+            if (i > 0) c.drawLine(60f + colW * i, top, 60f + colW * i, top + 400f, P(color = argb(110, 60, 60, 60), stroke = 2f))
+            c.drawCircle(cx, cy, r, P(shader = lin(0f, cy - r, 0f, cy + r, intArrayOf(withA(th.kit, 255), shade(th.bg, 0.8f)))))
+            c.save(); val clip = Path(); clip.addCircle(cx, cy, r, Path.Direction.CW); c.clipPath(clip)
+            if (p.portrait != null) c.drawBitmap(p.portrait, null, RectF(cx - r, cy - r, cx + r, cy + r), P())
+            else text(c, p.name.trim().first().uppercaseChar().toString(), cx, cy + 36f, 110f, Color.WHITE, align = 'c', skew = 0f, scale = 1f)
+            c.restore()
+            c.drawCircle(cx, cy, r, P(color = argb(160, 255, 255, 255), stroke = 4f))
+            val np = txtPaint(1f, true, 0f, 0.8f); var ns = 52f; np.textSize = ns
+            val nm = p.name.uppercase()
+            while (np.measureText(nm) > colW - 40f && ns > 24f) { ns -= 2f; np.textSize = ns }
+            np.color = argb(255, 10, 10, 10); c.drawText(nm, cx - np.measureText(nm) / 2f, cy + r + 62f, np)
+            val ip = txtPaint(26f, true, 0f, 0.88f); ip.color = argb(255, 30, 30, 30)
+            var ln = p.line
+            while (ip.measureText(ln) > colW - 30f && ip.textSize > 15f) ip.textSize -= 1f
+            c.drawText(ln, cx - ip.measureText(ln) / 2f, cy + r + 98f, ip)
+            val pp = txtPaint(25f, true, 0f, 0.9f); pp.color = Color.WHITE
+            while (pp.measureText(p.stats) > colW - 70f && pp.textSize > 14f) pp.textSize -= 1f
+            val pw = pp.measureText(p.stats) + 36f
+            val pr = RectF(cx - pw / 2f, cy + r + 118f, cx + pw / 2f, cy + r + 156f)
+            c.drawRoundRect(pr, 6f, 6f, P(color = ink)); c.drawText(p.stats, pr.left + 18f, pr.bottom - 11f, pp)
+        }
+        val qy = top + 400f
+        c.drawLine(40f, qy - 20f, w - 40f, qy - 20f, P(color = argb(160, 60, 60, 60), stroke = 2f))
+        val qh = txtPaint(1f, true, 0f, 0.76f); var qs = 56f; qh.textSize = qs
+        while (qh.measureText(quoteHead) > w - 400f && qs > 30f) { qs -= 2f; qh.textSize = qs }
+        qh.color = ink; c.drawText(quoteHead, 220f, qy + 42f, qh)
+        val qp = txtPaint(26f, false, 0f, 0.95f); qp.color = argb(255, 25, 25, 25)
+        var qyy = qy + 82f
+        val lines = wrap("“$quote”", qp, w - 440f)
+        for ((i, ln) in lines.take(3).withIndex()) { c.drawText(if (i == 2 && lines.size > 3) "$ln…" else ln, 220f, qyy, qp); qyy += 32f }
+        val fp = txtPaint(17f, false, 0.0f, 1f); fp.color = argb(255, 110, 100, 90)
+        c.drawText("declaração fictícia", 60f, qy + 42f, fp)
+        // rodapé
+        val bar = RectF(40f, h - 66f, w - 40f, h - 18f)
+        c.drawRoundRect(bar, 8f, 8f, P(color = ink))
+        text(c, footer, w / 2f, bar.bottom - 14f, 31f, Color.WHITE, maxw = w - 100f, align = 'c', skew = 0f, scale = 0.92f)
+        return out
+    }
 }
