@@ -240,7 +240,24 @@ class Repo(private val ctx: Context) {
     private suspend fun applyHub(ex: Extraction, now: Long): Int {
         var changed = 0
         for (c in ex.hubCards) {
-            val rows = dao.fieldsOf(c.slot).associateBy { it.fkey }
+            var rows = dao.fieldsOf(c.slot).associateBy { it.fkey }
+            // Reparo: o time guardado não tem nada a ver com o clube da central enquanto outro slot espera competição nova =
+            // telas de uma batalha nova foram gravadas aqui por engano (S3 13/11 ficou com "Argentinos Juniors"): apaga o
+            // clube/elenco/calendário contaminados (relidos nas próximas passadas) e volta ao clube da central.
+            run {
+                val team = rows[K.TEAM]?.fvalue
+                val title = c.team.takeIf { it.isNotBlank() }?.let { Txt.titleCase(it) }
+                val ctype = rows[K.COMP_TYPE]?.fvalue?.let { Txt.key(it) } ?: ""
+                if (team != null && title != null && c.state == null && !ctype.startsWith("batalha") &&
+                    Txt.sim(Txt.key(team), Txt.key(title)) < 0.5f &&
+                    (1..4).any { s -> s != c.slot && dao.fieldsOf(s).firstOrNull { it.fkey == K.SLOT_STATE }?.fvalue in setOf("preepoca", "procurando", "vazio") }) {
+                    archiveSeason(c.slot, now, true)
+                    dao.putField(FieldEntity(c.slot, K.TEAM, title, 0.8, now, "hub"))
+                    dao.putField(FieldEntity(c.slot, K.SLOT_STATE, "ativo", 0.9, now, "hub"))
+                    Diag.log("S${c.slot}: time guardado \"$team\" não é o clube da central ($title): dados contaminados apagados")
+                    rows = dao.fieldsOf(c.slot).associateBy { it.fkey }
+                }
+            }
             val prev = rows[K.SLOT_STATE]?.fvalue
             // pré-época na central, mas o pré-jogo da competição nova já foi lido (jornada 1-2): o slot está ativo
             if (c.state == "preepoca" && prev == "ativo" && (rows[K.ROUND]?.fvalue?.toIntOrNull() ?: 0) <= 2) {   // rodada ainda não lida = competição recém-começada (batalha): não volta a "pré-época"

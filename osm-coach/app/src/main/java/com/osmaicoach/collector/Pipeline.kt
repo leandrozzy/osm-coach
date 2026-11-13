@@ -1005,7 +1005,26 @@ class FramePipeline private constructor(private val ctx: Context) {
                     else -> null
                 }?.takeIf { it.isNotBlank() }
                 if (newTeam != null) {
-                    val sl = asg.slot
+                    var sl = asg.slot
+                    // O slot atribuído (herança da sessão/ambiguidade) não tem nada a ver com este time e há um slot esperando competição nova:
+                    // a tela é DELE (S4 13/11: a batalha nova caía no S3 e contaminava time/elenco/calendário do S3).
+                    if (sl != null) {
+                        val f = repo.fieldMap(sl)
+                        val st = f[K.SLOT_STATE]?.value
+                        val nk = Txt.key(newTeam)
+                        val names = listOfNotNull(f[K.TEAM]?.value, f[K.HUB_TITLE]?.value).map { Txt.key(it) }.filter { it.length >= 3 }
+                        val unrelated = names.isNotEmpty() && names.none { Txt.sim(it, nk) >= 0.6f }
+                        if (unrelated && st !in setOf("preepoca", "procurando", "vazio")) {
+                            val open = repo.openSlotFor(newTeam, ocr.fullText)
+                            if (open != null && open != sl) {
+                                repo.startCompetition(open, newTeam, now)
+                                machine.adopt(open)
+                                asg = Assignment(open, 0.8, "tela da competição nova (não é do S$sl)")
+                                Diag.log("Competição nova reconhecida por ${type.name.lowercase()}: $newTeam → S$open (e não S$sl)")
+                                sl = open
+                            }
+                        }
+                    }
                     if (sl == null && type != ScreenType.PREGAME) {
                         val open = repo.openSlotFor(newTeam, ocr.fullText)
                         if (open != null) {
