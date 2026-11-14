@@ -183,7 +183,7 @@ object ArtsAi {
      */
     suspend fun matchStory(ctx: Context, facts: String): Triple<String, String, List<String>>? {
         val q = "Você é redator esportivo de um jornal brasileiro. Escreva a notícia do jogo abaixo, em português do Brasil, estilo de capa de jornal esportivo. " +
-            "Use SOMENTE estes fatos: $facts. Não invente nomes, números, minutos, lances, declarações nem fatos além destes; se faltar informação, escreva de forma geral. " +
+            "Use SOMENTE estes fatos: $facts. Não invente nomes, números, minutos, lances, declarações nem fatos além destes (não cite turno, primeiro/segundo tempo, público nem torcida); respeite exatamente quem foi mandante e quem foi visitante; se faltar informação, escreva de forma geral. " +
             "Responda APENAS um JSON: {\"headline\":\"manchete forte de até 70 caracteres\",\"sub\":\"linha fina de até 140 caracteres\",\"body\":[\"parágrafo 1 de até 55 palavras\",\"parágrafo 2 de até 55 palavras\"]}"
         val j = AiClient.parseJson(askText(ctx, q)) ?: return null
         val h = j.optString("headline").trim(); val sub = j.optString("sub").trim()

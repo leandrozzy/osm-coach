@@ -345,6 +345,24 @@ object Arts {
             if (rawGoals.any { it.min == min && it.ours == ours && Txt.sim(Txt.key(it.who), Txt.key(who)) >= 0.6f }) continue
             rawGoals.add(G(min, who, ours))
         }
+        // gol SEM assistência vem do parser como "lance de X (gol sem assistência ou cartão)" (sem ícone de bola): só entra como gol quando falta
+        // exatamente esse número de gols do lado no placar (senão pode ser cartão e não afirmo nada)
+        val loose = ArrayList<G>()
+        if (evs != null) for (i in 0 until evs.length()) {
+            val e = evs.optString(i)
+            if (!e.contains("gol sem assistência")) continue
+            val who = e.substringAfter(" lance de ").substringBefore(" (").trim()
+            if (who.isBlank()) continue
+            val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(e)?.groupValues?.get(1)
+            val ours = if (mineHome == null) null else (e.contains("(casa)") == mineHome)
+            if (ours != null && loose.none { it.min == min && it.ours == ours }) loose.add(G(min, who, ours))
+        }
+        for (side in listOf(true, false)) {
+            val missing = (if (side) mine else theirs) - rawGoals.count { it.ours == side }
+            val cands = loose.filter { it.ours == side && rawGoals.none { g -> g.min == it.min && g.ours == side } }
+            if (missing > 0 && cands.size == missing) rawGoals.addAll(cands)
+        }
+        rawGoals.sortBy { it.min?.substringBefore('+')?.toIntOrNull() ?: 999 }
         // nunca mais gols do que o placar: por lado, só os primeiros (o placar é o dado confiável)
         val cap = mapOf<Boolean?, Int>(true to mine, false to theirs)
         val used = HashMap<Boolean?, Int>()
@@ -361,8 +379,9 @@ object Arts {
         val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
         val resWord = when (res) { "V" -> "vitória"; "E" -> "empate"; else -> "derrota" }
         val where = when (mineHome) { true -> "em casa"; false -> "fora de casa"; else -> null }
+        val roleFact = when (mineHome) { true -> "o $team foi o MANDANTE (jogou em casa) e o $opp foi o visitante"; false -> "o $team foi o VISITANTE (jogou fora de casa, no campo do $opp, que foi o mandante)"; else -> null }
         val facts = listOfNotNull(
-            "$team ${mine} x ${theirs} $opp ($resWord do $team${where?.let { " $it" } ?: ""})", "rodada $round", comp?.takeIf { it.isNotBlank() }?.let { "competição: $it" },
+            "$team ${mine} x ${theirs} $opp ($resWord do $team${where?.let { " $it" } ?: ""})", roleFact, "rodada $round", comp?.takeIf { it.isNotBlank() }?.let { "competição: $it" },
             pos?.let { "$team ocupa o ${it}º lugar na liga" }, "campanha do $team: ${v}V ${e}E ${d}D",
             if (my != null && rv != null) "força do $team $my contra $rv do $opp" else null,
             if (goalFacts.isNotEmpty()) "gols: " + goalFacts.joinToString("; ") else null
