@@ -512,6 +512,24 @@ internal fun SlotLearning(slot: Int, d: SlotData) {
         // ---- 3. jogo a jogo (um cartão por jogo; toque para ver os números)
         Title("Jogo a jogo")
         for (g in games.take(8)) GameCard(g, Coach.review(g))
+        // conferência do que foi LIDO da tela de Resultado do último jogo (para achar gol/evento que o OCR perdeu)
+        val lastRep = d.reports.mapNotNull { p -> p.kind.removePrefix("mr_R").toIntOrNull()?.let { r -> r to p } }.maxByOrNull { it.first }
+        if (lastRep != null) {
+            val rj = runCatching { JSONObject(lastRep.second.json) }.getOrNull()
+            val evs = rj?.optJSONArray("events")
+            val lines = (0 until (evs?.length() ?: 0)).map { evs!!.optString(it) }
+            val goals = lines.count { it.contains(" gol de ") || it.contains(" gol (autor") }
+            val score = if (rj != null && rj.has("sh")) rj.optInt("sh") + rj.optInt("sa") else null
+            Panel {
+                Text("🔎 O que li do Resultado da J${lastRep.first}", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    "Placar ${rj?.optString("sh").orEmpty().ifBlank { "?" }}×${rj?.optString("sa").orEmpty().ifBlank { "?" }} • ${lines.size} evento(s) • $goals gol(s) lido(s)" + (if (score != null && goals < score) " ⚠ faltam ${score - goals}" else ""),
+                    fontSize = 13.sp, color = if (score != null && goals < score) C.WARN else C.MUTED, modifier = Modifier.padding(top = 4.dp)
+                )
+                for (l in lines.take(24)) Text("• $l", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+                if (lines.isEmpty()) Text("Nenhum evento lido: abra o Resultado e role a lista de eventos (Primeira parte / Segunda parte) devagar.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
     }
 
     // ---- 4. o que funciona por formação, estilo e contexto
