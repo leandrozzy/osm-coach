@@ -1295,6 +1295,8 @@ data class SlotSummary(
     val readMine: Boolean = false,
     /** A tática que está no OSM foi conferida e bate com a gerada (plano `tacticdone`): nada a montar. */
     val mounted: Boolean = false,
+    /** Li a Tática do OSM depois de gerada e ela difere da gerada: o que difere (a pendência "montar" mostra isso em vez de repetir "já está pronta"). */
+    val mountDiff: List<String> = emptyList(),
     /** Idade da leitura mais antiga de cada passo [Pré-jogo, Análise, Rival]: a tela mostra "✓ Análise · 2 h" em vez de só ✓. */
     val readAges: List<Long?> = emptyList(),
     /** Forma recente (ex. "VVDEV") dos dois times e nível da preparação, lidos no pré-jogo (≤12 h). */
@@ -1594,6 +1596,7 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                 readMine = Director.groups(f, now)[3].ok,
                 mounted = repo.dao.plan(slot, "tactic").let { tp -> tp != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }.let { dj ->
                     dj != null && (dj.optLong("at") == tp.at || dj.optString("sig").let { sg -> sg.isNotBlank() && runCatching { sg == Director.mountSig(JSONObject(tp.json)) }.getOrDefault(false) }) } },
+                mountDiff = repo.dao.plan(slot, "tactic")?.let { tp -> runCatching { Hints.mountDiffs(repo, slot, tp, JSONObject(tp.json), f) }.getOrDefault(emptyList()) } ?: emptyList(),
                 readAges = Director.groupAgesMs(f, now),
                 // meu time: igual ao jogo (5 bolinhas do Pré-jogo) quando o Calendário está incompleto; Calendário em dia vale mais
                 myForm = if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
@@ -2055,7 +2058,8 @@ internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
             todo.add(Todo(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
         if (s.rivalChanged.isNotEmpty()) todo.add(Todo(s.slot, "⚠", "O rival mudou a tática", "Gere a tática de novo antes do jogo", 6, 4))
-        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
+        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(if (s.mountDiff.isNotEmpty()) Todo(s.slot, "📋", "Ajustar a tática montada no OSM", "Li a Tática do jogo e está diferente da gerada: " + s.mountDiff.joinToString(" • "), 3, 4)
+            else Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
     }
     for (w in data.work) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }

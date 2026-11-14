@@ -167,7 +167,7 @@ object Fresh {
         // a barra do pré-jogo já diz o nível: BOM/BOA/EXCELENTE não pede nada; CRÍTICO/FRACO/RAZOÁVEL pede a lista de afazeres
         val prepRank = PrepLevel.rank(i.prepLevel)
         // a lista de afazeres já foi aberta DEPOIS da última leitura do pré-jogo (que traz o nível): não cobra de novo, os itens pendentes já estão na lista
-        val prepListSeen = pr != null && (age(ScreenType.PREGAME).let { pg -> pg == null || pr <= pg })
+        val prepListSeen = pr != null && (pr < 4 * H || age(ScreenType.PREGAME).let { pg -> pg == null || pr <= pg })   // lista aberta há <4 h vale mesmo que o Pré-jogo tenha sido relido depois (o nível só sobe quando o OSM sobe; item impossível ou já feito não pode cobrar para sempre)
         if (gameIn != null && gameIn in 0L..(6 * H) && PrepLevel.low(i.prepLevel) && !prepListSeen)
             add(ScreenType.PREP, if (prepRank == 0) 2 else 1, "preparação do jogo está ${i.prepLevel}: abra a lista de afazeres e conclua o que falta (cada item sobe o bônus)")
         // sem leitura do nível: só cobra perto do jogo, como antes

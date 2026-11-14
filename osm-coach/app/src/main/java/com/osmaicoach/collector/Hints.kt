@@ -240,7 +240,8 @@ object Hints {
         val done = doneJ?.optLong("at")
         val doneSame = tj != null && doneJ?.optString("sig").orEmpty().let { it.isNotBlank() && it == Director.mountSig(tj) }
         if (activeSlot && tacticOk && tj != null && tp != null && done != tp.at && !doneSame) {
-            pend.add(Hint("📋", "Monte: ${tj.optString("formation")} • ${tj.optString("playStyle")}", Director.tacticSummary(tj), true))
+            val diff = mountDiffs(repo, slot, tp, tj, repo.fieldMap(slot))
+            pend.add(Hint("📋", "Monte: ${tj.optString("formation")} • ${tj.optString("playStyle")}", Director.tacticSummary(tj) + if (diff.isNotEmpty()) "\nLi a Tática do OSM e está diferente: " + diff.joinToString(" • ") else "", true))
         }
         // O cartão mostra SÓ o que falta fazer (o que já foi feito não aparece nem conta). Na tela de preparação, cada item.
         val items = ArrayList<Hint>()
@@ -252,6 +253,13 @@ object Hints {
         val opt = if (type == ScreenType.MARKET) tips.filter { it.icon == "💰" }.map { asHint(it) } else emptyList()
         val out = pend + items.filter { h -> pend.none { it.title == h.title } } + opt
         return out.filter { !dismissed(ctx, it.title) }
+    }
+
+    /** Diferenças entre a tática lida no OSM DEPOIS de gerada e a gerada (vazio = não li depois ou confere). Mostra ao usuário POR QUE a pendência continua. */
+    suspend fun mountDiffs(repo: Repo, slot: Int, tp: PlanEntity, tj: JSONObject, f: Map<String, StoredField>): List<String> {
+        val m = repo.dao.plan(slot, "tacmounted")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return emptyList()
+        if (m.optLong("at") <= tp.at) return emptyList()
+        return runCatching { Parsers.tacticDiff(m, tj, f[K.REFEREE]?.value) }.getOrDefault(emptyList())
     }
 
     private fun dismissKey(t: String) = "hint_x_" + t.hashCode()
