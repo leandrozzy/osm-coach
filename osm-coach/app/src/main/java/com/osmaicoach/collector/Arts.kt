@@ -358,6 +358,17 @@ object Arts {
             goalLines.add((g.min?.let { "$it' " } ?: "") + g.who + (if (tag.isNotEmpty()) " ($tag)" else ""))
             goalFacts.add((g.min?.let { "$it' " } ?: "") + (if (g.who == "autor não lido") "gol (autor desconhecido: não cite nome)" else "gol de ${g.who}") + (if (tag.isNotEmpty()) " ($tag)" else ""))
         }
+        // gol do placar que o relatório não trouxe: aparece como gol SEM autor/minuto (o placar é o dado confiável; nada é inventado)
+        var unread = 0
+        if (mineHome != null) for (ours in listOf(true, false)) {
+            val miss = (cap[ours] ?: 0) - used.getOrDefault(ours, 0)
+            val tag = if (ours) team else opp
+            repeat(miss.coerceAtLeast(0)) {
+                unread++
+                goalLines.add("gol de $tag (autor e minuto não lidos)")
+                goalFacts.add("gol ($tag) com autor e minuto DESCONHECIDOS: não cite nome nem minuto")
+            }
+        }
         val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
         val pos = num(f[K.LEAGUE_POS]?.value)
         val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
@@ -368,7 +379,8 @@ object Arts {
             "$team ${mine} x ${theirs} $opp ($resWord do $team${where?.let { " $it" } ?: ""})", roleFact, "rodada $round", comp?.takeIf { it.isNotBlank() }?.let { "competição: $it" },
             pos?.let { "$team ocupa o ${it}º lugar na liga" }, "campanha do $team: ${v}V ${e}E ${d}D",
             if (my != null && rv != null) "força do $team $my contra $rv do $opp" else null,
-            if (goalFacts.isNotEmpty()) "gols: " + goalFacts.joinToString("; ") else null
+            if (goalFacts.isNotEmpty()) "gols: " + goalFacts.joinToString("; ") else null,
+            if (unread > 0) "o placar tem $mine x $theirs: NUNCA escreva \"único gol\" nem diga que só um time marcou" else null
         ).joinToString(". ")
         val story = ArtsAi.matchStory(ctx, facts)
         val headline = story?.first ?: when (res) { "V" -> "$team vence o $opp por $mine a $theirs"; "D" -> "$team perde para o $opp por $theirs a $mine"; else -> "$team e $opp empatam em $mine a $theirs" }
