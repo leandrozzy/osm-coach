@@ -2009,6 +2009,9 @@ internal fun BrandBar() {
                 Row {
                     Text("OSM AI ", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Coach", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY)
+                    // versão instalada (CI: 5.0.<nº da execução>): serve para conferir se o APK é o mais novo
+                    val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty() }
+                    if (ver.isNotBlank()) Text("  v$ver", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.align(Alignment.Bottom).padding(bottom = 3.dp))
                 }
                 Text("Assistente tático e analítico para o OSM", fontSize = 12.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
