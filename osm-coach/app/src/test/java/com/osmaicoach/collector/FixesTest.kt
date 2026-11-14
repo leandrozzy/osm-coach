@@ -101,6 +101,17 @@ class FixesTest {
         assertEquals(listOf("44' (visitante) gol de McNeil (assistência: Comesaña)", "56' (casa) gol de D. Ouattara (assistência: Lukić)"), ev)
     }
 
+    @Test fun secondHalfFrameWithoutFirstHalfIsResultAndNeighborDoesNotSteal() {
+        val L = listOf(
+            Fx.line("Segunda parte", 0.5f, 0.30f, 0.1f),
+            Fx.line("48'", 0.5f, 0.40f, 0.03f), Fx.line("9. Cartão Rival", 0.93f, 0.39f, 0.08f), Fx.line("Falta dura", 0.92f, 0.43f, 0.1f),
+            Fx.line("56'", 0.5f, 0.48f, 0.03f), Fx.line("7. D. Ouattara", 0.07f, 0.47f, 0.08f), Fx.line("Assistência: Lukić", 0.07f, 0.51f, 0.1f))
+        val o = Fx.ocr(*L.toTypedArray())
+        org.junit.Assert.assertTrue(Parsers.isMatchResult(o))
+        val ev = Parsers.matchResult(o, null).matchReport!!.events
+        org.junit.Assert.assertTrue(ev.toString(), ev.contains("56' (casa) gol de D. Ouattara (assistência: Lukić)"))
+    }
+
     @Test fun ballIconWithoutTextStillCountsGoalWithoutAuthor() {
         val w = 1000; val h = 400
         val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }

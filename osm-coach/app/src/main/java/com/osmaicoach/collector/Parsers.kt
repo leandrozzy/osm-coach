@@ -818,6 +818,11 @@ object Parsers {
         val t = Txt.norm(o.fullText)
         if (t.contains("estatisticas do jogo") || t.contains("homem do jogo") || t.contains("zonas de acao")) return true
         if (t.contains("primeira parte") && t.contains("segunda parte")) return true
+        // quadro rolado só com UMA das partes (o 2º tempo sem "Primeira parte" caía em OTHER_OSM e o gol nunca era lido)
+        if (t.contains("segunda parte") || t.contains("primeira parte")) {
+            val mins = o.lines.count { it.xc in 0.42f..0.58f && RX_MINUTE.find(it.text.trim()) != null }
+            if (mins >= 1) return true
+        }
         // Topo do relatório (Jornada N, placar no centro, botão Rever, dicas): é aqui que estão os times e a
         // rodada que dizem de qual slot é o resultado. Antes era descartado por conter "Jornada".
         val scoreCenter = o.lines.any { it.xc in 0.40f..0.60f && it.yc in 0.12f..0.40f && RX_SCORE.find(it.text.trim()) != null }
@@ -911,7 +916,12 @@ object Parsers {
         for (mn in o.lines) {
             val mm = RX_MINUTE.find(mn.text.trim()) ?: continue
             if (mn.xc !in 0.42f..0.58f) continue
-            val band = o.lines.filter { it !== mn && abs(it.yc - mn.yc) <= 0.045f && it.xc !in 0.42f..0.58f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
+            // só as linhas MAIS PERTO deste minuto que de outro (evento vizinho não entra) e do mesmo lado da mais próxima
+            val others = o.lines.filter { it !== mn && it.xc in 0.42f..0.58f && RX_MINUTE.find(it.text.trim()) != null }
+            val cand = o.lines.filter { it !== mn && abs(it.yc - mn.yc) <= 0.045f && it.xc !in 0.42f..0.58f && Txt.letters(it.text) >= 2 &&
+                others.none { m -> abs(it.yc - m.yc) < abs(it.yc - mn.yc) } }
+            val near = cand.minByOrNull { abs(it.yc - mn.yc) } ?: continue
+            val band = cand.filter { (it.xc < 0.5f) == (near.xc < 0.5f) }.sortedBy { it.yc }
             if (band.isEmpty()) continue
             val side = if (band[0].xc < 0.5f) "casa" else "visitante"
             val l1 = band[0].text.trim()
