@@ -330,4 +330,90 @@ internal object ArtsDraw {
         text(c, footer, w / 2f, bar.bottom - 14f, 31f, Color.WHITE, maxw = w - 100f, align = 'c', skew = 0f, scale = 0.92f)
         return out
     }
+
+    /**
+     * Capa de jornal pós-jogo (1600×1120): manchete e texto escritos pela IA com os fatos do jogo, foto da cena (IA, fictícia), placar com os dois escudos
+     * (quem joga em casa à esquerda), gols lidos e rodapé. Placar, escudos, nomes dos gols e rodapé vêm dos dados lidos.
+     */
+    fun matchNews(
+        th: Theme, crest: Bitmap?, paper: String, dateLine: String, headline: String, sub: String, body: List<String>, photo: Bitmap?,
+        leftCrest: Bitmap?, rightCrest: Bitmap?, leftName: String, rightName: String, score: String, goals: List<String>, footer: String
+    ): Bitmap {
+        val w = 1600f; val h = 1120f
+        val out = Bitmap.createBitmap(w.toInt(), h.toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val ink = shade(th.bg, 0.95f).let { Color.rgb(min(255, Color.red(it)), min(255, Color.green(it) + 12), min(255, Color.blue(it) + 30)) }
+        c.drawColor(argb(255, 243, 240, 232))
+        c.drawRect(0f, 0f, w, h, P(shader = RadialGradient(w / 2f, h / 2f, w * 0.75f, intArrayOf(white(0), argb(70, 150, 130, 100)), floatArrayOf(0.6f, 1f), Shader.TileMode.CLAMP)))
+        val rnd = java.util.Random(11)
+        for (i in 0 until 900) c.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 1f + rnd.nextFloat() * 1.5f, P(color = argb(10 + rnd.nextInt(14), 90, 70, 40)))
+        // título do jornal
+        val tp = txtPaint(1f, true, 0f, 0.72f)
+        var ts = 150f; tp.textSize = ts
+        while (tp.measureText(paper) > 800f && ts > 40f) { ts -= 4f; tp.textSize = ts }
+        tp.color = ink; c.drawText(paper, 56f, 140f, tp)
+        c.drawLine(870f, 40f, 870f, 150f, P(color = argb(120, 60, 60, 60), stroke = 2f))
+        ring(c, 960f, 92f, crest, th, 66f)
+        c.drawLine(1050f, 40f, 1050f, 150f, P(color = argb(120, 60, 60, 60), stroke = 2f))
+        text(c, dateLine, 1070f, 80f, 22f, argb(255, 30, 30, 30), maxw = 500f, skew = 0f, scale = 0.9f)
+        text(c, "EDIÇÃO PÓS-JOGO", 1070f, 112f, 22f, ink, maxw = 500f, skew = 0f, scale = 0.9f)
+        c.drawLine(40f, 168f, w - 40f, 168f, P(color = ink, stroke = 3f))
+        // manchete (até 2 linhas) e linha fina
+        val hp = txtPaint(88f, true, 0f, 0.74f); hp.color = ink
+        var y = 252f
+        val hl = wrap(headline.uppercase(), hp, w - 120f).take(2)
+        for (ln in hl) { c.drawText(ln, (w - hp.measureText(ln)) / 2f, y, hp); y += 90f }
+        val sp = txtPaint(34f, true, 0f, 0.88f); sp.color = argb(255, 25, 25, 25)
+        y += -50f
+        for (ln in wrap(sub, sp, w - 240f).take(2)) { c.drawText(ln, (w - sp.measureText(ln)) / 2f, y, sp); y += 40f }
+        val top = max(y + 10f, 400f)
+        // foto (cena) à esquerda
+        val pr = RectF(50f, top, 620f, top + 300f)
+        c.drawRect(RectF(pr.left - 3f, pr.top - 3f, pr.right + 3f, pr.bottom + 3f), P(color = ink))
+        if (photo != null) {
+            val sw = photo.width.toFloat(); val sh = sw * pr.height() / pr.width()
+            val sy = ((photo.height - sh) * 0.3f).coerceAtLeast(0f)
+            c.drawBitmap(photo, android.graphics.Rect(0, sy.toInt(), photo.width, min(photo.height, (sy + sh).toInt())), pr, P())
+        } else c.drawRect(pr, P(color = argb(255, 40, 50, 70)))
+        val cp = txtPaint(17f, false, 0.1f, 1f); cp.color = argb(255, 90, 80, 70)
+        c.drawText("Imagem ilustrativa gerada por IA", pr.left, pr.bottom + 22f, cp)
+        // placar com os dois escudos
+        val by = pr.bottom + 40f
+        val box = RectF(50f, by, 620f, h - 80f)
+        c.drawRoundRect(box, 10f, 10f, P(color = ink))
+        val mid = (box.top + box.bottom) / 2f
+        ring(c, 140f, mid - 14f, leftCrest, th, 56f); ring(c, 530f, mid - 14f, rightCrest, th, 56f)
+        text(c, score, 335f, mid + 22f, 92f, Color.WHITE, maxw = 190f, align = 'c', skew = 0f, scale = 0.9f)
+        text(c, leftName.uppercase(), 140f, box.bottom - 12f, 20f, Color.WHITE, maxw = 170f, align = 'c', skew = 0f, scale = 0.85f)
+        text(c, rightName.uppercase(), 530f, box.bottom - 12f, 20f, Color.WHITE, maxw = 170f, align = 'c', skew = 0f, scale = 0.85f)
+        // texto da notícia em 2 colunas
+        val bp = txtPaint(27f, false, 0f, 0.95f); bp.color = argb(255, 22, 22, 22)
+        val colW = 430f; val x1 = 670f; val x2 = 1120f
+        val lines = ArrayList<String>()
+        for ((i, para) in body.withIndex()) { lines.addAll(wrap(para, bp, colW)); if (i < body.lastIndex) lines.add("") }
+        val maxLines = 14
+        val perCol = minOf(maxLines, (lines.size + 1) / 2)
+        var ly = top + 28f
+        for ((i, ln) in lines.take(perCol * 2).withIndex()) {
+            val col = i / perCol; val row = i % perCol
+            c.drawText(ln, if (col == 0) x1 else x2, ly + row * 36f, bp)
+        }
+        c.drawLine(1105f, top, 1105f, top + perCol * 36f + 10f, P(color = argb(100, 60, 60, 60), stroke = 2f))
+        // gols (lidos do relatório do jogo)
+        if (goals.isNotEmpty()) {
+            val gy = h - 190f
+            c.drawLine(660f, gy - 26f, w - 50f, gy - 26f, P(color = ink, stroke = 2f))
+            val gh = txtPaint(26f, true, 0f, 0.85f); gh.color = ink
+            c.drawText("GOLS DO JOGO", 670f, gy, gh)
+            val gp = txtPaint(23f, false, 0f, 0.95f); gp.color = argb(255, 25, 25, 25)
+            goals.take(8).forEachIndexed { i, g ->
+                val col = i / 4; val row = i % 4
+                c.drawText(g, if (col == 0) 670f else 1120f, gy + 32f + row * 30f, gp)
+            }
+        }
+        val bar = RectF(40f, h - 66f, w - 40f, h - 18f)
+        c.drawRoundRect(bar, 8f, 8f, P(color = ink))
+        text(c, footer, w / 2f, bar.bottom - 14f, 31f, Color.WHITE, maxw = w - 100f, align = 'c', skew = 0f, scale = 0.92f)
+        return out
+    }
 }

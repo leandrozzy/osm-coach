@@ -155,6 +155,8 @@ internal fun ArtsTab() {
     var preview by remember { mutableStateOf<Arts.Item?>(null) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
+    // o aviso aparece no topo da página, fora da vista de quem tocou num botão lá embaixo: repete como Toast
+    LaunchedEffect(msg) { msg?.let { runCatching { android.widget.Toast.makeText(ctx, it, android.widget.Toast.LENGTH_LONG).show() } } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
         PageTitle("🎨", "Artes", "${d.items.size} imagens")
         Text(
@@ -168,7 +170,7 @@ internal fun ArtsTab() {
             busy = true; msg = null
             scope.launch {
                 val n = withContext(Dispatchers.IO) { runCatching { Arts.auto(ctx) }.getOrDefault(0) }
-                msg = if (n > 0) "Criei $n arte(s) nova(s)." else (ArtsAi.lastError ?: "Nada novo para criar. Use \"Criar uma arte\" abaixo para escolher um evento.")
+                msg = if (n > 0) "Criei $n arte(s) nova(s)." else (ArtsAi.lastError ?: "Nenhum evento NOVO nos slots ligados (o que já foi visto não se repete). Use \"Criar\" na lista de cada slot para escolher um evento.")
                 busy = false
             }
         }

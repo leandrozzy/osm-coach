@@ -176,6 +176,29 @@ object ArtsAi {
         return if (t != null && t.length in 40..380 && !t.contains("\n")) t else fallback
     }
 
+
+    /**
+     * Notícia do jogo para a capa de jornal pós-jogo: a IA de texto escreve manchete, linha fina e 2 parágrafos SÓ com os [facts] (placar, rival, rodada, gols lidos,
+     * forças, posição). Devolve null se a IA não respondeu direito (quem chama usa um texto montado só com os mesmos fatos).
+     */
+    suspend fun matchStory(ctx: Context, facts: String): Triple<String, String, List<String>>? {
+        val q = "Você é redator esportivo de um jornal brasileiro. Escreva a notícia do jogo abaixo, em português do Brasil, estilo de capa de jornal esportivo. " +
+            "Use SOMENTE estes fatos: $facts. Não invente nomes, números, minutos, lances, declarações nem fatos além destes; se faltar informação, escreva de forma geral. " +
+            "Responda APENAS um JSON: {\"headline\":\"manchete forte de até 70 caracteres\",\"sub\":\"linha fina de até 140 caracteres\",\"body\":[\"parágrafo 1 de até 55 palavras\",\"parágrafo 2 de até 55 palavras\"]}"
+        val j = AiClient.parseJson(askText(ctx, q)) ?: return null
+        val h = j.optString("headline").trim(); val sub = j.optString("sub").trim()
+        val arr = j.optJSONArray("body") ?: return null
+        val body = (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.length >= 20 }.take(3)
+        return if (h.length in 8..110 && sub.length >= 10 && body.isNotEmpty()) Triple(h, sub.take(200), body) else null
+    }
+
+    /** Cena do jornal pós-jogo (torcida/jogadores), conforme o resultado. */
+    fun matchScenePrompt(result: String, colors: String): String = when (result) {
+        "V" -> "$STYLE. Fictional football players and fans celebrating a victory in a night stadium, arms raised, $colors flares and confetti, joyful atmosphere. The bottom third of the frame is dark smoke"
+        "D" -> "$STYLE. A fictional football player kneeling on the pitch dejected after a defeat, hands on face, empty stands behind, night stadium, cold blue light, moody atmosphere. The bottom third of the frame is dark smoke"
+        else -> "$STYLE. Two lines of fictional football players shaking hands on the pitch after a draw, night stadium, floodlights, tense calm atmosphere, $colors tones. The bottom third of the frame is dark smoke"
+    }
+
     // ------------------------------------------------------------------ gerador de imagem (Pollinations)
     private fun url(prompt: String, seed: Int): String =
         "https://image.pollinations.ai/prompt/" + URLEncoder.encode(prompt, "UTF-8").replace("+", "%20") +

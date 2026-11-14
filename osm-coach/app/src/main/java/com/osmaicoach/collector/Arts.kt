@@ -141,6 +141,7 @@ object Arts {
             }
             val recent = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
             if (recent.isNotEmpty()) out.add(Cand("news|$slot|${recent.first().at}", slot, "NEWS", "Capa de jornal: " + recent.joinToString(", ") { it.name }, recent.first().at, auto = false))
+            if (last != null && last.round != null) out.add(Cand("post|$slot|${last.round}", slot, "POST", "Jornal do jogo: J${last.round} ${last.scoreMine ?: "?"}×${last.scoreOpp ?: "?"} vs ${last.opponent.orEmpty()}", last.updatedAt))
             if (last != null && last.result == "V") {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
@@ -314,6 +315,67 @@ object Arts {
         return out
     }
 
+
+    /** Jornal pós-jogo: IA escreve a notícia com os fatos lidos (placar, rival, gols, forças, posição); a imagem e os números são do app. */
+    private suspend fun postNews(ctx: Context, repo: Repo, c: Cand, f: Map<String, StoredField>, team: String, comp: String?, crest: Bitmap?, th: ArtsDraw.Theme, colors: String, ms: List<MatchEntity>, seed: Int): Bitmap? {
+        val slot = c.slot
+        val round = c.id.split("|").getOrNull(2)?.toIntOrNull()
+        val m = ms.firstOrNull { it.round == round } ?: return null
+        val opp = m.opponent?.takeIf { it.isNotBlank() } ?: return null
+        val mine = m.scoreMine ?: return null; val theirs = m.scoreOpp ?: return null
+        val res = m.result ?: return null
+        val oppCrest = bmp(CrestWeb.find(ctx.filesDir, opp) ?: CrestCut.find(ctx.filesDir, opp))
+        val j = repo.dao.plan(slot, "mr_R$round")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val mineHome = j?.takeIf { it.has("mineHome") }?.optBoolean("mineHome") ?: m.home
+        // gols lidos do relatório: "23' (casa) gol de X (assistência: Y)"
+        val goalLines = ArrayList<String>()
+        val goalFacts = ArrayList<String>()
+        val evs = j?.optJSONArray("events")
+        if (evs != null) for (i in 0 until evs.length()) {
+            val e = evs.optString(i)
+            if (!e.contains(" gol de ")) continue
+            val who = e.substringAfter(" gol de ").substringBefore(" (").trim()
+            if (who.isBlank()) continue
+            val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(e)?.groupValues?.get(1)
+            val homeSide = e.contains("(casa)")
+            val ours = if (mineHome == null) null else (homeSide == mineHome)
+            val tag = when (ours) { true -> team; false -> opp; else -> "" }
+            goalLines.add((min?.let { "$it' " } ?: "") + who + (if (tag.isNotEmpty()) " ($tag)" else ""))
+            goalFacts.add((min?.let { "$it' " } ?: "") + "gol de $who" + (if (tag.isNotEmpty()) " ($tag)" else ""))
+        }
+        val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
+        val pos = num(f[K.LEAGUE_POS]?.value)
+        val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
+        val resWord = when (res) { "V" -> "vitória"; "E" -> "empate"; else -> "derrota" }
+        val where = when (mineHome) { true -> "em casa"; false -> "fora de casa"; else -> null }
+        val facts = listOfNotNull(
+            "$team ${mine} x ${theirs} $opp ($resWord do $team${where?.let { " $it" } ?: ""})", "rodada $round", comp?.takeIf { it.isNotBlank() }?.let { "competição: $it" },
+            pos?.let { "$team ocupa o ${it}º lugar na liga" }, "campanha do $team: ${v}V ${e}E ${d}D",
+            if (my != null && rv != null) "força do $team $my contra $rv do $opp" else null,
+            if (goalFacts.isNotEmpty()) "gols: " + goalFacts.joinToString("; ") else null
+        ).joinToString(". ")
+        val story = ArtsAi.matchStory(ctx, facts)
+        val headline = story?.first ?: when (res) { "V" -> "$team vence o $opp por $mine a $theirs"; "D" -> "$team perde para o $opp por $theirs a $mine"; else -> "$team e $opp empatam em $mine a $theirs" }
+        val sub = story?.second ?: "Pela rodada $round" + (comp?.let { " do $it" } ?: "") + (pos?.let { ", o time ocupa o ${it}º lugar" } ?: "") + "."
+        val body = story?.third ?: listOf(
+            "O $team ${when (res) { "V" -> "venceu"; "D" -> "perdeu"; else -> "empatou" }} com o $opp por $mine a $theirs${where?.let { " $it" } ?: ""}, pela rodada $round." +
+                (if (goalFacts.isNotEmpty()) " Gols: " + goalFacts.joinToString(", ") + "." else ""),
+            "A campanha do time na competição é de ${v} vitória(s), ${e} empate(s) e ${d} derrota(s)" + (if (my != null && rv != null) ", com força $my contra $rv do adversário no confronto." else ".")
+        )
+        val photo = ArtsAi.scene(ArtsAi.matchScenePrompt(res, colors), seed)
+        val loc = java.util.Locale("pt", "BR")
+        val date = java.text.SimpleDateFormat("EEEE, d 'de' MMMM 'de' yyyy", loc).format(java.util.Date(m.updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis())).uppercase(loc)
+        val awayM = mineHome == false
+        val out = ArtsDraw.matchNews(
+            th, crest, "JORNAL DO " + team.uppercase(), date, headline, sub, body, photo,
+            if (awayM) oppCrest else crest, if (awayM) crest else oppCrest, if (awayM) opp else team, if (awayM) team else opp,
+            if (awayM) "$theirs × $mine" else "$mine × $theirs", goalLines,
+            listOfNotNull("RODADA $round", comp?.uppercase(), pos?.let { "${it}º LUGAR" }, "CAMPANHA ${v}V ${e}E ${d}D").joinToString("  •  ")
+        )
+        photo?.recycle()
+        return out
+    }
+
     private suspend fun draw(ctx: Context, repo: Repo, c: Cand, reroll: Int): Bitmap? {
         val slot = c.slot
         val f = repo.fieldMap(slot)
@@ -346,6 +408,7 @@ object Arts {
                 plate = p.strength?.let { "FORÇA" to it.toString() }
                 foot = if (c.kind == "BUY") "Bem-vindo ao $team!" else "$team • orgulho do clube"
             }
+            "POST" -> return postNews(ctx, repo, c, f, team, comp, crest, th, colors, ms, seed)
             "NEWS" -> return news(ctx, repo, c, f, team, comp, crest, th, colors, ms, seed)
             "GOLEADA" -> {
                 val m = last ?: return null
