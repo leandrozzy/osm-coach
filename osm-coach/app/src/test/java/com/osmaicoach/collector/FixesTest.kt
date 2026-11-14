@@ -89,6 +89,18 @@ class FixesTest {
         assertNull(PixelProbe.eventIcon(img, true, 0.9f))   // linha sem ícone
     }
 
+    @Test fun resultEventsReadBothSidesLikeUserPrint() {
+        val L = ArrayList<OcrLine>()
+        L += Fx.line("Primeira parte", 0.5f, 0.25f, 0.1f)
+        L += Fx.line("44'", 0.5f, 0.333f, 0.03f)
+        L += Fx.line("18. McNeil", 0.93f, 0.31f, 0.08f); L += Fx.line("Assistência: Comesaña", 0.92f, 0.357f, 0.12f)
+        L += Fx.line("Segunda parte", 0.5f, 0.415f, 0.1f)
+        L += Fx.line("7. D. Ouattara", 0.07f, 0.47f, 0.08f); L += Fx.line("56'", 0.5f, 0.497f, 0.03f); L += Fx.line("Assistência: Lukić", 0.07f, 0.52f, 0.1f)
+        val ex = Parsers.matchResult(Fx.ocr(*L.toTypedArray()), null)
+        val ev = ex.matchReport!!.events
+        assertEquals(listOf("44' (visitante) gol de McNeil (assistência: Comesaña)", "56' (casa) gol de D. Ouattara (assistência: Lukić)"), ev)
+    }
+
     @Test fun squadRowClippedUnderTopBarIsIgnored() {
         val rows = ArrayList<OcrLine>()
         fun row(y: Float, name: String, age: String, pos: String, a: String, d: String, m: String, v: String) {

@@ -346,7 +346,18 @@ class FramePipeline private constructor(private val ctx: Context) {
                     val st = j.optJSONObject("stats")?.length() ?: 0
                     val rt = (j.optJSONArray("rh")?.length() ?: 0) + (j.optJSONArray("ra")?.length() ?: 0)
                     val ev = j.optJSONArray("events")?.length() ?: 0
-                    val lacks = buildList { if (st < 7) add("estatísticas (até Zonas de ação)"); if (rt == 0) add("notas dos jogadores") }
+                    // gols lidos (ícone de bola ou "Assistência") contra o placar: se faltar, o jornal não pode mostrar o gol (nada é inventado)
+                    val evArr = j.optJSONArray("events")
+                    val goalsRead = (0 until (evArr?.length() ?: 0)).map { evArr!!.optString(it) }.filter { it.contains(" gol de ") }
+                        .distinctBy { Txt.key(it) }.size
+                    val goalsScore = j.optInt("sh") + j.optInt("sa")
+                    val lacks = buildList {
+                        if (st < 7) add("estatísticas (até Zonas de ação)"); if (rt == 0) add("notas dos jogadores")
+                        if (goalsRead < goalsScore) {
+                            add("gols (li $goalsRead de $goalsScore: role a lista de eventos devagar até cada gol aparecer inteiro, sem botões do app por cima)")
+                            Diag.log("S$slot J$rd: placar ${j.optInt("sh")}-${j.optInt("sa")} mas só $goalsRead gol(s) lido(s); eventos: " + (0 until (evArr?.length() ?: 0)).joinToString(" | ") { evArr!!.optString(it) })
+                        }
+                    }
                     (if (complete) "✅" else "⚠") + " S$slot: Resultado da J$rd: ${j.optInt("sh")}-${j.optInt("sa")} • $ev eventos • $st estatísticas • $rt notas." +
                         (if (lacks.isEmpty()) (if (complete) " Completo: o aprendizado foi atualizado." else tail) else " Falta: " + lacks.joinToString(", ") + ".")
                 }
