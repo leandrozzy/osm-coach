@@ -1692,8 +1692,9 @@ class Repo(private val ctx: Context) {
         mergeRatings("ra", rep.ratingsAway)
         val evs = j.optJSONArray("events") ?: org.json.JSONArray()
         val seen = HashSet<String>()
-        for (i in 0 until evs.length()) seen.add(evs.optString(i))
-        for (e in rep.events) if (seen.add(e)) {
+        for (i in 0 until evs.length()) seen.add(Txt.key(evs.optString(i)))
+        // o OCR lê o mesmo lance com grafias diferentes ("MCNeil"/"McNeil"): compara sem caixa/acento, senão o gol vira dois
+        for (e in rep.events) if (seen.add(Txt.key(e))) {
             evs.put(e)
             changed++
         }

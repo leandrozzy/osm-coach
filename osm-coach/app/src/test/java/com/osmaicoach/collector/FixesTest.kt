@@ -75,6 +75,10 @@ class FixesTest {
         assertEquals(listOf(90, 89), ex.players.map { it.strength })
     }
 
+    @Test fun sameGoalReadWithDifferentCaseHasSameKey() {
+        assertEquals(Txt.key("44' MCNeil (casa) gol de MCNeil"), Txt.key("44' McNeil (casa) gol de McNeil"))
+    }
+
     @Test fun squadRowClippedUnderTopBarIsIgnored() {
         val rows = ArrayList<OcrLine>()
         fun row(y: Float, name: String, age: String, pos: String, a: String, d: String, m: String, v: String) {

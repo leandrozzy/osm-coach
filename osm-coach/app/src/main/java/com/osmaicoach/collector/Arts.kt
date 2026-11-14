@@ -330,6 +330,8 @@ object Arts {
         // gols lidos do relatório: "23' (casa) gol de X (assistência: Y)"
         val goalLines = ArrayList<String>()
         val goalFacts = ArrayList<String>()
+        data class G(val min: String?, val who: String, val ours: Boolean?)
+        val rawGoals = ArrayList<G>()
         val evs = j?.optJSONArray("events")
         if (evs != null) for (i in 0 until evs.length()) {
             val e = evs.optString(i)
@@ -339,9 +341,20 @@ object Arts {
             val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(e)?.groupValues?.get(1)
             val homeSide = e.contains("(casa)")
             val ours = if (mineHome == null) null else (homeSide == mineHome)
-            val tag = when (ours) { true -> team; false -> opp; else -> "" }
-            goalLines.add((min?.let { "$it' " } ?: "") + who + (if (tag.isNotEmpty()) " ($tag)" else ""))
-            goalFacts.add((min?.let { "$it' " } ?: "") + "gol de $who" + (if (tag.isNotEmpty()) " ($tag)" else ""))
+            // o mesmo gol lido duas vezes pelo OCR (mesmo minuto e lado, nome parecido, ex. "MCNeil"/"McNeil") conta UMA vez
+            if (rawGoals.any { it.min == min && it.ours == ours && Txt.sim(Txt.key(it.who), Txt.key(who)) >= 0.6f }) continue
+            rawGoals.add(G(min, who, ours))
+        }
+        // nunca mais gols do que o placar: por lado, só os primeiros (o placar é o dado confiável)
+        val cap = mapOf<Boolean?, Int>(true to mine, false to theirs)
+        val used = HashMap<Boolean?, Int>()
+        for (g in rawGoals) {
+            val n = used.getOrDefault(g.ours, 0)
+            if (g.ours != null && n >= (cap[g.ours] ?: 0)) continue
+            used[g.ours] = n + 1
+            val tag = when (g.ours) { true -> team; false -> opp; else -> "" }
+            goalLines.add((g.min?.let { "$it' " } ?: "") + g.who + (if (tag.isNotEmpty()) " ($tag)" else ""))
+            goalFacts.add((g.min?.let { "$it' " } ?: "") + "gol de ${g.who}" + (if (tag.isNotEmpty()) " ($tag)" else ""))
         }
         val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
         val pos = num(f[K.LEAGUE_POS]?.value)
