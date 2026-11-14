@@ -224,6 +224,8 @@ object PixelProbe {
         val y = frac(img, x0, x1, y0, y1, GOLD)
         if (g >= 0.03f && r >= 0.02f) return "troca"
         if (y >= 0.10f && r < 0.03f) return "amarelo"
+        // bola de gol: preto e branco, sem cor viva (medido no print de 14/11: bola 4–5% de pixels escuros; troca/cartão/linha vazia ≤1,5%)
+        if (r < 0.03f && g < 0.03f && y < 0.05f && frac(img, x0, x1, y0, y1) { _, _, v -> v < 0.35f } >= 0.025f) return "bola"
         if (r < 0.08f) return null
         // preenchimento da caixa do vermelho
         val xa = (x0 * img.w).toInt(); val xb = (x1 * img.w).toInt().coerceAtMost(img.w)

@@ -923,6 +923,11 @@ object Parsers {
                 icon == "lesao" || (icon == null && injuryText) -> "lesão de $p1" + (l2?.let { " (${it.trim('.', '…')})" } ?: "")
                 icon == "amarelo" -> "cartão amarelo de $p1"
                 icon == "vermelho" -> "cartão vermelho de $p1"
+                // ícone de bola = gol (com ou sem assistência); só o ícone prova gol, texto sem ícone não
+                icon == "bola" -> {
+                    val a = if (l2 != null && Txt.norm(l2).startsWith("assist")) l2.substringAfter(':', "").trim().trim('.', '…').trim() else ""
+                    "gol de $p1" + (if (a.length >= 3) " (assistência: $a)" else "")
+                }
                 l2 != null && Txt.norm(l2).startsWith("assist") -> {
                     val a = l2.substringAfter(':', "").trim().trim('.', '…').trim()
                     "gol de $p1" + (if (a.length >= 3) " (assistência: $a)" else " (com assistência)")

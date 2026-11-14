@@ -345,23 +345,7 @@ object Arts {
             if (rawGoals.any { it.min == min && it.ours == ours && Txt.sim(Txt.key(it.who), Txt.key(who)) >= 0.6f }) continue
             rawGoals.add(G(min, who, ours))
         }
-        // gol SEM assistência vem do parser como "lance de X (gol sem assistência ou cartão)" (sem ícone de bola): só entra como gol quando falta
-        // exatamente esse número de gols do lado no placar (senão pode ser cartão e não afirmo nada)
-        val loose = ArrayList<G>()
-        if (evs != null) for (i in 0 until evs.length()) {
-            val e = evs.optString(i)
-            if (!e.contains("gol sem assistência")) continue
-            val who = e.substringAfter(" lance de ").substringBefore(" (").trim()
-            if (who.isBlank()) continue
-            val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(e)?.groupValues?.get(1)
-            val ours = if (mineHome == null) null else (e.contains("(casa)") == mineHome)
-            if (ours != null && loose.none { it.min == min && it.ours == ours }) loose.add(G(min, who, ours))
-        }
-        for (side in listOf(true, false)) {
-            val missing = (if (side) mine else theirs) - rawGoals.count { it.ours == side }
-            val cands = loose.filter { it.ours == side && rawGoals.none { g -> g.min == it.min && g.ours == side } }
-            if (missing > 0 && cands.size == missing) rawGoals.addAll(cands)
-        }
+        // só o ícone de bola prova gol (o "lance sem assistência" pode ser cartão: não entra)
         rawGoals.sortBy { it.min?.substringBefore('+')?.toIntOrNull() ?: 999 }
         // nunca mais gols do que o placar: por lado, só os primeiros (o placar é o dado confiável)
         val cap = mapOf<Boolean?, Int>(true to mine, false to theirs)

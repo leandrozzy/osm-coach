@@ -79,6 +79,16 @@ class FixesTest {
         assertEquals(Txt.key("44' MCNeil (casa) gol de MCNeil"), Txt.key("44' McNeil (casa) gol de McNeil"))
     }
 
+    @Test fun ballIconMakesGoalAndBlankRowIsNot() {
+        val w = 1000; val h = 400
+        val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }
+        // "bola": mancha preta (≈5% da caixa do ícone) na coluna esquerda da linha y=0,5
+        for (yy in 190 until 210) for (xx in 20 until 32) px[yy * w + xx] = 0xFF000000.toInt()
+        val img = PixelProbe.Img(w, h, px)
+        assertEquals("bola", PixelProbe.eventIcon(img, true, 0.5f))
+        assertNull(PixelProbe.eventIcon(img, true, 0.9f))   // linha sem ícone
+    }
+
     @Test fun squadRowClippedUnderTopBarIsIgnored() {
         val rows = ArrayList<OcrLine>()
         fun row(y: Float, name: String, age: String, pos: String, a: String, d: String, m: String, v: String) {
