@@ -348,7 +348,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                     val ev = j.optJSONArray("events")?.length() ?: 0
                     // gols lidos (ícone de bola ou "Assistência") contra o placar: se faltar, o jornal não pode mostrar o gol (nada é inventado)
                     val evArr = j.optJSONArray("events")
-                    val goalsRead = (0 until (evArr?.length() ?: 0)).map { evArr!!.optString(it) }.filter { it.contains(" gol de ") }
+                    val goalsRead = (0 until (evArr?.length() ?: 0)).map { evArr!!.optString(it) }.filter { it.contains(" gol de ") || it.contains(" gol (autor") }
                         .distinctBy { Txt.key(it) }.size
                     val goalsScore = j.optInt("sh") + j.optInt("sa")
                     val lacks = buildList {

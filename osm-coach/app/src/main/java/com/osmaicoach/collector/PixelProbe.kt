@@ -241,6 +241,33 @@ object PixelProbe {
         return if (n.toFloat() / box < 0.68f) "lesao" else "vermelho"
     }
 
+    /**
+     * Bolas de gol na coluna de ícones dos eventos do Resultado (lado esquerdo = casa, direito = visitante) entre [y0] e [y1]: centro y de cada bola.
+     * Independe do texto do OCR (medido no vídeo de 14/11: bola 4–5% de pixels escuros na coluna estreita; cartão, troca e fundo 0–1,2%).
+     */
+    fun ballRows(img: Img, left: Boolean, y0: Float, y1: Float): List<Float> {
+        val x0 = if (left) 0.010f else 0.958f
+        val x1 = x0 + 0.032f
+        val hits = ArrayList<Float>()
+        var yc = y0 + 0.02f
+        while (yc < y1 - 0.02f) {
+            val d = frac(img, x0, x1, yc - 0.032f, yc + 0.032f) { _, _, v -> v < 0.35f }
+            val g = frac(img, x0, x1, yc - 0.032f, yc + 0.032f, GREEN)
+            val r = frac(img, x0, x1, yc - 0.032f, yc + 0.032f, RED)
+            val y = frac(img, x0, x1, yc - 0.032f, yc + 0.032f, GOLD)
+            if (d >= 0.03f && g < 0.03f && r < 0.03f && y < 0.05f) hits.add(yc)
+            yc += 0.01f
+        }
+        val out = ArrayList<Float>()
+        var cur = ArrayList<Float>()
+        for (h in hits) {
+            if (cur.isNotEmpty() && h - cur.last() > 0.025f) { if (cur.size >= 2) out.add(cur.average().toFloat()); cur = ArrayList() }
+            cur.add(h)
+        }
+        if (cur.size >= 2) out.add(cur.average().toFloat())
+        return out
+    }
+
     /** Fração de pixels vermelhos na caixa (cartão vermelho do plantel). */
     fun redBox(img: Img, x0: Float, x1: Float, y0: Float, y1: Float): Float = frac(img, x0, x1, y0, y1, RED)
 

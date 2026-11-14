@@ -335,8 +335,8 @@ object Arts {
         val evs = j?.optJSONArray("events")
         if (evs != null) for (i in 0 until evs.length()) {
             val e = evs.optString(i)
-            if (!e.contains(" gol de ")) continue
-            val who = e.substringAfter(" gol de ").substringBefore(" (").trim()
+            if (!e.contains(" gol de ") && !e.contains(" gol (autor não lido)")) continue
+            val who = if (e.contains(" gol (autor não lido)")) "autor não lido" else e.substringAfter(" gol de ").substringBefore(" (").trim()
             if (who.isBlank()) continue
             val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(e)?.groupValues?.get(1)
             val homeSide = e.contains("(casa)")
@@ -356,7 +356,7 @@ object Arts {
             used[g.ours] = n + 1
             val tag = when (g.ours) { true -> team; false -> opp; else -> "" }
             goalLines.add((g.min?.let { "$it' " } ?: "") + g.who + (if (tag.isNotEmpty()) " ($tag)" else ""))
-            goalFacts.add((g.min?.let { "$it' " } ?: "") + "gol de ${g.who}" + (if (tag.isNotEmpty()) " ($tag)" else ""))
+            goalFacts.add((g.min?.let { "$it' " } ?: "") + (if (g.who == "autor não lido") "gol (autor desconhecido: não cite nome)" else "gol de ${g.who}") + (if (tag.isNotEmpty()) " ($tag)" else ""))
         }
         val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
         val pos = num(f[K.LEAGUE_POS]?.value)

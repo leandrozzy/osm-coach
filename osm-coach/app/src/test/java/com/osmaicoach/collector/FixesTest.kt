@@ -101,6 +101,15 @@ class FixesTest {
         assertEquals(listOf("44' (visitante) gol de McNeil (assistência: Comesaña)", "56' (casa) gol de D. Ouattara (assistência: Lukić)"), ev)
     }
 
+    @Test fun ballIconWithoutTextStillCountsGoalWithoutAuthor() {
+        val w = 1000; val h = 400
+        val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }
+        for (yy in 190 until 210) for (xx in 14 until 30) px[yy * w + xx] = 0xFF000000.toInt()   // bola à esquerda na linha do 56'
+        val L = listOf(Fx.line("Primeira parte", 0.5f, 0.4f, 0.1f), Fx.line("56'", 0.5f, 0.5f, 0.03f), Fx.line("Homem do jogo", 0.5f, 0.75f, 0.1f))
+        val ex = Parsers.matchResult(Fx.ocr(*L.toTypedArray()), PixelProbe.Img(w, h, px))
+        assertEquals(listOf("56' (casa) gol (autor não lido)"), ex.matchReport!!.events)
+    }
+
     @Test fun squadRowClippedUnderTopBarIsIgnored() {
         val rows = ArrayList<OcrLine>()
         fun row(y: Float, name: String, age: String, pos: String, a: String, d: String, m: String, v: String) {

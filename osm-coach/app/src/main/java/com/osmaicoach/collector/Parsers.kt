@@ -939,6 +939,21 @@ object Parsers {
             events.add("${mm.groupValues[1]}' ($side) $desc")
         }
 
+        // Rede de segurança pelo ÍCONE: bola de gol sem evento de texto na mesma linha (o OCR perdeu o nome/linha do jogador): registra o gol sem autor,
+        // com o minuto da linha. Só dentro da faixa dos eventos (entre "Primeira parte" e "Homem do jogo"/"Estatísticas").
+        if (img != null) {
+            val top = o.lines.firstOrNull { Txt.norm(it.text) == "primeira parte" }?.yc ?: 0.12f
+            val bottom = o.lines.firstOrNull { val n = Txt.norm(it.text); n == "homem do jogo" || n == "estatisticas do jogo" }?.yc ?: 0.97f
+            for (left in listOf(true, false)) {
+                val sideTxt = if (left) "casa" else "visitante"
+                for (by in PixelProbe.ballRows(img, left, top, bottom)) {
+                    val mn = o.lines.filter { RX_MINUTE.containsMatchIn(it.text.trim()) && it.xc in 0.42f..0.58f && abs(it.yc - by) <= 0.05f }.minByOrNull { abs(it.yc - by) } ?: continue
+                    val min = RX_MINUTE.find(mn.text.trim())!!.groupValues[1]
+                    if (events.none { it.startsWith("$min' ($sideTxt) gol") }) events.add("$min' ($sideTxt) gol (autor não lido)")
+                }
+            }
+        }
+
         // Notas dos jogadores: bolinhas à esquerda (time da casa) e à direita (visitante).
         val ratingsHome = ArrayList<Pair<String, Int>>()
         val ratingsAway = ArrayList<Pair<String, Int>>()
