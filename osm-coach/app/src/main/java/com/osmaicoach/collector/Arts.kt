@@ -192,14 +192,15 @@ object Arts {
         val now = System.currentTimeMillis()
         var made = 0
         var failed = false
+        var failStreak = 0
         loop@ for (slot in 1..4) {
             if (!slotOn(ctx, slot)) continue
             for (c in candidates(repo, slot)) {
                 if (c.id in seenSet) continue
                 if (!c.auto) { if (c.kind == "CAMP" || c.kind == "SEASON") seenSet.add(c.id); continue }
                 if (firstRun && now - c.at > 24 * 3600_000L) { seenSet.add(c.id); continue }
-                if (made >= 3) break@loop
-                if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; seenSet.add(c.id) } else { failed = true; break@loop }
+                // cria TUDO que está ativo (sem limite por vez); uma falha não interrompe as outras, 2 falhas seguidas (serviço fora) param
+                if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; failStreak = 0; seenSet.add(c.id) } else { failed = true; failStreak++; if (failStreak >= 2) break@loop }
             }
         }
         putSeen(repo, seenSet)

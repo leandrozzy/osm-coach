@@ -1599,10 +1599,13 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                 mountDiff = repo.dao.plan(slot, "tactic")?.let { tp -> runCatching { Hints.mountDiffs(repo, slot, tp, JSONObject(tp.json), f) }.getOrDefault(emptyList()) } ?: emptyList(),
                 readAges = Director.groupAgesMs(f, now),
                 // meu time: igual ao jogo (5 bolinhas do Pré-jogo) quando o Calendário está incompleto; Calendário em dia vale mais
-                myForm = if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
-                    ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }),
-                rivalForm = if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
-                    ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
+                // nunca mais bolinhas do que jogos disputados NESTA competição (liga nova com 1 jogo mostrava 3 bolinhas)
+                myForm = (if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
+                    ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }))
+                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) },
+                rivalForm = (if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
+                    ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value)
+                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) },
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,

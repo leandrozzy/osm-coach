@@ -41,6 +41,12 @@ object FormRead {
         }
     }
 
+    /** Corta as bolinhas ao nº de jogos já disputados na competição (rodadas jogadas ou resultados lidos, o maior). */
+    fun cap(form: String, matches: List<MatchEntity>, roundDone: Int?): String {
+        val played = maxOf(roundDone ?: 0, matches.count { it.result in listOf("V", "E", "D") })
+        return if (played <= 0) "" else form.takeLast(played)
+    }
+
     /** Rodadas jogadas que o calendário ainda não mostra (2 ou mais = leitura incompleta; 0 = em dia). */
     fun lag(matches: List<MatchEntity>, roundDone: Int?): Int {
         if (roundDone == null || roundDone < 2) return 0

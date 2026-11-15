@@ -112,6 +112,12 @@ class FixesTest {
         org.junit.Assert.assertTrue(ev.toString(), ev.contains("56' (casa) gol de D. Ouattara (assistência: Lukić)"))
     }
 
+    @Test fun formDotsAreCappedToGamesPlayed() {
+        org.junit.Assert.assertEquals("E", FormRead.cap("VVE", emptyList(), 1))
+        org.junit.Assert.assertEquals("", FormRead.cap("VVE", emptyList(), 0))
+        org.junit.Assert.assertEquals("VVE", FormRead.cap("VVE", emptyList(), 7))
+    }
+
     @Test fun ballIconWithoutTextStillCountsGoalWithoutAuthor() {
         val w = 1000; val h = 400
         val px = IntArray(w * h) { 0xFFFFFFFF.toInt() }

@@ -161,7 +161,7 @@ internal fun ArtsTab() {
         PageTitle("🎨", "Artes", "${d.items.size} imagens")
         Text(
             "Cartazes dos seus times: a cena (atleta fictício, estádio, taça) é gerada por uma IA gratuita (Pollinations, sem chave, precisa de internet; só o texto do pedido é enviado: " +
-                "cores do time e tipo de arte) e o app escreve por cima o nome, escudo, bandeira e números, sempre certos. Depois de Encerrar a leitura o app cria sozinho (até 3 por vez) " +
+                "cores do time e tipo de arte) e o app escreve por cima o nome, escudo, bandeira e números, sempre certos. Depois de Encerrar a leitura o app cria sozinho (todas as artes novas dos slots ligados) " +
                 "as de contratação, goleada, sequência de vitórias, liderança, título e objetivo, e também expectativa da temporada, craques, momento do time, dia de jogo e lado a lado. Escolha abaixo em quais slots criar sozinho. Slot sem liga não gera nada.",
             fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 8.dp)
         )

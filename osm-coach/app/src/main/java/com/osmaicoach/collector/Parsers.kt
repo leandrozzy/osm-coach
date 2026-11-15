@@ -952,14 +952,23 @@ object Parsers {
         // Rede de segurança pelo ÍCONE: bola de gol sem evento de texto na mesma linha (o OCR perdeu o nome/linha do jogador): registra o gol sem autor,
         // com o minuto da linha. Só dentro da faixa dos eventos (entre "Primeira parte" e "Homem do jogo"/"Estatísticas").
         if (img != null) {
-            val top = o.lines.firstOrNull { Txt.norm(it.text) == "primeira parte" }?.yc ?: 0.12f
-            val bottom = o.lines.firstOrNull { val n = Txt.norm(it.text); n == "homem do jogo" || n == "estatisticas do jogo" }?.yc ?: 0.97f
+            val partLines = o.lines.filter { val n = Txt.norm(it.text); n == "primeira parte" || n == "segunda parte" }
+            val top = partLines.minOfOrNull { it.yc } ?: 0.12f
+            val bottom = o.lines.filter { val n = Txt.norm(it.text); n == "homem do jogo" || n == "estatisticas do jogo" || n == "zonas de acao" || n == "notas" }.minOfOrNull { it.yc } ?: 0.97f
             for (left in listOf(true, false)) {
                 val sideTxt = if (left) "casa" else "visitante"
-                for (by in PixelProbe.ballRows(img, left, top, bottom)) {
-                    val mn = o.lines.filter { RX_MINUTE.containsMatchIn(it.text.trim()) && it.xc in 0.42f..0.58f && abs(it.yc - by) <= 0.05f }.minByOrNull { abs(it.yc - by) } ?: continue
+                val rows = PixelProbe.ballRows(img, left, top, bottom)
+                for (by in rows) {
+                    val mn = o.lines.filter { RX_MINUTE.containsMatchIn(it.text.trim()) && it.xc in 0.42f..0.58f && abs(it.yc - by) <= 0.05f }.minByOrNull { abs(it.yc - by) }
+                    if (mn == null) continue
                     val min = RX_MINUTE.find(mn.text.trim())!!.groupValues[1]
                     if (events.none { it.startsWith("$min' ($sideTxt) gol") }) events.add("$min' ($sideTxt) gol (autor não lido)")
+                }
+                // bola sem minuto lido (o OCR perdeu a linha do minuto): conta o gol do lado sem minuto, se ainda não há gol de texto suficiente
+                val noMin = rows.count { by -> o.lines.none { RX_MINUTE.containsMatchIn(it.text.trim()) && it.xc in 0.42f..0.58f && abs(it.yc - by) <= 0.05f } }
+                if (noMin > 0 && partLines.isNotEmpty()) {
+                    val have = events.count { it.contains("($sideTxt) gol") }
+                    if (have < rows.size) repeat(minOf(noMin, rows.size - have)) { events.add("?' ($sideTxt) gol (autor não lido)") }
                 }
             }
         }
