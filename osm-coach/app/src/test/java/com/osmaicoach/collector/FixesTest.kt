@@ -116,6 +116,8 @@ class FixesTest {
         org.junit.Assert.assertEquals("E", FormRead.cap("VVE", emptyList(), 1))
         org.junit.Assert.assertEquals("", FormRead.cap("VVE", emptyList(), 0))
         org.junit.Assert.assertEquals("VVE", FormRead.cap("VVE", emptyList(), 7))
+        org.junit.Assert.assertEquals("", FormRead.cap("D", emptyList(), 13, complete = true))
+        org.junit.Assert.assertEquals("D", FormRead.cap("D", emptyList(), 1, complete = true))
     }
 
     @Test fun ballIconWithoutTextStillCountsGoalWithoutAuthor() {

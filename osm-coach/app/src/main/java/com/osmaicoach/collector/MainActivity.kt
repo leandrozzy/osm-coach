@@ -1605,7 +1605,7 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                     ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) },
                 rivalForm = (if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
                     ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value)
-                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) },
+                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull(), complete = true) },
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
