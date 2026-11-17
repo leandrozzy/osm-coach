@@ -3203,6 +3203,7 @@ internal fun SlotSummaryTab(slot: Int, d: SlotData) {
         if (d.eve.isNotEmpty()) EveCard(d.eve)
         StrengthsAttention(d)
         CompareCard(d)
+        DirectorChat(slot, d)
         Panel { WinCard(d.win) }
     }
     LastGameCard(d)
@@ -3490,6 +3491,13 @@ internal fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onFlag: ()
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                 ) { Text("🎨 Criar arte deste jogador") }
+                var tool by remember { mutableStateOf(0) }
+                if (p.owner == "MY") {
+                    OutlinedButton(onClick = { tool = 1 }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("⚖ Comparar com outro jogador") }
+                    OutlinedButton(onClick = { tool = 2 }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("💰 Preço de venda") }
+                }
+                if (tool == 1) PlayerCompareDialog(slot, p) { tool = 0 }
+                if (tool == 2) PriceDialog(slot, p) { tool = 0 }
                 var newName by remember { mutableStateOf(p.name) }
                 Text("Leitura errada? Corrija o nome (vale nas próximas leituras):", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 12.dp))
                 OutlinedTextField(value = newName, onValueChange = { newName = it }, singleLine = true, modifier = Modifier.fillMaxWidth())

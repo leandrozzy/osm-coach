@@ -435,6 +435,7 @@ internal fun SlotLearning(slot: Int, d: SlotData) {
     Accuracy.of(Accuracy.parse(slot, d.logsAll.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }))?.let { AccuracyCard(it, "S$slot, todas as competições") }
     LearnedCard(d.learned)
     ImpactCard(slot, d)
+    VsLibraryCard()
     data class Row2(
         val kind: String, val round: Int, val formation: String, val style: String, val rival: String,
         val result: String?, val score: String, val human: Boolean?, val home: Boolean?

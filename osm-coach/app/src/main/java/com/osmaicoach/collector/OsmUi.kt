@@ -396,7 +396,7 @@ fun SectorPitch(attack: String?, mid: String?, def: String?, modifier: Modifier 
 
 /** Barra do jogo: trilho escuro, parte azul até o valor, bolinha branca e o número numa caixinha preta. */
 @Composable
-fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Modifier) {
+fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Modifier, band: IntRange? = null) {
     Column(modifier.fillMaxWidth().osmPanel().padding(horizontal = 12.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         OsmCaption(title, label)
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -408,6 +408,12 @@ fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Mod
                 val f = anim
                 val th = 3.dp.toPx()
                 drawLine(OsmColors.TRACK, Offset(0f, y), Offset(size.width, y), th, StrokeCap.Round)
+                // faixa que as fontes indicam para esta formação (só referência visual; o valor da tática não muda)
+                if (band != null) {
+                    val x0 = size.width * band.first / 100f; val x1 = size.width * band.last / 100f
+                    drawRoundRect(Color(0x883DDC84), Offset(x0, y - 7.dp.toPx()), Size((x1 - x0).coerceAtLeast(4.dp.toPx()), 14.dp.toPx()), CornerRadius(5.dp.toPx()))
+                    for (x in listOf(x0, x1)) drawLine(Color(0xFF3DDC84), Offset(x, y - 11.dp.toPx()), Offset(x, y + 11.dp.toPx()), 2.dp.toPx(), StrokeCap.Round)
+                }
                 drawLine(OsmColors.BLUE, Offset(0f, y), Offset(size.width * f, y), th, StrokeCap.Round)
                 val k = Offset(size.width * f, y)
                 drawCircle(Color(0x66000000), 8.dp.toPx(), k + Offset(1.5.dp.toPx(), 2.dp.toPx()))
@@ -418,6 +424,10 @@ fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Mod
                 Text("$value", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
+        if (band != null) Text(
+            if (value in band) "✓ dentro da faixa ${band.first}–${band.last} das fontes" else "faixa das fontes: ${band.first}–${band.last}",
+            fontSize = 11.5.sp, color = if (value in band) Color(0xFF3DDC84) else Color(0xFF9FB4D3), modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
 

@@ -415,6 +415,9 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
     }
     TacticHero(d)
     WhyCard(slot, d)
+    AuditCard(slot, d)
+    PlanBCard(slot, d)
+    GameContextCard(d)
     if (d.rivalChanged.isNotEmpty()) RivalChangedCard(d.rivalChanged) { startGeneration(ctx, "tactic", slot) }
     d.rivalPred?.takeIf { it.guesses.isNotEmpty() }?.let { RivalPredictCard(it, known(d.fields, K.RIVAL_NICK)) }
     // Checklist: o que ainda falta ler e em qual tela do OSM (a tática sai melhor com tudo lido).
@@ -605,9 +608,12 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
             }
         }
     }
-    OsmSlider("Pressão", Osm.pressureLabel(pressure), pressure, Modifier.padding(vertical = 4.dp))
-    OsmSlider("Estilo", Osm.mentalityLabel(mentality), mentality, Modifier.padding(vertical = 4.dp))
-    OsmSlider("Temporização", Osm.tempoLabel(tempo), tempo, Modifier.padding(vertical = 4.dp))
+    val formation = j.optString("formation")
+    val bandsJ = rememberLoaded<JSONObject?>(null, 0, formation) { runCatching { WebKnow.bands(Repo(ctx))?.optJSONObject(Formations.canonical(formation) ?: formation) }.getOrNull() }
+    fun bandOf(k: String): IntRange? = bandsJ?.optJSONArray(k)?.takeIf { it.length() >= 2 }?.let { it.optInt(0)..it.optInt(1) }
+    OsmSlider("Pressão", Osm.pressureLabel(pressure), pressure, Modifier.padding(vertical = 4.dp), bandOf("pressure"))
+    OsmSlider("Estilo", Osm.mentalityLabel(mentality), mentality, Modifier.padding(vertical = 4.dp), bandOf("mentality"))
+    OsmSlider("Temporização", Osm.tempoLabel(tempo), tempo, Modifier.padding(vertical = 4.dp), bandOf("tempo"))
     OsmSplitCard(
         left = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
