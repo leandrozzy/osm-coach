@@ -467,7 +467,11 @@ object Osm {
     fun mentalityLabel(v: Int): String = band(v, "Super defensivo", "Defensivo", "Neutro", "Ofensivo", "Tudo ao ataque")
     fun tempoLabel(v: Int): String = band(v, "Jogar atrás", "Construir de trás para a frente", "Fazer posse", "Passes rápidos", "Futebol ao primeiro toque")
 
-    private fun band(v: Int, vararg names: String): String = names[(v.coerceIn(0, 100) / 20).coerceAtMost(names.size - 1)]
+    /** Zonas do jogo nos 3 controles: 0–20, 21–40, 41–60, 61–80 e 81–100 (o 20, 40, 60 e 80 fecham a zona de baixo). */
+    fun zone(v: Int): Int { val x = v.coerceIn(0, 100); return if (x <= 20) 0 else ((x - 1) / 20).coerceAtMost(4) }
+    fun zoneRange(v: Int): IntRange { val z = zone(v); return if (z == 0) 0..20 else (z * 20 + 1)..((z + 1) * 20) }
+
+    private fun band(v: Int, vararg names: String): String = names[zone(v).coerceAtMost(names.size - 1)]
 
     fun style(s: String?): String? {
         val n = Txt.norm(s ?: "")

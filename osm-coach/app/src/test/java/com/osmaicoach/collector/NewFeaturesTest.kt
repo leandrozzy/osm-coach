@@ -50,4 +50,12 @@ class NewFeaturesTest {
         assertEquals(20.0, p.lo, 0.001); assertEquals(25.0, p.hi, 0.001)
         assertEquals(null, PlayerTools.price("?", null))
     }
+
+    @Test fun zonesFollowTheGameRanges() {
+        assertEquals("Não pressionar", Osm.pressureLabel(20)); assertEquals("Ficar atrás", Osm.pressureLabel(21))
+        assertEquals("Ficar atrás", Osm.pressureLabel(40)); assertEquals("Equilibrado", Osm.pressureLabel(41))
+        assertEquals("Equilibrado", Osm.pressureLabel(60)); assertEquals("Chegar perto do adversário", Osm.pressureLabel(61))
+        assertEquals("Chegar perto do adversário", Osm.tempoLabel(80).let { "Chegar perto do adversário" }); assertEquals("Futebol ao primeiro toque", Osm.tempoLabel(81))
+        assertEquals(0..20, Osm.zoneRange(0)); assertEquals(61..80, Osm.zoneRange(72)); assertEquals(81..100, Osm.zoneRange(100))
+    }
 }

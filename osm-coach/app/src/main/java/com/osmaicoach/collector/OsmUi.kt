@@ -398,7 +398,7 @@ fun SectorPitch(attack: String?, mid: String?, def: String?, modifier: Modifier 
 @Composable
 fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Modifier, band: IntRange? = null) {
     Column(modifier.fillMaxWidth().osmPanel().padding(horizontal = 12.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        OsmCaption(title, label)
+        OsmCaption(title, label + Osm.zoneRange(value).let { " (${it.first}–${it.last})" })
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             val anim by androidx.compose.animation.core.animateFloatAsState(
                 value.coerceIn(0, 100) / 100f, androidx.compose.animation.core.tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "slider"
@@ -408,6 +408,10 @@ fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Mod
                 val f = anim
                 val th = 3.dp.toPx()
                 drawLine(OsmColors.TRACK, Offset(0f, y), Offset(size.width, y), th, StrokeCap.Round)
+                // as 5 zonas do jogo (0–20 … 81–100): a zona atual fica mais clara e há marcas em 20, 40, 60 e 80
+                val z = Osm.zone(value); val zr = Osm.zoneRange(value)
+                drawRoundRect(Color(0x332AB4FF), Offset(size.width * zr.first.coerceAtLeast(0) / 100f, y - 5.dp.toPx()), Size(size.width * (zr.last - (if (z == 0) 0 else zr.first - 1)) / 100f, 10.dp.toPx()), CornerRadius(4.dp.toPx()))
+                for (m in listOf(20, 40, 60, 80)) drawLine(Color(0x66FFFFFF), Offset(size.width * m / 100f, y - 4.dp.toPx()), Offset(size.width * m / 100f, y + 4.dp.toPx()), 1.dp.toPx())
                 // faixa que as fontes indicam para esta formação (só referência visual; o valor da tática não muda)
                 if (band != null) {
                     val x0 = size.width * band.first / 100f; val x1 = size.width * band.last / 100f
