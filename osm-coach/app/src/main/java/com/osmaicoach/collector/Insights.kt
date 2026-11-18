@@ -79,7 +79,9 @@ object Why {
             for ((name, key, value) in listOf(Triple("Pressão", "pressure", j.optInt("pressure")), Triple("Estilo", "mentality", j.optInt("mentality")), Triple("Ritmo", "tempo", j.optInt("tempo")))) {
                 val a = bandsJ.optJSONArray(key) ?: continue
                 val lo = a.optInt(0); val hi = a.optInt(1)
-                bands.add(Pair(value in lo..hi, "$name $value " + (if (value in lo..hi) "dentro da faixa $lo–$hi" else "FORA da faixa $lo–$hi") + " (${bandsJ.optString("src")})"))
+                val src = bandsJ.optString("src").ifBlank { "o site" }
+                bands.add(Pair(value in lo..hi, if (value in lo..hi) "$name $value: dentro do que $src recomenda ($lo–$hi)"
+                    else "$name $value: " + (if (value > hi) "${value - hi} acima" else "${lo - value} abaixo") + " do que $src recomenda ($lo–$hi). Mantido porque a escolha do app vem da simulação e dos seus jogos; a faixa é só opinião do site. Para seguir o site: ${value.coerceIn(lo, hi)}."))
             }
         }
 

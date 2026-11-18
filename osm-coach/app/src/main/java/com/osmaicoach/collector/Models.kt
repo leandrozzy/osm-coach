@@ -327,6 +327,23 @@ object Money {
      * O OCR às vezes perde a vírgula ("27,5M" vira "275M"). Para times fracos (força <= 80),
      * um valor de 3 dígitos em M é implausível: reinsere a vírgula antes do último dígito.
      */
+    /**
+     * Escolhe entre o valor lido ("106M") e o mesmo valor com a vírgula reinserida ("10,6M") usando uma REFERÊNCIA real
+     * (soma dos jogadores do elenco ou valor da tabela da liga). Retorna null se não há referência ou se o lido já é o mais próximo.
+     * O palpite por força (fixLostComma) errava elencos de 100M+ com força baixa (106M virava 10,6M).
+     */
+    fun pickByReference(text: String, reference: Double?): String? {
+        if (reference == null || reference <= 0.0) return null
+        val raw = parse(text) ?: return null
+        val m = Regex("^(\\d+)(\\d)M$").find(text.trim())
+        val alt = m?.let { parse(it.groupValues[1] + "," + it.groupValues[2] + "M") }
+        fun d(v: Double) = kotlin.math.abs(kotlin.math.ln(v / reference))
+        // vírgula sobrando/perdida: lido ×10 ou ÷10 da referência
+        val cands = listOfNotNull(raw to text.trim(), alt?.let { it to (m!!.groupValues[1] + "," + m.groupValues[2] + "M") })
+        val best = cands.minByOrNull { d(it.first) } ?: return null
+        return if (best.second == text.trim()) text.trim() else best.second
+    }
+
     fun fixLostComma(text: String, teamStrength: Int): String? {
         if (teamStrength > 80) return null
         val m = Regex("^(\\d{2})(\\d)M$").find(text.trim()) ?: return null

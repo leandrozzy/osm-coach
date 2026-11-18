@@ -411,7 +411,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -630,7 +630,27 @@ class Repo(private val ctx: Context) {
             val st = ex.fields["x.strength"]?.value?.toIntOrNull() ?: f[if (owner == "MY") K.MY_STRENGTH else K.RIVAL_STRENGTH]?.value?.toIntOrNull()
             val v = mapped[vk]
             if (v != null) {
-                var fixed = if (st != null) Money.fixLostComma(v.value, st) else null
+                // REFERÊNCIA real primeiro: soma dos jogadores guardados (meu elenco, ≥14) ou valor do clube na tabela da liga
+                val ref: Double? = run {
+                    if (owner == "MY") {
+                        val vals = dao.playersOf(slot).filter { it.owner == "MY" }.mapNotNull { Money.parse(it.valueText) }
+                        if (vals.size >= 14) return@run vals.sum()
+                    }
+                    val clubName = (if (owner == "MY") (ot ?: f[K.TEAM]?.value) else (ot ?: f[K.RIVAL_TEAM]?.value)) ?: return@run null
+                    val va = planJson(slot, "league").optJSONObject("va") ?: return@run null
+                    val kk = Txt.key(clubName)
+                    var best: Double? = null
+                    for (club in va.keys()) {
+                        if (SlotMatcher.nameSim(Txt.key(club), kk) >= 0.8) best = va.optJSONObject(club)?.optDouble("value", Double.NaN)?.takeIf { !it.isNaN() }
+                    }
+                    best
+                }
+                val byRef = Money.pickByReference(v.value, ref)
+                if (byRef != null) {
+                    if (byRef != v.value.trim()) mapped[vk] = Reading(byRef, 0.8)
+                    return@run
+                }
+                var fixed = if (st != null && ref == null) Money.fixLostComma(v.value, st) else null
                 if (fixed == null && owner == "MY") {
                     // sem força: se o valor guardado é ~10× menor e só a vírgula explica, corrige
                     val prev = Money.parse(f[vk]?.value); val now1 = Money.parse(v.value)
@@ -698,7 +718,7 @@ class Repo(private val ctx: Context) {
                 changed++
             }
             // jogador novo num elenco que já estava lido = contratação (a 1ª leitura do elenco não conta)
-            if (old == null && existing.size >= 14 && squadBaseOld && source != "ai" && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
+            if (old == null && existing.size >= 14 && squadBaseOld && source != "ai" && now - planJson(slot, "squadgone").optLong(key, 0L) > 7 * 86400_000L && n.strength != null && n.valueText != null && !looksGarbled(n.name)) arrived.add(key)
         }
         // bandeiras (coluna Nac.): agrupa assinaturas parecidas numa só (representante) e guarda por jogador no plano "nations"
         runCatching {
@@ -2208,18 +2228,25 @@ class Repo(private val ctx: Context) {
      */
     suspend fun reconcileSquads(since: Long): Int {
         var removed = 0
+        for (slot in 1..4) removed += reconcileSlot(slot, since)
+        return removed
+    }
+
+    /** Confere o elenco de UM slot logo depois de uma passada completa (chamado pelo Pipeline ao fechar a leitura do Plantel). */
+    suspend fun reconcileSlot(slot: Int, since: Long): Int {
+        var removed = 0
         val now = System.currentTimeMillis()
-        for (slot in 1..4) {
+        run {
             dedupeSlot(slot, now)
             val mine = dao.playersOf(slot).filter { it.owner == "MY" }
-            if (mine.isEmpty()) continue
+            if (mine.isEmpty()) return 0
             val seenAt = planJson(slot, "squadseen")
             val seenNow = mine.filter { seenAt.optLong(it.nameKey, 0L) >= since }
             // Passada completa: 14+ jogadores vistos E pelo menos um de cada setor (o fim da lista, com os goleiros,
             // também foi visto). Fantasmas de OCR inflam o total guardado, então os 80% de antes nunca eram atingidos.
             val cats = seenNow.mapNotNull { it.cat }.toSet()
             val fullPass = seenNow.size >= 14 && cats.containsAll(listOf("ATA", "MEI", "DEF", "GOL"))
-            if (!fullPass || seenNow.size < mine.size * 0.5) continue
+            if (!fullPass || seenNow.size < mine.size * 0.5) return 0
             val notSeen = mine.filter { seenAt.optLong(it.nameKey, 0L) < since }
             // Sumir de UMA leitura completa não prova venda (o OCR perde linhas: Ba/N'Guessan no S2, 12/11). Só sai do elenco depois de
             // 2 leituras completas seguidas sem ele (plano `squadmiss`: nameKey → passadas completas sem o jogador).
@@ -2227,10 +2254,13 @@ class Repo(private val ctx: Context) {
             val missNew = org.json.JSONObject()
             for (p in notSeen) missNew.put(p.nameKey, miss.optInt(p.nameKey, 0) + 1)
             dao.putPlan(PlanEntity(slot, "squadmiss", missNew.toString(), now))
-            val gone = notSeen.filter { missNew.optInt(it.nameKey, 0) >= 2 }
-            if (gone.isEmpty() || gone.size > 20) continue
+            // uma passada COMPLETA (fim da lista + 4 setores + 14 vistos) basta: o usuário quer só os jogadores reais (12/11 exigia 2 passadas e fantasmas ficavam)
+            val gone = notSeen.filter { missNew.optInt(it.nameKey, 0) >= 1 }
+            if (gone.isEmpty() || gone.size > 20) return 0
             val ledger = Ledger.parse(dao.plan(slot, "ledger")?.json)
+            val goneAt = planJson(slot, "squadgone")
             for (p in gone) {
+                goneAt.put(p.nameKey, now)
                 dao.deletePlayer(slot, "MY", p.nameKey)
                 removed++
                 // o livro de caixa só ganha a venda quando o jogador ESTAVA À VENDA (setas lidas); sem isso não dá para saber se foi venda ou erro de leitura
@@ -2238,6 +2268,7 @@ class Repo(private val ctx: Context) {
                     Ledger.add(ledger, Ledger.Entry("sell", p.nameKey, p.name, now, Money.parse(p.valueText), true, p.strength, p.age))
                 }
             }
+            dao.putPlan(PlanEntity(slot, "squadgone", goneAt.toString(), now))
             dao.putPlan(PlanEntity(slot, "ledger", Ledger.toJson(ledger), now))
             val sold = gone.filter { it.forSale == true && !looksGarbled(it.name) }
             val rest = gone - sold.toSet()

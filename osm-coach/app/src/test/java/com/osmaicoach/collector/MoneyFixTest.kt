@@ -16,4 +16,11 @@ class MoneyFixTest {
         Weekly.upsert(l, Weekly.Week(202545, 3, 70.6, null, null, 0, 0, 0))
         assertEquals(listOf(202544, 202545), l.map { it.id })
     }
+    @Test fun referenceBeatsStrengthGuess() {
+        // elenco real de 106M com força 79: a regra por força dava 10,6M
+        assertEquals("106M", Money.pickByReference("106M", 104.0))
+        assertEquals("57,3M", Money.pickByReference("573M", 55.0))
+        assertEquals("10,6M", Money.pickByReference("10,6M", 10.0))
+        assertEquals(null, Money.pickByReference("106M", null))
+    }
 }

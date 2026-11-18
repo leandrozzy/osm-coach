@@ -247,6 +247,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         var lastHadGk = false
         /** Dono da lista (plantel): quadros rolados sem o título continuam a mesma leitura. */
         var owner: String? = null
+        val startAt = System.currentTimeMillis()
     }
     private var pending: Pending? = null
     private var reportPassAt = 0L
@@ -312,6 +313,10 @@ class FramePipeline private constructor(private val ctx: Context) {
         ex.listings.forEach { l -> l.cat?.let { c -> pd.cats.add(c) } }
         if (!pd.done && complete(pd)) {
             pd.done = true
+            if (pd.type == ScreenType.SQUAD && pd.owner != "RIVAL") runCatching {
+                val n = repo.reconcileSlot(pd.slot, pd.startAt)
+                if (n > 0) { Diag.log("Elenco S${pd.slot}: $n jogador(es) que não estão mais no plantel saíram da lista"); UiBus.bump() }
+            }
             summary(pd, true)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, System.currentTimeMillis()) }
         }
     }

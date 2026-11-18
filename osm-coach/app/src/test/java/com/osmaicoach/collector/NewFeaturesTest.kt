@@ -27,7 +27,7 @@ class NewFeaturesTest {
         assertTrue(r.score < 75)
         assertTrue(r.problems.any { it.contains("árbitro") })
         assertTrue(r.problems.any { it.contains("EVITE") })
-        assertTrue(r.problems.any { it.contains("fora da faixa") })
+        assertTrue(r.problems.any { it.contains("recomendam") })
         assertTrue(r.tips.any { it.contains("No OSM") })
     }
 

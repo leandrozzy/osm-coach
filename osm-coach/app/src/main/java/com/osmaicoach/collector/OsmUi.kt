@@ -429,7 +429,7 @@ fun OsmSlider(title: String, label: String, value: Int, modifier: Modifier = Mod
             }
         }
         if (band != null) Text(
-            if (value in band) "✓ dentro da faixa ${band.first}–${band.last} das fontes" else "faixa das fontes: ${band.first}–${band.last}",
+            if (value in band) "✓ dentro do que os sites recomendam (${band.first}–${band.last})" else "sites recomendam ${band.first}–${band.last} (só referência; o app decide pela simulação e seus jogos)",
             fontSize = 11.5.sp, color = if (value in band) Color(0xFF3DDC84) else Color(0xFF9FB4D3), modifier = Modifier.padding(top = 4.dp)
         )
     }
