@@ -290,35 +290,6 @@ internal fun DuelPitch(mine: String?, rival: String?, modifier: Modifier = Modif
 
 /** Medidor de rigor do árbitro (0 = muito brando … 4 = muito rigoroso), no estilo dos medidores do desarme. */
 @Composable
-internal fun RefereeArt(level: Int?, modifier: Modifier = Modifier) {
-    val cols = listOf(Color(0xFF34D399), Color(0xFF7BE0A2), Color(0xFFF2C94C), Color(0xFFFF9A3D), Color(0xFFE5484D))
-    Canvas(modifier) {
-        val w = size.width; val h = size.height
-        val sw = w * 0.13f
-        val c = Offset(w / 2, h * 0.86f)
-        val rad = w * 0.36f
-        val tl = Offset(c.x - rad, c.y - rad)
-        val sz = Size(rad * 2, rad * 2)
-        for (i in 0 until 5) {
-            val on = level == null || level == i
-            drawArc(cols[i].copy(alpha = if (on) 1f else 0.30f), 180f + i * 36f + 1.5f, 33f, false, tl, sz, style = Stroke(sw))
-        }
-        if (level != null) {
-            val ang = Math.toRadians((180.0 + 18.0 + level * 36.0))
-            val tip = Offset(c.x + (rad * 0.78f * Math.cos(ang)).toFloat(), c.y + (rad * 0.78f * Math.sin(ang)).toFloat())
-            drawLine(Color(0xFFE6EDF7), c, tip, w * 0.035f, StrokeCap.Round)
-            drawCircle(Color(0xFFE6EDF7), w * 0.055f, c)
-            drawCircle(cols[level], w * 0.03f, c)
-        }
-        // cartão amarelo no nível rigoroso, vermelho no muito rigoroso
-        if (level != null && level >= 3) {
-            val cc = if (level >= 4) Color(0xFFE5484D) else Color(0xFFFFD24A)
-            drawRoundRect(cc, Offset(w * 0.46f, h * 0.18f), Size(w * 0.08f, h * 0.20f), CornerRadius(w * 0.012f))
-        }
-    }
-}
-
-@Composable
 internal fun GameContextView(mine: String?, rival: String?, refereeName: String?, refereeTackle: String?, home: Boolean?) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(14.dp)) {
         Text("🏟 Contexto do jogo", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
@@ -330,7 +301,7 @@ internal fun GameContextView(mine: String?, rival: String?, refereeName: String?
             DuelPitch(mine, rival, Modifier.fillMaxWidth().height(124.dp).padding(top = 4.dp))
         }
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            RefereeArt(Referee.level(refereeName), Modifier.size(width = 120.dp, height = 78.dp))
+            RefereeFace(Referee.level(refereeName), Modifier.height(78.dp))
             Column(Modifier.padding(start = 12.dp)) {
                 Text("Árbitro: ${refereeName ?: "não lido"}", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text(if (refereeTackle != null) "Desarme permitido até $refereeTackle" else "Leia o Pré-jogo (termômetro)", fontSize = 12.5.sp, color = C.MUTED)
