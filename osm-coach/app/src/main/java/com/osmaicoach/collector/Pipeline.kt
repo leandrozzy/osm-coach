@@ -250,6 +250,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         val startAt = System.currentTimeMillis()
     }
     private var pending: Pending? = null
+    private var lastLiveRecon = 0L
+    private var sessionStartAt = System.currentTimeMillis()
     private var reportPassAt = 0L
     private var reportPrev: ScreenType? = null
 
@@ -311,6 +313,16 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         if (hasGk) pd.cats.add("GOL")
         ex.listings.forEach { l -> l.cat?.let { c -> pd.cats.add(c) } }
+        // AUTOMÁTICO enquanto você rola (18/11: o elenco só ficava certo ao Encerrar): com goleiros no quadro, as 4 seções e ≥14 jogadores vistos nesta
+        // passada, quem não foi lido nesta sessão sai na hora (no máx. 1×/15 s). `Repo.reconcileSlot` ainda exige 14+ vistos e os 4 setores.
+        if (type == ScreenType.SQUAD && pd.owner != "RIVAL" && hasGk && pd.seen.size >= 14 && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA")) &&
+            System.currentTimeMillis() - lastLiveRecon > 15_000L) {
+            lastLiveRecon = System.currentTimeMillis()
+            runCatching {
+                val n = repo.reconcileSlot(slot, pd.startAt)
+                if (n > 0) { Diag.log("Elenco S$slot: $n jogador(es) que não estão mais no plantel saíram da lista"); UiBus.bump(); note(slot, "S$slot: elenco conferido: $n jogador(es) que já não estão no plantel saíram da lista.", System.currentTimeMillis()) }
+            }
+        }
         if (!pd.done && complete(pd)) {
             pd.done = true
             if (pd.type == ScreenType.SQUAD && pd.owner != "RIVAL") runCatching {
@@ -547,6 +559,7 @@ class FramePipeline private constructor(private val ctx: Context) {
     private fun ensureMachine(sessionId: String) {
         if (machineSession == sessionId) return
         machineSession = sessionId
+        sessionStartAt = System.currentTimeMillis()
         candidate = null
         stable = 0
         unstable = 0

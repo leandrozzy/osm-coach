@@ -45,11 +45,11 @@ object TacticAudit {
             for ((name, key) in listOf("Pressão" to "pressure", "Estilo" to "mentality", "Ritmo" to "tempo")) {
                 val a = bands.optJSONArray(key) ?: continue
                 val v = t.optInt(key); val lo = a.optInt(0); val hi = a.optInt(1)
+                // faixa dos SITES = só referência (o app não a usa para decidir): vira aviso informativo, nunca problema e não tira nota
                 if (v in lo..hi) good.add("$name $v dentro do que os sites recomendam ($lo–$hi)")
                 else {
                     val dist = minOf(abs(v - lo), abs(v - hi))
-                    if (dist > 10) { problems.add("$name $v está $dist pontos ${if (v > hi) "acima" else "abaixo"} do que os sites recomendam ($lo–$hi). O app escolheu pela simulação e pelos seus jogos; a faixa é só opinião de site, não regra do jogo. Para seguir o site: ${v.coerceIn(lo, hi)}"); score -= 3 }
-                    else { tips.add("$name $v está a $dist ponto(s) do que os sites recomendam ($lo–$hi); é só referência"); score -= 1 }
+                    tips.add("Aviso: $name $v está $dist ponto(s) ${if (v > hi) "acima" else "abaixo"} do que os sites recomendam ($lo–$hi). Só referência: o app escolheu pela simulação e pelos seus jogos. Para seguir o site: ${v.coerceIn(lo, hi)}")
                 }
             }
         }

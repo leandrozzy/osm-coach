@@ -24,10 +24,10 @@ class NewFeaturesTest {
     @Test fun auditPenalizesBandsRefereeAndAvoid() {
         val t = tac(pr = 90, me = 50, te = 40, tackle = "Extremo")
         val r = TacticAudit.evaluate(t, bands(), "Normal", false, listOf("Formação 4-4-2"), listOf("estilo"))
-        assertTrue(r.score < 75)
+        assertTrue(r.score < 90)
         assertTrue(r.problems.any { it.contains("árbitro") })
         assertTrue(r.problems.any { it.contains("EVITE") })
-        assertTrue(r.problems.any { it.contains("recomendam") })
+        assertTrue(r.tips.any { it.contains("recomendam") }); assertTrue(r.problems.none { it.contains("recomendam") })
         assertTrue(r.tips.any { it.contains("No OSM") })
     }
 
