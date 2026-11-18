@@ -2006,7 +2006,7 @@ internal fun BrandBar() {
     val col = if (ready) C.OK else C.BAD
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.ic_launcher_fg), contentDescription = null, modifier = Modifier.size(42.dp))
+            Image(androidx.compose.ui.graphics.ImageBitmap.imageResource(R.drawable.g_logo), contentDescription = null, modifier = Modifier.size(46.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row {

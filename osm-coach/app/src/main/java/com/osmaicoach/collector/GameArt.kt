@@ -4,8 +4,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.res.imageResource
 
 /**
  * Desenhos do próprio jogo (recortes dos prints enviados pelo usuário, uso pessoal): estilo de jogo, desarme, marcação, fora-de-jogo e árbitro
@@ -34,7 +36,7 @@ private fun res(name: String): Int = when (name) {
 
 @Composable
 private fun GameImg(name: String, modifier: Modifier) {
-    Image(painterResource(res(name)), contentDescription = null, modifier = modifier, contentScale = ContentScale.Fit, alignment = Alignment.Center)
+    Image(ImageBitmap.imageResource(res(name)), contentDescription = null, modifier = modifier, contentScale = ContentScale.Fit, alignment = Alignment.Center, filterQuality = FilterQuality.High)
 }
 
 @Composable

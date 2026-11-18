@@ -391,7 +391,7 @@ class CaptureService : AccessibilityService() {
         }
         bubble.addView(ring, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize))
         val icon = android.widget.ImageView(this).apply {
-            setImageResource(R.drawable.ic_launcher_fg)
+            setImageResource(R.drawable.g_icon)
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             elevation = 9 * dp
         }
