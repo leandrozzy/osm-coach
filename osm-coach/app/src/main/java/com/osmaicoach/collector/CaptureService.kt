@@ -380,22 +380,14 @@ class CaptureService : AccessibilityService() {
         val bubbleSize = (58 * dp).toInt()
         val maxW = minOf((340 * dp).toInt(), (sw * 0.78f).toInt())
 
-        // bola: escudo do app num círculo azul com borda dourada + contador vermelho
+        // bola: só o logo do app (sem círculo de fundo) + contador vermelho
         val bubble = android.widget.FrameLayout(this)
-        val ring = View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF2F7BFF.toInt(), 0xFF0B2A6B.toInt())).apply {
-                shape = GradientDrawable.OVAL
-                setStroke((2.5f * dp).toInt(), 0xFFFFD24A.toInt())
-            }
-            elevation = 8 * dp
-        }
-        bubble.addView(ring, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize))
         val icon = android.widget.ImageView(this).apply {
             setImageResource(R.drawable.g_icon)
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             elevation = 9 * dp
         }
-        bubble.addView(icon, android.widget.FrameLayout.LayoutParams((bubbleSize * 0.9f).toInt(), (bubbleSize * 0.9f).toInt(), Gravity.CENTER))
+        bubble.addView(icon, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize, Gravity.CENTER))
         val badge = TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE); textSize = 11f; gravity = Gravity.CENTER
             setTypeface(typeface, android.graphics.Typeface.BOLD)
