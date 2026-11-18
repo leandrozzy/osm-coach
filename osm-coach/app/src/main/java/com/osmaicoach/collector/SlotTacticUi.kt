@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -581,22 +582,11 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
 
     // ---- Tática
     OsmTitle("Tática: o que montar no OSM")
-    OsmSplitCard(
-        left = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                OsmCaption("Estilo de jogo", style)
-                StyleIllustration(style, Modifier.fillMaxWidth().height(118.dp).padding(top = 6.dp))
-                OsmDots(Osm.STYLES.size, Osm.STYLES.indexOf(style), Modifier.padding(top = 4.dp))
-            }
-        },
-        right = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                OsmCaption("Desarme", tackle)
-                TackleIllustration(tackle, Modifier.size(width = 130.dp, height = 112.dp).padding(top = 6.dp))
-                OsmDots(Osm.TACKLES.size, Osm.TACKLES.indexOf(tackle), Modifier.padding(top = 4.dp))
-            }
-        }
-    )
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        OsmCaption("Estilo de jogo", style)
+        StyleIllustration(style, Modifier.fillMaxWidth().aspectRatio(2172f / 724f).padding(top = 8.dp))
+        OsmDots(Osm.STYLES.size, Osm.STYLES.indexOf(style), Modifier.padding(top = 6.dp))
+    }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().padding(10.dp)) {
         Text("Táticas por sector", fontSize = 12.5.sp, color = OsmColors.CAPTION, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterHorizontally))
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -614,22 +604,23 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
     OsmSlider("Pressão", Osm.pressureLabel(pressure), pressure, Modifier.padding(vertical = 4.dp), bandOf("pressure"))
     OsmSlider("Estilo", Osm.mentalityLabel(mentality), mentality, Modifier.padding(vertical = 4.dp), bandOf("mentality"))
     OsmSlider("Temporização", Osm.tempoLabel(tempo), tempo, Modifier.padding(vertical = 4.dp), bandOf("tempo"))
-    OsmSplitCard(
-        left = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                OsmCaption("Marcação", marking)
-                MarkingIllustration(marking, Modifier.size(width = 130.dp, height = 150.dp).padding(top = 6.dp))
-                OsmDots(2, Osm.MARKING.indexOf(marking), Modifier.padding(top = 4.dp))
-            }
-        },
-        right = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                OsmCaption("Fazer fora-de-jogo", offside)
-                OffsideIllustration(offside, Modifier.size(width = 130.dp, height = 150.dp).padding(top = 6.dp))
-                OsmDots(2, if (offside == "Sim") 1 else 0, Modifier.padding(top = 4.dp))
-            }
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().padding(horizontal = 6.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            OsmCaption("Desarme", tackle, valueSize = 13)
+            TackleIllustration(tackle, Modifier.fillMaxWidth().height(110.dp).padding(top = 6.dp))
+            OsmDots(Osm.TACKLES.size, Osm.TACKLES.indexOf(tackle), Modifier.padding(top = 4.dp))
         }
-    )
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            OsmCaption("Marcação", marking, valueSize = 13)
+            MarkingIllustration(marking, Modifier.fillMaxWidth().height(110.dp).padding(top = 6.dp))
+            OsmDots(2, Osm.MARKING.indexOf(marking), Modifier.padding(top = 4.dp))
+        }
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            OsmCaption("Fora-de-jogo", offside, valueSize = 13)
+            OffsideIllustration(offside, Modifier.fillMaxWidth().height(110.dp).padding(top = 6.dp))
+            OsmDots(2, if (offside == "Sim") 1 else 0, Modifier.padding(top = 4.dp))
+        }
+    }
     Spacer(Modifier.height(8.dp))
     GenPanel("tactic_ai", slot, "🤖 Consultar a IA de novo") { startGeneration(ctx, "tactic_ai", slot) }
 
