@@ -318,9 +318,18 @@ object Money {
     /** Acha dinheiro dentro de um token sujo pelo ícone da moeda (ex.: "©7,6M" -> "7,6M"). */
     fun extract(s: String?): String? {
         if (s == null) return null
-        val m = reFind.find(s) ?: return null
-        val t = m.groupValues[1] + m.groupValues[2].uppercase()
-        return if (valid(t)) t else null
+        val m = reFind.find(s)
+        if (m != null) {
+            val t = m.groupValues[1] + m.groupValues[2].uppercase()
+            if (valid(t)) return t
+        }
+        // moeda lida como letra e zeros como "O" ("S55OM" = ícone + 55 0 M; 19/11, S1: valor do elenco do rival nunca era lido)
+        val core = s.trim().replace(Regex("^[^0-9]+"), "")
+        if (core.isNotEmpty() && core.last().uppercaseChar() == 'M' && core.dropLast(1).all { it.isDigit() || it in ".,Oo" } && core.any { it.isDigit() }) {
+            val t = core.dropLast(1).replace('O', '0').replace('o', '0') + "M"
+            if (valid(t)) return t
+        }
+        return null
     }
 
     /**

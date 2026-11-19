@@ -681,6 +681,38 @@ class FramePipeline private constructor(private val ctx: Context) {
      * Para cada jogador sem força (e com setor conhecido) lê de novo SÓ a faixa das colunas Ata/Def/Med daquela linha, ampliada 3×:
      * o OCR de um recorte pequeno acerta onde o da tela falhou. A força é a coluna do setor (ATA→Ata, MEI→Med, DEF/GOL→Def).
      */
+    /**
+     * Bolhas de força por setor do cabeçalho do Plantel (GOL/DEF/MÉD/ATA): o OCR da tela inteira às vezes perde o número de UMA bolha
+     * (19/11, S2: "Méd" sem o 72 e o app pedia "Plantel do rival (setor MEI)" mesmo com a tela aberta). Relê cada bolha que falta
+     * por recorte ampliado e só aceita número de 30 a 130.
+     */
+    private suspend fun repairBubbles(bmp: Bitmap, ex: Extraction): Extraction {
+        val keys = listOf("x.gol", "x.def", "x.mid", "x.atk")
+        val have = keys.count { ex.fields[it] != null }
+        if (have == 4 || have == 0 && ex.fields["x.strength"] == null) return ex
+        val xs = listOf(0.631f, 0.676f, 0.721f, 0.766f)
+        val add = LinkedHashMap<String, Reading>()
+        for (i in keys.indices) {
+            if (ex.fields[keys[i]] != null) continue
+            var found: Int? = null
+            for ((sc, hw, y0n, y1n) in listOf(listOf(5f, 0.020f, 0.235f, 0.335f), listOf(3f, 0.026f, 0.215f, 0.350f), listOf(6f, 0.016f, 0.255f, 0.315f))) {
+                val x0 = ((xs[i] - hw) * bmp.width).toInt().coerceAtLeast(0); val x1 = ((xs[i] + hw) * bmp.width).toInt().coerceAtMost(bmp.width)
+                val y0 = (y0n * bmp.height).toInt().coerceAtLeast(0); val y1 = (y1n * bmp.height).toInt().coerceAtMost(bmp.height)
+                if (x1 - x0 < 8 || y1 - y0 < 8) continue
+                val crop = Bitmap.createBitmap(bmp, x0, y0, x1 - x0, y1 - y0)
+                val big = Bitmap.createScaledBitmap(crop, (crop.width * sc).toInt(), (crop.height * sc).toInt(), true)
+                val r = OcrEngine.read(big)
+                crop.recycle(); big.recycle()
+                found = r.tokens.mapNotNull { t -> t.text.trim().replace(" ", "").replace('S', '5').replace('O', '0').replace('l', '1').replace('I', '1').replace('B', '8').toIntOrNull()?.takeIf { it in 30..130 } }.firstOrNull()
+                if (found != null) break
+            }
+            if (found != null) add[keys[i]] = Reading(found.toString(), 0.8)
+        }
+        if (add.isEmpty()) { Diag.log("Bolhas do Plantel: faltam ${4 - have} e a releitura por recorte não achou o número"); return ex }
+        Diag.log("Bolhas do Plantel relidas por recorte: " + add.entries.joinToString { it.key.removePrefix("x.") + "=" + it.value.value })
+        return ex.copy(fields = ex.fields + add)
+    }
+
     private suspend fun repairStrength(bmp: Bitmap, ex: Extraction): Extraction {
         val need = ex.players.filter { it.strength == null && it.cat != null && it.natY != null }.take(8)
         if (need.isEmpty()) return ex
@@ -977,6 +1009,7 @@ class FramePipeline private constructor(private val ctx: Context) {
 
             var ex = parse(ocr, type, img, now)
             if (type == ScreenType.SQUAD) ex = runCatching { repairStrength(bmp, ex) }.getOrDefault(ex)
+            if (type == ScreenType.SQUAD) ex = runCatching { repairBubbles(bmp, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) ex = runCatching { repairRows(bmp, ocr, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) ex = runCatching { repairNames(bmp, ex) }.getOrDefault(ex)
             Diag.parsed.incrementAndGet()

@@ -23,4 +23,11 @@ class MoneyFixTest {
         assertEquals("10,6M", Money.pickByReference("10,6M", 10.0))
         assertEquals(null, Money.pickByReference("106M", null))
     }
+    @Test fun coinIconAndOhAreReadAsMoney() {
+        assertEquals("550M", Money.extract("S55OM"))
+        assertEquals("550M", Money.extract("S550M"))
+        assertEquals("65,2M", Money.extract("(65,2M"))
+        assertEquals("80,1M", Money.extract("80,1M"))
+        assertEquals(null, Money.extract("Posicao"))
+    }
 }
