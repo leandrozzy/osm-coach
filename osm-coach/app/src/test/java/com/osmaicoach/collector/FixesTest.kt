@@ -282,4 +282,19 @@ class FixesTest {
         assertEquals("Ajudar a defender", Osm.attack("Ajudar a defender"))
         assertEquals("Defender atrás", Osm.defense("Defender atrás"))
     }
+
+    @Test fun scrolledSquadHeaderNeverTakesLabelOrPlayerAsOwner() {
+        // 19/11: lista rolada com o nome do time fora da vista: o dono virava "Melhor marcador:", "Idade: 23" ou um jogador e o quadro era descartado
+        val rows = mutableListOf<OcrLine>()
+        rows += Fx.line("Nota mais alta:", 0.03f, 0.32f); rows += Fx.line("Jogador estrela:", 0.04f, 0.37f); rows += Fx.line("Melhor marcador:", 0.04f, 0.42f)
+        rows += Fx.line("Posição: 9", 0.08f, 0.15f)
+        rows += Fx.line("Melhor marcador:", 0.07f, 0.26f); rows += Fx.line("Idade: 23", 0.07f, 0.28f)
+        val ex = Parsers.squad(Fx.ocr(*rows.toTypedArray()), null)
+        org.junit.Assert.assertNull(ex.ownerTeam)
+        // com o nome do time visível acima de "Nota mais alta", continua valendo
+        val ok = Parsers.squad(Fx.ocr(Fx.line("Nota mais alta:", 0.03f, 0.32f), Fx.line("Posição: 9", 0.08f, 0.15f), Fx.line("SV Austria Salzburg", 0.08f, 0.24f)), null)
+        org.junit.Assert.assertEquals("SV Austria Salzburg", ok.ownerTeam)
+        val club = Parsers.squad(Fx.ocr(Fx.line("Nota mais alta:", 0.03f, 0.32f), Fx.line("Posição: 9", 0.08f, 0.15f), Fx.line("Atalanta", 0.08f, 0.24f)), null)
+        org.junit.Assert.assertEquals("Atalanta", club.ownerTeam)
+    }
 }

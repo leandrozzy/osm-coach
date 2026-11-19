@@ -668,10 +668,25 @@ object Director {
      * fazia o app recomendar desarme "Agressivo/Extremo" com o árbitro de agora desconhecido.
      */
     fun refereeNow(f: Map<String, StoredField>, now: Long = System.currentTimeMillis()): String? =
-        f[K.REFEREE]?.takeIf { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS }?.value
+        f[K.REFEREE]?.takeIf { fieldFresh(f, it, now) }?.value
 
     /** Rival conferido: formação, estilo e força lidos há pouco (3 h). Sem isso a tática pode estar baseada em dado velho. */
     const val RIVAL_FRESH_MS = 3L * 3600_000L
+
+    /**
+     * Leitura "do jogo de agora". Antes só valia por 3 h, então a tática gerada voltava sozinha a "Reler Pré-jogo e Análise do rival" horas
+     * depois de tudo lido (19/11: "pede de novo o que já fiz"). Agora vale também a leitura feita DEPOIS do jogo anterior (a partir de 24 h
+     * antes do horário do jogo) enquanto faltam mais de 3 h para ele; rival CPU não muda, então vale até o jogo. Rival humano pode trocar
+     * a tática: nas últimas 3 h antes do jogo volta a exigir leitura recente (3 h).
+     */
+    fun fieldFresh(f: Map<String, StoredField>, fld: StoredField, now: Long): Boolean {
+        if (!FieldMerge.known(fld.value)) return false
+        if (now - fld.updatedAt <= RIVAL_FRESH_MS) return true
+        val at = f[K.MATCH_AT]?.value?.toLongOrNull() ?: return false
+        if (at <= now || fld.updatedAt < at - 24L * 3600_000L) return false
+        val human = f[K.RIVAL_HUMAN]?.value == "Sim"
+        return !human || at - now > RIVAL_FRESH_MS
+    }
     fun rivalConfirmed(f: Map<String, StoredField>, now: Long): Boolean = tacticGaps(f, now).isEmpty()
 
     /** Leituras obrigatórias do rival para gerar a tática, em grupos (cada grupo = uma tela do OSM). */
@@ -680,7 +695,7 @@ object Director {
     private val LB = listOf(K.RIVAL_GOL to "setor GOL", K.RIVAL_DEF to "setor DEF", K.RIVAL_MID to "setor MEI", K.RIVAL_ATK to "setor ATA")
 
     fun groups(f: Map<String, StoredField>, now: Long): List<Group> {
-        fun fresh(k: String) = f[k]?.let { FieldMerge.known(it.value) && now - it.updatedAt <= RIVAL_FRESH_MS } == true
+        fun fresh(k: String) = f[k]?.let { fieldFresh(f, it, now) } == true
         val secret = SecretTraining.on(f)
         val pre = ArrayList<String>()
         if (!fresh(K.MY_STRENGTH)) pre.add("sua força")

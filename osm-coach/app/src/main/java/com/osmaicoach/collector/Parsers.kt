@@ -286,9 +286,25 @@ object Parsers {
             val n = Txt.norm(ln.text)
             (ln.yc in 0.10f..0.20f && (n.contains("posicao") || n.contains("objetivo"))) || n.contains("nota mais alta")
         }
-        val head = if (hasHeader) o.lines.filter { it.yc in 0.18f..0.30f && it.xc < 0.30f }.sortedBy { it.yc } else emptyList()
-        val owner = head.firstOrNull { Txt.letters(it.text) >= 3 && !Txt.norm(it.text).startsWith("nota") }
-        val nick = if (owner != null) head.firstOrNull { it !== owner && it.yc > owner.yc && Txt.letters(it.text) >= 3 } else null
+        // Dono da lista = a linha do NOME DO TIME logo acima de "Nota mais alta"/"Jogador estrela". Antes valia a 1ª linha de 3+ letras da faixa
+        // y 0,18–0,30, e na lista rolada isso virava rótulo ("Melhor marcador:", "Idade: 23") ou NOME DE JOGADOR ("Dumfries"): a tela inteira era
+        // descartada como "dono desconhecido" (19/11: ~800 quadros do Plantel ignorados no diagnóstico).
+        val labelStarts = listOf("nota mais", "jogador estrela", "melhor marcador", "posicao", "objetivo", "avancados", "guarda-redes", "suplentes")
+        val labelExact = setOf("ata", "def", "med", "con", "mor", "estado", "valor", "nac", "pos", "idade", "ldade", "jogador", "equipa", "gr", "de", "g")
+        fun headerLabel(t: String): Boolean {
+            val n = Txt.norm(t).trim()
+            return n in labelExact || labelStarts.any { n.startsWith(it) } || n.count { it.isDigit() } >= n.count { it.isLetter() } || n.endsWith(":") || n.startsWith("idade") || n.startsWith("ldade")
+        }
+        val refY = o.lines.filter { val n = Txt.norm(it.text); n.contains("nota mais alta") || n.contains("jogador estrela") }.minOfOrNull { it.yc }
+        val head = if (!hasHeader) emptyList() else if (refY != null)
+            o.lines.filter { it.yc in (refY - 0.14f)..(refY - 0.03f) && it.xc < 0.30f && it.yc > 0.17f }.sortedBy { it.yc }
+        else {
+            // sem "Nota mais alta": âncora = "Posição:/Objetivo:" no topo; o time fica logo abaixo. Sem nenhuma âncora, nada (na lista rolada qualquer nome de jogador cairia na faixa)
+            val top = o.lines.filter { it.yc in 0.10f..0.20f && Txt.norm(it.text).let { n -> n.contains("posicao") || n.contains("objetivo") } }.minOfOrNull { it.yc }
+            if (top == null) emptyList() else o.lines.filter { it.yc in (top + 0.04f)..(top + 0.16f) && it.xc < 0.30f }.sortedBy { it.yc }
+        }
+        val owner = head.firstOrNull { Txt.letters(it.text) >= 3 && !headerLabel(it.text) }
+        val nick = if (owner != null) head.firstOrNull { it !== owner && it.yc > owner.yc && Txt.letters(it.text) >= 3 && !headerLabel(it.text) } else null
 
         // Bolhas de força por setor (GOL, DEF, MEI, ATA): lidas pela POSIÇÃO, porque o rótulo pequeno o OCR erra.
         val bubbleX = listOf(0.631f, 0.676f, 0.721f, 0.766f)
