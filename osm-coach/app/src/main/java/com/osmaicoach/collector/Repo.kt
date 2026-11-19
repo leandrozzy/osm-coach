@@ -1000,8 +1000,18 @@ class Repo(private val ctx: Context) {
                 if (ex.type == ScreenType.LAWYER) {
                     // sem recurso possível: vale até passar a rodada (a suspensão cumpre sozinha)
                     val round = fieldMap(slot)[K.ROUND]?.value?.toIntOrNull() ?: -1
-                    if (x.optBoolean("noAppeal")) dao.putPlan(PlanEntity(slot, "noappeal", JSONObject().put("round", round).put("at", now).toString(), now))
-                    else if (!x.optBoolean("empty") && planJson(slot, "noappeal").length() > 0) dao.putPlan(PlanEntity(slot, "noappeal", "{}", now))
+                    if (x.optBoolean("noAppeal")) {
+                        // "Li o caso de Mancini. Infelizmente não posso apresentar recurso!": sem recurso para ESSE jogador, qualquer que seja o nº de jogos de suspensão.
+                        // Fica guardado pelo nome até o vermelho dele sumir (não volta a pedir o advogado a cada rodada).
+                        val cur = planJson(slot, "noappeal")
+                        val names = cur.optJSONObject("names") ?: JSONObject()
+                        x.optString("noAppealName").takeIf { it.isNotBlank() && it != "null" }?.let { names.put(Txt.key(it), now) }
+                        dao.putPlan(PlanEntity(slot, "noappeal", JSONObject().put("round", round).put("at", now).put("names", names).toString(), now))
+                    } else if (!x.optBoolean("empty") && planJson(slot, "noappeal").length() > 0 && !x.optBoolean("card")) {
+                        // outra mensagem do advogado (há recurso a fazer): zera só o aviso por rodada; os nomes sem recurso continuam
+                        val cur = planJson(slot, "noappeal")
+                        dao.putPlan(PlanEntity(slot, "noappeal", JSONObject().put("names", cur.optJSONObject("names") ?: JSONObject()).toString(), now))
+                    }
                 }
                 val kind = if (ex.type == ScreenType.DOCTOR) "injured" else "suspended"
                 // Advogado diz que não há ninguém: vermelhos antigos (nome que sumiu/OCR) não valem mais
@@ -1096,6 +1106,20 @@ class Repo(private val ctx: Context) {
     }
 
     /** Jogadores com cartão vermelho no plantel (nameKeys). */
+    /** Jogadores (nameKeys do elenco) para quem o advogado já disse "não posso apresentar recurso" e que ainda estão suspensos; limpa quem já cumpriu. */
+    suspend fun noAppealKeys(slot: Int): Set<String> {
+        val cur = planJson(slot, "noappeal")
+        val names = cur.optJSONObject("names") ?: return emptySet()
+        val out = outByDoctorOrLawyer(slot).second
+        val keep = JSONObject(); val res = HashSet<String>()
+        for (k in names.keys()) {
+            val match = out.firstOrNull { it == k || Txt.sim(it, k) >= 0.8 }
+            if (match != null) { keep.put(k, names.optLong(k)); res.add(match) }
+        }
+        if (keep.length() != names.length()) dao.putPlan(PlanEntity(slot, "noappeal", cur.put("names", keep).toString(), System.currentTimeMillis()))
+        return res
+    }
+
     suspend fun redsOf(slot: Int): Set<String> = planJson(slot, "reds").let { o -> o.keys().asSequence().filter { o.optBoolean(it) }.toSet() }
 
     /** Lesionados e suspensos lidos do Médico/Advogado (nameKeys). */
@@ -2255,7 +2279,9 @@ class Repo(private val ctx: Context) {
             for (p in notSeen) missNew.put(p.nameKey, miss.optInt(p.nameKey, 0) + 1)
             dao.putPlan(PlanEntity(slot, "squadmiss", missNew.toString(), now))
             // uma passada COMPLETA (fim da lista + 4 setores + 14 vistos) basta: o usuário quer só os jogadores reais (12/11 exigia 2 passadas e fantasmas ficavam)
-            val gone = notSeen.filter { missNew.optInt(it.nameKey, 0) >= 1 }
+            // quem foi lido há MENOS de 20 min (antes desta passada) só sai na 2ª passada seguida sem ele: o OCR perde linhas e Lukébakio/Hudson-Odoi do S2
+            // sumiram do elenco (19/11). Quem não é visto há mais tempo (vendido de verdade) sai já na 1ª passada completa.
+            val gone = notSeen.filter { p -> val n = missNew.optInt(p.nameKey, 0); n >= 2 || (n >= 1 && seenAt.optLong(p.nameKey, 0L) < since - 20 * 60_000L) }
             if (gone.isEmpty() || gone.size > 20) return 0
             val ledger = Ledger.parse(dao.plan(slot, "ledger")?.json)
             val goneAt = planJson(slot, "squadgone")
@@ -2269,6 +2295,12 @@ class Repo(private val ctx: Context) {
                 }
             }
             dao.putPlan(PlanEntity(slot, "squadgone", goneAt.toString(), now))
+            // cartões/lesão/recurso de quem saiu do elenco não valem mais (S2 "inventava" cartão de jogador que já não estava)
+            for (planKind in listOf("reds", "cards")) {
+                val o = planJson(slot, planKind); var ch = false
+                for (p in gone) if (o.has(p.nameKey)) { o.remove(p.nameKey); ch = true }
+                if (ch) dao.putPlan(PlanEntity(slot, planKind, o.toString(), now))
+            }
             dao.putPlan(PlanEntity(slot, "ledger", Ledger.toJson(ledger), now))
             val sold = gone.filter { it.forSale == true && !looksGarbled(it.name) }
             val rest = gone - sold.toSet()

@@ -313,4 +313,11 @@ class FixesTest {
         val m = Fx.ocr(Fx.line("Vender jogadores 1/4", 0.5f, 0.2f), Fx.line("Idade", 0.5f, 0.3f), Fx.line("Valor", 0.9f, 0.3f), Fx.line("Jogador", 0.1f, 0.3f), Fx.line("Lista de transferências", 0.3f, 0.1f))
         assertEquals(ScreenType.MARKET, ScreenClassifier.classify(m, true))
     }
+
+    @Test fun lawyerNoAppealMessageKeepsPlayerName() {
+        val o = Fx.ocr(Fx.line("Li o caso de Mancini. Infelizmente não posso apresentar recurso!", 0.4f, 0.49f, 0.7f), Fx.line("Advogado", 0.95f, 0.9f), Fx.line("Lawrence Bailey", 0.95f, 0.94f))
+        val j = Screens.roster(o)
+        assertTrue(j.optBoolean("noAppeal"))
+        assertEquals("Mancini", j.optString("noAppealName"))
+    }
 }

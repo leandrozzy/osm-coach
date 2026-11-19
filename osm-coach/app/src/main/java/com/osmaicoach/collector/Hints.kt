@@ -46,7 +46,8 @@ object Hints {
             repo.dao.matchesOf(slot).filter { it.scoreMine != null || it.result != null }.mapNotNull { Fixtures.kickoff(it) }.filter { it <= now }.maxOrNull()
         }.getOrNull()
         val (inj, susp) = repo.outByDoctorOrLawyer(slot)
-        val reds = repo.redsOf(slot).size
+        val noAppealK = repo.noAppealKeys(slot)
+        val reds = repo.redsOf(slot).count { r -> r !in noAppealK }
         val noAppeal = repo.dao.plan(slot, "noappeal")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
             ?.let { it.optInt("round", -2) == (repo.fieldMap(slot)[K.ROUND]?.value?.toIntOrNull() ?: -1) } == true
         return Fresh.needs(Fresh.In(slot, repo.seenMap(slot), repo.timers(slot), matchAt, sp.any { it.games <= 1 }, now, active, lastMatch, reds, inj.size, noAppeal,
@@ -100,7 +101,7 @@ object Hints {
                 trainLevel = f[K.MY_STAD_TRAIN]?.value?.toIntOrNull(),
                 stadiumBuilding = timers.any { it.key.startsWith("stad_") && it.at > now },
                 lawyerBusy = timers.any { it.lawyer && it.at > now },
-                noAppeal = noAppeal,
+                noAppeal = noAppeal, noAppealKeys = repo.noAppealKeys(slot),
                 doctorBusy = timers.any { it.doctor && it.at > now },
                 listings = repo.dao.listingsOf(slot).let { l -> SlotRules.load(repo, slot)?.maxBuy?.let { cap -> l.filter { (it.strength ?: 0) <= cap } } ?: l },
                 rules = SlotRules.load(repo, slot),

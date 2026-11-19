@@ -202,7 +202,7 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (f in listOf("TODOS", "ATA", "MEI", "DEF", "GOL")) FilterPill(if (f == "TODOS") "Todos" else f, filter == f) { filter = f }
         }
-        Text("⚡ Cond. = condição física • 🙂 Moral • ★ titular da tática gerada", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        Text("⚡ Cond. = condição física • 🙂 Moral • 👕 titular da tática gerada", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
     }
     for (cat in listOf("ATA", "MEI", "DEF", "GOL", "?")) {
         // "?": lidos sem posição — antes ficavam invisíveis (mas contavam), sem como remover.
@@ -220,7 +220,7 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                            if (p.name.take(14) in xiNames) Text("  ★", color = C.GOLD, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                            if (p.name.take(14) in xiNames) Text("  👕", fontSize = 14.sp)
                             if (p.forSale == true) Text("  🏷 À venda", color = C.WARN, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {

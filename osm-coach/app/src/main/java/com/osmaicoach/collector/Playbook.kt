@@ -50,6 +50,8 @@ object Playbook {
         val lawyerBusy: Boolean = false,
         /** O advogado disse que não há recurso possível agora: não manda ir lá. */
         val noAppeal: Boolean = false,
+        /** Suspensos para quem o advogado já disse que não há recurso (vale até o vermelho sumir). */
+        val noAppealKeys: Set<String> = emptySet(),
         val doctorBusy: Boolean = false,
         /** Jogadores à venda no mercado (última leitura): fonte das sugestões de compra para as posições que faltam. */
         val listings: List<ListingEntity> = emptyList(),
@@ -316,10 +318,11 @@ object Playbook {
         if (i.injured.isNotEmpty() && !i.doctorBusy) {
             out.add(Tip("🩹", "Mande ao médico: " + i.injured.joinToString { nameOf(it) }, "Menu ☰ → Médico → Iniciar (8 h, grátis). Não use \"Tratar imediatamente\" (gasta Boss Coins).", 80, 4))
         }
-        if (i.suspended.isNotEmpty() && !i.lawyerBusy && !i.noAppeal) {
+        val forLawyer = i.suspended - i.noAppealKeys
+        if (forLawyer.isNotEmpty() && !i.lawyerBusy && !i.noAppeal) {
             out.add(
                 Tip(
-                    "⚖", "Mande ao advogado: " + i.suspended.joinToString { nameOf(it) },
+                    "⚖", "Mande ao advogado: " + forLawyer.joinToString { nameOf(it) },
                     "Menu ☰ → Advogado → Iniciar (8 h, grátis). Não use \"Recorre imediatamente\" (gasta Boss Coins).", 80, 4
                 )
             )

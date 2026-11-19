@@ -405,6 +405,17 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (txt != null) { Diag.log("Resumo da tela → $txt"); note(pd.slot, txt, System.currentTimeMillis()) }
     }
 
+    private fun reportLine(slot: Int, f: Map<String, StoredField>): String {
+        fun v(k: String) = f[k]?.value?.takeIf { FieldMerge.known(it) }
+        val fm = v(K.RIVAL_FORMATION); val pl = v(K.RIVAL_PLAN)
+        return when {
+            fm != null && pl != null -> "✅ S$slot: Análise do rival lida (formação $fm • $pl)."
+            fm != null -> "S$slot: Análise do rival, tela 1 lida (formação $fm). Falta a 2ª tela (estilo e marcação)."
+            pl != null -> "S$slot: Análise do rival, tela 2 lida ($pl). Falta a 1ª tela (formação)."
+            else -> "S$slot: Análise do rival: não consegui ler formação nem estilo."
+        }
+    }
+
     private fun why(slot: Int, text: String) { Diag.log("Tática automática S$slot: $text") }
 
     /** Pré-jogo/Análise lidos com o jogo longe (fora das 8 h): diz o que foi lido e que a tática só sai nas 8 h antes (cada tela fala; o mesmo texto não repete em 1 min). */
@@ -488,14 +499,15 @@ class FramePipeline private constructor(private val ctx: Context) {
             val chk = if (justRead) now else old?.optLong("chk", 0L)?.takeIf { it > 0L }
             repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { chk?.let { put("chk", it) } }.toString(), now))
             // só avisa quando acabou de ler a Análise; entrar no slot não gera mensagem (o cartão já mostra o estado da tática)
-            if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
+            // 19/11: sem a regra das "2 telas na mesma passada" a Análise lida não dizia nada: agora sempre diz o que leu
+            if (type == ScreenType.REPORT) note(slot, (delta ?: reportLine(slot, f)) + " A tática gerada continua valendo.", now)
             return
         }
         // só a força (dos dois times) mudou e a tática ainda vale: a força oscila e não muda a decisão; não regera nem avisa (só atualiza a assinatura)
         val onlyStrength = valid && oldParts != null && changed.isNotEmpty() && changed.all { it == K.RIVAL_STRENGTH || it == K.MY_STRENGTH }
         if (onlyStrength) {
             repo.dao.putPlan(PlanEntity(slot, "autogen", JSONObject().put("sig", sig).put("at", old?.optLong("at") ?: now).apply { old?.optLong("chk", 0L)?.takeIf { it > 0L }?.let { put("chk", it) } }.toString(), now))
-            if (justRead) note(slot, (delta ?: "✅ S$slot: Análise lida.") + " A tática gerada continua valendo.", now)
+            if (type == ScreenType.REPORT) note(slot, (delta ?: reportLine(slot, f)) + " A tática gerada continua valendo.", now)
             return
         }
         if (same && now - (old?.optLong("at") ?: 0L) < 300_000L) return
@@ -813,6 +825,11 @@ class FramePipeline private constructor(private val ctx: Context) {
                     val bx = (box[0] - 1).coerceAtLeast(0); val by = (box[1] - 1).coerceAtLeast(0)
                     val bw2 = (box[2] + 2).coerceAtMost(ww) - bx; val bh2 = (box[3] + 2).coerceAtMost(hh) - by
                     if (bw2 >= 8 && bh2 >= 8) { val c2 = Bitmap.createBitmap(crop, bx, by, bw2, bh2); crop.recycle(); crop = c2 }
+                } else {
+                    // bandeira de topo BRANCO (Polônia, Japão, Finlândia…) tem o canto igual ao fundo da linha e a caixa não é achada: usa a caixa
+                    // esperada (35×24 px) centrada no recorte, em vez da área inteira cheia de fundo branco (19/11: Szymański ficava sem bandeira)
+                    val ew = (0.0273f * bmp.width).toInt().coerceIn(8, ww); val eh = (0.0426f * bmp.height).toInt().coerceIn(8, hh)
+                    val c2 = Bitmap.createBitmap(crop, (ww - ew) / 2, (hh - eh) / 2, ew, eh); crop.recycle(); crop = c2
                 }
             }
             val small = Bitmap.createScaledBitmap(crop, outW, outH, true)
@@ -865,7 +882,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (moving && old != null) continue
             val t = thumb(bmp, x, y, 0.040f, 0.062f, 48, 32, refine = true) ?: continue   // a bandeira do plantel mede 0,028×0,043 (36×24 px em 1280×564): a caixa tem ~1,5 px de folga
             // sem imagem boa ainda: só entra se não for bem mais borrada que as já guardadas; depois só troca por uma mais nítida
-            val ok = if (old == null) (refQ <= 0f || t.first >= refQ * 0.6f) else t.first > old * 1.08f + 1f
+            // quem ainda não tem NENHUMA imagem aceita uma bem menos nítida (bandeira de pouco contraste tem gradiente baixo); depois só troca por mais nítida
+            val ok = if (old == null) (refQ <= 0f || t.first >= refQ * 0.25f) else t.first > old * 1.08f + 1f
             if (ok) { cur.put(key, "q:${(t.first * 10).toInt()}|${t.second}"); n++ }
         }
         if (n > 0) {

@@ -1047,7 +1047,9 @@ object Parsers {
      * "18h" (custo do melhoramento), "24h" (selo do treinador universal) e "-2h" (anúncio) ficam de fora.
      */
     fun timerSecs(text: String): Long? {
+        // o OCR troca o dígito das horas por letra ("Gh 17m 15s" = 6h 17m 15s; 19/11: o treino do Brozovic aparecia terminando em 5 min): letra solta antes de "h" + minutos
         val t = text.lowercase().replace(Regex("(?<=\\d)[oO]|[oO](?=\\d)"), "0")
+            .replace(Regex("(?<![0-9a-z])([gsbliz])\\s*h(?=\\s*\\d)")) { m -> (when (m.groupValues[1]) { "g" -> "6"; "s" -> "5"; "b" -> "8"; "l", "i" -> "1"; else -> "2" }) + "h" }
         if (t.trim().startsWith("-")) return null
         val units = Regex("(\\d{1,3})\\s*([dhms])(?![a-z])").findAll(t).map { Pair(it.groupValues[1].toLong(), it.groupValues[2]) }.toList()
         if (units.size < 2 || units.map { it.second }.distinct().size != units.size) return null

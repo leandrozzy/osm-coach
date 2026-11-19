@@ -103,7 +103,9 @@ object Screens {
         val card = t.contains("tratamento em curso") && t.contains("idade") && !t.contains("tratar imediatamente")
         // o número dentro da cruz vermelha = tratamentos que ainda faltam para esse jogador (ex.: 3)
         val cross = if (card) o.tokens.firstOrNull { t -> t.xc in 0.66f..0.84f && t.yc in 0.40f..0.60f && t.text.trim().length == 1 && t.text.trim()[0] in '1'..'9' }?.text?.trim()?.toIntOrNull() else null
-        return JSONObject().put("empty", empty).put("lines", lines).put("busy", busy).put("card", card).put("cross", cross ?: JSONObject.NULL).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
+        // "Li o caso de Mancini. Infelizmente não posso apresentar recurso!" (linha longa: não entra em `lines`): guarda o NOME do jogador
+        val noAppealName = if (noAppeal) o.lines.firstNotNullOfOrNull { ln -> Regex("(?i)li\\s+o\\s+caso\\s+de\\s+(.+?)\\.").find(ln.text)?.groupValues?.get(1)?.trim()?.takeIf { it.length in 3..40 } } else null
+        return JSONObject().put("noAppealName", noAppealName ?: JSONObject.NULL).put("empty", empty).put("lines", lines).put("busy", busy).put("card", card).put("cross", cross ?: JSONObject.NULL).put("endsIn", secs ?: JSONObject.NULL).put("noAppeal", noAppeal)
     }
 
     // ------------------------------------------------------------ especialistas
