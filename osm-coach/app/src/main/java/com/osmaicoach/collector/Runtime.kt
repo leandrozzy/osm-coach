@@ -63,6 +63,43 @@ object Diag {
         return listOf(java.io.File(f.parentFile, "trace.1.log"), f).filter { it.exists() }
     }
 
+    /**
+     * LOG AO VIVO (19/11): decisões e avisos em UMA linha cada (sem texto de OCR), em arquivo próprio que sobrevive ao app fechar e vai no JSON do
+     * diagnóstico ("live"). Assim o diagnóstico mostra o que o app leu, decidiu e pediu ao longo do dia, sem gravar a tela.
+     */
+    private const val LIVE_MAX = 1_200_000L
+    private var lastLive = ""
+    @Synchronized
+    fun live(msg: String) {
+        val f = logFile ?: return
+        if (msg == lastLive) return
+        lastLive = msg
+        try {
+            val lf = java.io.File(f.parentFile, "live.log")
+            if (lf.length() > LIVE_MAX) {
+                val old = java.io.File(f.parentFile, "live.1.log"); old.delete(); lf.renameTo(old)
+            }
+            lf.appendText(SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault()).format(Date()) + "  " + msg.take(600) + "\n")
+        } catch (e: Exception) { }
+    }
+
+    /** Últimas linhas do log ao vivo (as mais antigas primeiro). */
+    @Synchronized
+    fun liveTail(max: Int): List<String> {
+        val f = logFile ?: return emptyList()
+        val out = ArrayList<String>()
+        for (n in listOf("live.1.log", "live.log")) runCatching { java.io.File(f.parentFile, n).takeIf { it.exists() }?.readLines()?.let { out.addAll(it) } }
+        return if (out.size > max) out.subList(out.size - max, out.size) else out
+    }
+
+    /** Linha "o que o app está pedindo agora" só quando a lista MUDA (a contagem regressiva não conta). */
+    private var lastAsk = ""
+    fun ask(sig: String, text: String) {
+        if (sig == lastAsk) return
+        lastAsk = sig
+        live("PARA FAZER: $text")
+    }
+
     private fun persist(line: String) {
         val f = logFile ?: return
         try {
@@ -87,6 +124,7 @@ object Diag {
         history.add(line)
         while (history.size > 400) history.removeAt(0)
         persist(line)
+        if (!msg.startsWith("OCR ")) live(msg)
     }
 
     /** Histórico longo (para o diagnóstico exportado): eventos e o texto lido nas telas importantes. */

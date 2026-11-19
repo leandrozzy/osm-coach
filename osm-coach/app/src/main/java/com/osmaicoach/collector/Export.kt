@@ -218,6 +218,8 @@ object DiagExport {
         for (l in dao.allLearning(3000)) learning.put("${l.at} S${l.slotId} ${l.kind}: ${l.text}")
         root.put("learning", learning)
         root.put("pipeline", JSONArray(Diag.historyLines()))
+        // log ao vivo persistente (decisões, avisos da bolha e o que o app pediu em "Para fazer"): sobrevive ao app fechar
+        root.put("live", JSONArray(Diag.liveTail(3000)))
         return root
     }
 

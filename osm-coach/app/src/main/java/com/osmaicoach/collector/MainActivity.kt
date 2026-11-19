@@ -1644,6 +1644,19 @@ internal suspend fun loadToday(ctx: Context): TodayData {
     val res = runCatching {
         Results.of((1..4).flatMap { sl -> repo.dao.tacticLogs(sl).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() } })
     }.getOrNull()
+    runCatching {
+        // log ao vivo: o que o app está pedindo agora, por slot, e por quê (só quando muda)
+        val parts = ArrayList<String>(); val sig = StringBuilder()
+        for (sl in list) {
+            if (sl.ended || sl.state != null) continue
+            val ageStr = sl.readAges.withIndex().joinToString(",") { (i, v) -> listOf("pre", "ana", "rival", "meu").getOrElse(i) { "?" } + "=" + (v?.let { a -> (a / 3_600_000L).toString() + "h" } ?: "-") }
+            val st = "S${sl.slot}: tática=" + (if (sl.tacticReady) "pronta" else if (sl.tacticStale) "velha(reler rival)" else if (sl.rivalGaps) "faltam leituras" else "sem tática") +
+                (if (sl.mounted) " montada" else "") + (if (sl.rivalChanged.isNotEmpty()) " rival-mudou" else "") + (if (sl.needsResult) " falta-resultado" else "") + " leituras[$ageStr]"
+            parts.add(st); sig.append(st.replace(Regex("=\\d+h"), "="))
+        }
+        for (n in needs.filter { it.urgency >= 1 }) { val t = "S${n.slot} ${Fresh.NAME[n.type] ?: n.type.name}(u${n.urgency}): ${n.reason}"; parts.add(t); sig.append(t.replace(Regex("\\d+"), "#")) }
+        if (parts.isNotEmpty()) Diag.ask(sig.toString(), parts.joinToString(" | "))
+    }
     return TodayData(Control.activeSession(ctx) != null, list, work, needs.sortedWith(compareByDescending<Fresh.Need> { it.urgency }.thenBy { it.slot }), acc, res).also { TodayCache.last = it }
 }
 

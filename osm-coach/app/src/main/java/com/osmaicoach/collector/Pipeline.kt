@@ -171,6 +171,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         val l = lastNote[slot]
         if (l != null && l.first == text && now - l.second < ttl) return
         lastNote[slot] = text to now
+        Diag.live("BOLHA S$slot: $text")
         CaptureService.instance?.notice(text)
     }
 

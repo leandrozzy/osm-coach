@@ -661,6 +661,17 @@ internal fun SettingsTab() {
         }
         SectionLabel("Dados", "Capturas guardadas, leitura com IA e diagnóstico")
         Fold("📼", "Capturas e leitura com IA") { SessionsBody() }
+        Fold("📜", "Log ao vivo (o que o app leu, avisou e pediu)") {
+            Hint("Registro em uma linha por decisão: telas lidas, avisos da bolha e o que está em \"Para fazer\" e por quê. Fica salvo mesmo com o app fechado e vai dentro do diagnóstico (campo \"live\"): não precisa gravar a tela.", "log ao vivo")
+            var lines by remember { mutableStateOf(Diag.liveTail(60)) }
+            OutlinedButton(onClick = { lines = Diag.liveTail(60) }, modifier = Modifier.fillMaxWidth()) { Text("🔄 Atualizar lista", fontSize = 13.sp) }
+            OutlinedButton(onClick = {
+                val txt = Diag.liveTail(1500).joinToString("\n")
+                ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, txt) }, "Compartilhar log").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("📤 Compartilhar o log (últimas 1500 linhas)", fontSize = 13.sp) }
+            for (l in lines.asReversed()) Text(l, fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            if (lines.isEmpty()) Text("Ainda sem registros.", fontSize = 13.sp, color = C.MUTED)
+        }
         Fold("📦", "Exportar diagnóstico") {
             Hint(
                 "Gera um arquivo com TUDO o que o app tem (campos, elenco, calendário, análises do fim do jogo, táticas, telas lidas, " +
