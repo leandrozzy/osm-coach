@@ -35,8 +35,12 @@ object ScreenClassifier {
         }
         // Pré-jogo ANTES do mercado: a tela do próximo jogo tem o botão "Vender jogadores" (batalha e liga) e
         // era lida como mercado — o slot nunca recebia rival, contagem nem bônus.
-        if (t.contains("preparacao para o jogo") || (t.contains("jogo rapido") && t.contains("treino")) ||
-            (jornada.containsMatchIn(t) && t.contains("arbitro") && t.contains("vs"))
+        // OCR real (19/11, S2): "PREPARAÇÃO PARA O J0G0" (zeros no lugar de O) e o "VS" lido como "-US" derrubavam o Pré-jogo para o Mercado
+        // sempre que o 4º cartão dizia "VENDER JOGADORES": o rival, as forças e o árbitro daquele jogo nunca eram lidos. Zeros viram "o" nas
+        // palavras-chave e basta "Jornada N" + "Árbitro" (o mercado e as listas não têm árbitro).
+        val tz = t.replace('0', 'o')
+        if (tz.contains("preparacao para o jogo") || tz.contains("preparacao para o jo") || (tz.contains("jogo rapido") && tz.contains("treino")) ||
+            (jornada.containsMatchIn(t) && t.contains("arbitro"))
         ) return ScreenType.PREGAME
         if (t.contains("vender jogadores") || t.contains("lista de transferencias") ||
             (t.contains("olheiro") && t.contains("negociacoes"))

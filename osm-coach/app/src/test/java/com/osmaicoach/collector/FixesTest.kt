@@ -297,4 +297,20 @@ class FixesTest {
         val club = Parsers.squad(Fx.ocr(Fx.line("Nota mais alta:", 0.03f, 0.32f), Fx.line("Posição: 9", 0.08f, 0.15f), Fx.line("Atalanta", 0.08f, 0.24f)), null)
         org.junit.Assert.assertEquals("Atalanta", club.ownerTeam)
     }
+
+    @Test fun pregameWithSellPlayersCardAndNoisyOcrIsNotMarket() {
+        // OCR real do S2 em 19/11: "PREPARAÇÃO PARA O J0G0", "-US" no lugar de VS e o 4º cartão "VENDER JOGADORES"
+        val o = Fx.ocr(
+            Fx.line("JOGO RÁPIDO", 0.10f, 0.65f), Fx.line("Liefering", 0.23f, 0.37f), Fx.line("leandrozzy", 0.24f, 0.41f), Fx.line("21/26 PONTOS", 0.20f, 0.72f),
+            Fx.line("Jornada 18", 0.50f, 0.13f), Fx.line("16h 25m 04s", 0.50f, 0.18f), Fx.line("-US", 0.49f, 0.32f), Fx.line("PREPARAÇÃO PARA O J0G0", 0.44f, 0.65f),
+            Fx.line("Arbitro", 0.52f, 0.47f), Fx.line("RAZOÁVEL", 0.52f, 0.72f), Fx.line("SK Rapid Wien", 0.77f, 0.37f), Fx.line("VENDER JOGADORES", 0.92f, 0.74f)
+        )
+        assertEquals(ScreenType.PREGAME, ScreenClassifier.classify(o, true))
+        // sem o texto da preparação, só "Jornada" + "Árbitro" também basta
+        val o2 = Fx.ocr(Fx.line("Jornada 18", 0.50f, 0.13f), Fx.line("Arbitro", 0.52f, 0.47f), Fx.line("Liefering", 0.23f, 0.37f), Fx.line("VENDER JOGADORES", 0.92f, 0.74f), Fx.line("SK Rapid", 0.77f, 0.37f))
+        assertEquals(ScreenType.PREGAME, ScreenClassifier.classify(o2, true))
+        // a lista de transferências de verdade continua sendo mercado
+        val m = Fx.ocr(Fx.line("Vender jogadores 1/4", 0.5f, 0.2f), Fx.line("Idade", 0.5f, 0.3f), Fx.line("Valor", 0.9f, 0.3f), Fx.line("Jogador", 0.1f, 0.3f), Fx.line("Lista de transferências", 0.3f, 0.1f))
+        assertEquals(ScreenType.MARKET, ScreenClassifier.classify(m, true))
+    }
 }
