@@ -80,7 +80,7 @@ object ArtsAi {
 
     private const val STYLE = "Cinematic sports press photograph for a football club announcement, vertical poster, ultra realistic, sharp focus, dramatic lighting, " +
         "shallow depth of field, rich contrast, no text, no letters, no logos, no watermark, " +
-        "men's professional association football (soccer) only, never American football, no helmets, no shoulder pads, every person is an adult man aged 25 to 32 " +
+        "men's professional association football (soccer) only: round black-and-white soccer ball, short-sleeve soccer jerseys, shorts, socks and cleats, bare heads, green grass pitch with white lines; NEVER American football, no helmet, no face mask, no headgear, no shoulder pads, no rugby, every person is an adult man aged 25 to 32 " +
         "with a mature masculine face, no women, no children, natural realistic faces and proportions, photographic skin texture"
 
     /** Pedido da cena por tipo de arte. [colors] vem do escudo; [kit] é a camisa do clube descrita pela IA de texto (pode ser vazia); [look] são cabelo/barba. */
@@ -110,6 +110,8 @@ object ArtsAi {
                 "wearing $shirt, dramatic backlight, stadium floodlights, smoke and sparks, dark $colors color grading. The players fill the upper half of the frame and the bottom half is dark smoke"
             "MOMENT" -> "$STYLE. Football fans waving flags and holding $colors flares in a packed night stadium, smoke, floodlights, energetic atmosphere, " +
                 "dark $colors color grading. The bottom half of the frame is dark smoke"
+            "RECOVER" -> "$STYLE. Fictional soccer players bare-headed in $colors jerseys huddled together on the grass pitch at dawn, arms around each other's shoulders, determined faces, " +
+                "stadium floodlights breaking through the mist, hopeful comeback atmosphere, seen from a distance. The bottom third of the frame is dark smoke"
             else -> "$STYLE. Wide cinematic view of a packed football stadium at night with bright floodlights, $colors flags and flares in the stands, smoke, " +
                 "dark $colors color grading. The bottom third of the frame is dark smoke"
         }
@@ -197,7 +199,7 @@ object ArtsAi {
     /** Cena do jornal pós-jogo (torcida/jogadores), conforme o resultado. */
     fun matchScenePrompt(result: String, colors: String): String = when (result) {
         "V" -> "$STYLE. Fictional football players and fans celebrating a victory in a night stadium, arms raised, $colors flares and confetti, joyful atmosphere. The bottom third of the frame is dark smoke"
-        "D" -> "$STYLE. A fictional football player kneeling on the pitch dejected after a defeat, hands on face, empty stands behind, night stadium, cold blue light, moody atmosphere. The bottom third of the frame is dark smoke"
+        "D" -> "$STYLE. Fictional soccer players bare-headed in $colors jerseys huddled together on the grass pitch after a defeat, arms around each other, determined faces, floodlights breaking through the mist, hopeful comeback atmosphere, seen from a distance. The bottom third of the frame is dark smoke"
         else -> "$STYLE. Two lines of fictional football players shaking hands on the pitch after a draw, night stadium, floodlights, tense calm atmosphere, $colors tones. The bottom third of the frame is dark smoke"
     }
 

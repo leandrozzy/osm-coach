@@ -467,6 +467,7 @@ object Arts {
         var kit = ""; var look = ""
         var oppCrest: Bitmap? = null
         var photo: Bitmap? = null
+        var badScene = false
         val banner: String; val big: String; val info: String; val plate: Pair<String, String>?; val foot: String
         when (c.kind) {
             "BUY", "PLAYER" -> {
@@ -524,8 +525,9 @@ object Arts {
                 val l5 = ms.takeLast(5)
                 val a5 = if (l5.isEmpty()) 0 else Math.round(100f * (3 * l5.count { it.result == "V" } + l5.count { it.result == "E" }) / (3 * l5.size))
                 val rowsM = listOf(ArtsDraw.Row("Aproveitamento", "$a5%", a5 / 100f), ArtsDraw.Row("Gols marcados × sofridos", "${l5.sumOf { it.scoreMine ?: 0 }} × ${l5.sumOf { it.scoreOpp ?: 0 }}"))
-                val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
-                val outM = ArtsDraw.list(th, scene, crest, null, "MOMENTO DO TIME", rowsM, "Cinco jogos, uma história!", dots = l5.joinToString("") { it.result.orEmpty() })
+                val badM = l5.size >= 3 && a5 < 40
+                val scene = ArtsAi.scene(ArtsAi.prompt(if (badM) "RECOVER" else c.kind, colors, "", ""), seed) ?: return null
+                val outM = ArtsDraw.list(th, scene, crest, null, if (badM) "HORA DE REAGIR" else "MOMENTO DO TIME", rowsM, if (badM) "Não está bom: vamos melhorar!" else "Cinco jogos, uma história!", dots = l5.joinToString("") { it.result.orEmpty() })
                 scene.recycle(); return outM
             }
             "MATCHDAY", "COMPARE" -> {
@@ -551,7 +553,7 @@ object Arts {
                 val awayM = f[K.HOME]?.value?.lowercase() == "fora"   // em casa à esquerda
                 banner = "DIA DE JOGO"; big = if (my != null && rv != null) (if (awayM) "$rv × $my" else "$my × $rv") else "J${round ?: ""}"
                 info = listOfNotNull(round?.let { "Rodada $it" }, home?.lowercase(), if (f[K.RIVAL_HUMAN]?.value == "Sim") "rival humano" else "rival CPU").joinToString("  •  ")
-                plate = prob?.let { "CHANCE DE VITÓRIA" to "${it.win}%" }
+                plate = prob?.let { "CHANCE DE VITÓRIA" to "$team ${it.win}%  •  Empate ${it.draw}%  •  $rival ${it.loss}%" }
                 foot = "Hoje é dia de decidir!"
                 val sceneV = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
                 val oppT = theme(oppCrest, (slot % 4) + 1)
@@ -568,13 +570,15 @@ object Arts {
             }
             else -> {   // CAMP, SEASON (à mão)
                 if (ms.isEmpty()) return null
-                banner = if (c.kind == "SEASON") "RESUMO DA TEMPORADA" else "CAMPANHA ATÉ AGORA"; big = rec
+                val bad = ms.size >= 3 && aprov < 40
+                banner = if (c.kind == "SEASON") "RESUMO DA TEMPORADA" else if (bad) "HORA DE REAGIR" else "CAMPANHA ATÉ AGORA"; big = rec
                 info = (comp?.let { "$it  •  " } ?: "") + "gols $gf × $ga"; plate = "APROVEITAMENTO" to "$aprov%"
-                foot = if (c.kind == "SEASON") "Obrigado, torcida!" else "A jornada continua!"
+                foot = if (bad) "Não está bom, mas dá para melhorar!" else if (c.kind == "SEASON") "Obrigado, torcida!" else "A jornada continua!"
+                badScene = bad
             }
         }
         // com foto real do jogador a cena é só o estádio (sem atleta fictício ao lado do rosto verdadeiro)
-        val scene = ArtsAi.scene(ArtsAi.prompt(if (photo != null) "SEASON" else c.kind, colors, kit, look), seed) ?: return null
+        val scene = ArtsAi.scene(ArtsAi.prompt(if (photo != null) "SEASON" else if (badScene) "RECOVER" else c.kind, colors, kit, look), seed) ?: return null
         val hero = c.kind in listOf("EXPECT", "STREAK", "LEADER", "CAMP", "SEASON")
         val awayG = c.kind == "GOLEADA" && last?.home == false
         val out = ArtsDraw.poster(th, scene, if (awayG) oppCrest else crest, if (awayG) crest else oppCrest, banner, big, info, plate, foot, heroCrest = hero, look = ArtsDraw.Look(photo = photo, kind = c.kind))

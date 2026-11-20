@@ -219,8 +219,11 @@ internal object ArtsDraw {
                     text(c, n.first.uppercase(), (30f + W / 2f + 36f) / 2f, 915f, 38f, onColor(th.kit), maxw = W / 2f - 110f, align = 'c', skew = -0.12f)
                     text(c, n.second.uppercase(), (W / 2f - 36f + W - 30f) / 2f, 915f, 38f, onColor(opp.kit), maxw = W / 2f - 110f, align = 'c', skew = -0.12f)
                 }
-                title(c, big, W / 2f, 1060f, 80f, maxw = W - 140f)
-                if (plate != null) text(c, plate.first + "  " + plate.second, W / 2f, 1130f, 40f, Color.WHITE, maxw = W - 100f, align = 'c', skew = -0.08f)
+                title(c, big, W / 2f, 1030f, 76f, maxw = W - 140f)
+                if (plate != null) {
+                    text(c, plate.first, W / 2f, 1092f, 32f, argb(255, 255, 214, 120), maxw = W - 100f, align = 'c', skew = -0.08f)
+                    text(c, plate.second, W / 2f, 1146f, 34f, Color.WHITE, maxw = W - 80f, align = 'c', skew = -0.08f)
+                }
                 footBand(c, th, 1200f, footer)
             }
             oppCrest != null -> {   // goleada: placar com os dois escudos
@@ -246,7 +249,7 @@ internal object ArtsDraw {
             heroCrest -> {
                 sceneBase(c, th, scene, 560f)
                 c.drawCircle(W / 2f, 360f, 280f, P(color = withA(th.kit, 80), blur = 60f))
-                crestPlain(c, crest, W / 2f, 360f, 420f)
+                crestPlain(c, crest, W / 2f, 340f, 340f)
                 title(c, big.uppercase(), W / 2f, 800f, 220f, maxw = W - 80f)
                 band2(c, 60f, 850f, W - 60f, 88f, th.kit)
                 text(c, banner, W / 2f, 912f, 44f, onColor(th.kit), maxw = W - 200f, align = 'c', skew = -0.12f)
