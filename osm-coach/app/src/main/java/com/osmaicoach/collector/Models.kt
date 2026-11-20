@@ -146,7 +146,9 @@ data class Extraction(
     /** Calendário no topo: faixa com o escudo + nome de TODOS os clubes da liga (centro do escudo na captura, 0..1). */
     val crests: List<CrestSpot> = emptyList(),
     /** Plantel: linhas com idade, força e valor lidos mas SEM nome legível (o OCR perde nomes curtos, ex. "Ba"): a faixa do nome é relida ampliada. */
-    val nameless: List<PlayerRead> = emptyList()
+    val nameless: List<PlayerRead> = emptyList(),
+    /** Linhas com idade lida que NÃO viraram jogador (e por quê): vai ao log ao vivo para achar a causa de jogador sumido. */
+    val dropped: List<String> = emptyList()
 )
 
 data class CrestSpot(val team: String, val x: Float, val y: Float)
@@ -672,14 +674,31 @@ object PlayerName {
         return false
     }
 
+    /** Troca dígitos lidos no lugar de letras: 0→O/o, 8→B, 1→l, 5→S (maiúscula no começo da palavra ou depois de hífen/apóstrofo). */
+    internal fun fixDigits(w: String): String {
+        val sb = StringBuilder()
+        for ((i, c) in w.withIndex()) {
+            val start = i == 0 || w[i - 1] == '-' || w[i - 1] == '\'' || w[i - 1] == '’'
+            sb.append(when (c) {
+                '0' -> if (start) 'O' else 'o'
+                '8' -> if (start) 'B' else 'e'
+                '1' -> if (start) 'I' else 'l'
+                '5' -> if (start) 'S' else 's'
+                else -> c
+            })
+        }
+        return sb.toString()
+    }
+
     /** Nome limpo, ou null se o que sobrou não é um nome de jogador. */
     fun clean(raw: String, minLetters: Int = 3): String? {
         var t = raw.trim()
         for (p in PHRASES) t = p.replace(t, " ")
         val out = ArrayList<String>()
         for (w00 in t.split(Regex("\\s+")).filter { it.isNotBlank() }) {
-            // nome curto do Plantel com 1ª letra lida como número ("8a" no lugar de "Ba", "0z" no lugar de "Oz"): só com minLetters<3 (linha com força e valor)
-            val w0 = if (minLetters < 3 && Regex("^[80][a-z]{1,4}$").matches(w00)) (if (w00[0] == '8') "B" else "O") + w00.substring(1) else w00
+            // Plantel (minLetters<3, linha com força e valor): o OCR troca letra por número ("8a" no lugar de "Ba", "Hudson-0doi" no lugar de "Hudson-Odoi")
+            val w0 = if (minLetters < 3 && w00.any { it.isDigit() } && w00.count { it.isLetter() } >= 1 && w00.count { it.isDigit() } <= 2)
+                fixDigits(w00) else w00
             // "189GOLAubameyang": número e rótulo em maiúsculas colados na frente do nome
             val w = Regex("^\\d+[A-Z]{2,}(?=[A-Z][a-z])").replace(w0, "")
             if (w.any { it.isDigit() }) continue

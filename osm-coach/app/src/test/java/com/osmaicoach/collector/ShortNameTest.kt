@@ -25,4 +25,9 @@ class ShortNameTest {
         assertEquals("Ba", PlayerName.clean("8a", 2))
         assertNull(PlayerName.clean("8a"))
     }
+
+    @Test fun digitInsideNameIsFixed() {
+        assertEquals("Hudson-Odoi", PlayerName.clean("Hudson-0doi", 2))
+        assertNull(PlayerName.clean("Hudson-0doi"))
+    }
 }

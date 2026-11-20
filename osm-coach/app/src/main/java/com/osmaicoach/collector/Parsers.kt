@@ -380,6 +380,7 @@ object Parsers {
 
         val players = ArrayList<PlayerRead>()
         val nameless = ArrayList<PlayerRead>()
+        val dropped = ArrayList<String>()
         val ageToks = o.tokens.filter { (intTok(it) ?: 0) in 15..45 && abs(it.xc - ageX) <= 0.035f && it.yc > 0.115f }   // linha cortada embaixo da barra do topo (ou do nosso botão) tem nome/valor/bandeira ilegíveis: não vale ("Veaii" 73M do Japão era um DD de 7,3M dos EUA)
         for (a in ageToks) {
             val band = o.tokens.filter { abs(it.yc - a.yc) <= 0.04f }
@@ -398,8 +399,8 @@ object Parsers {
                 else -> null
             }?.takeIf { it in 30..120 }
             val value = band.filter { it.xc > 0.85f }.mapNotNull { Money.extract(it.text) }.firstOrNull()
-            if (strength == null && value == null) continue
-            if (name != null && Txt.letters(name) < 3 && (strength == null || value == null)) continue
+            if (strength == null && value == null) { dropped.add("linha idade ${intTok(a)} nome '$rawName' sem força nem valor (pos '${posTok?.text ?: ""}')"); continue }
+            if (name != null && Txt.letters(name) < 3 && (strength == null || value == null)) { dropped.add("nome curto '$name' idade ${intTok(a)} sem ${if (strength == null) "força" else "valor"}"); continue }
             (if (name == null) nameless else players).add(
                 PlayerRead(
                     name = name ?: "",
@@ -431,6 +432,7 @@ object Parsers {
             fields = f,
             players = players,
             nameless = if (strength_ok(nameless)) nameless else emptyList(),
+            dropped = dropped,
             ownerTeam = owner?.text?.trim(),
             ownerNick = nick?.text?.trim(),
             needsAi = needsAi

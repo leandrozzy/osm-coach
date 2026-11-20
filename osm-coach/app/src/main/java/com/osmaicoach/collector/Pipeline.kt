@@ -1031,7 +1031,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (type == ScreenType.SQUAD) ex = runCatching { repairStrength(bmp, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) ex = runCatching { repairBubbles(bmp, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) ex = runCatching { repairRows(bmp, ocr, ex) }.getOrDefault(ex)
-            if (type == ScreenType.SQUAD) ex = runCatching { repairNames(bmp, ex) }.getOrDefault(ex)
+            if (type == ScreenType.SQUAD) { ex.dropped.take(3).forEach { Diag.log("Plantel: linha descartada — $it") }; ex = runCatching { repairNames(bmp, ex) }.getOrDefault(ex) }
             Diag.parsed.incrementAndGet()
 
             // Rolando a lista o cabeçalho some: reaproveita o dono lido por último (mesmo tipo e slot, até 10 min).
