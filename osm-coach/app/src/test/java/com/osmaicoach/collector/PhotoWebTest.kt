@@ -55,4 +55,24 @@ class PhotoWebTest {
         val a = c(3, "A. Silva", "Andre", "Silva", 31, "Brazil"); val b = c(4, "B. Silva", "Bruno", "Silva", 31, "Brazil")
         assertEquals("amb", PhotoWeb.pick("Silva", 31, "br", listOf(a, b)).state)
     }
+
+    @Test fun wikiFilterKeepsFootballerBornInRightYear() {
+        val hits = listOf(
+            PhotoWeb.WikiHit("Q1", "Senegalese association football player (born 1998)"),
+            PhotoWeb.WikiHit("Q2", "French footballer (born 1999)"),
+            PhotoWeb.WikiHit("Q3", "Senegalese footballer (born 1992)"),
+            PhotoWeb.WikiHit("Q4", "Senegalese politician (born 1998)")
+        )
+        val r = PhotoWeb.wikiFilter(hits, 28, "Senegal", 2026)
+        assertEquals(listOf("Q1"), r.map { it.qid })
+        // sem nacionalidade conhecida: 1998 e 1997 (aniversário) valem, 1999 não com idade 28
+        assertEquals(listOf("Q1"), PhotoWeb.wikiFilter(hits, 28, null, 2026).map { it.qid })
+        assertTrue(PhotoWeb.wikiFilter(hits, null, null, 2026).isEmpty())
+    }
+
+    @Test fun wikiLabelNeedsGameNameWords() {
+        assertTrue(PhotoWeb.wikiLabelOk("Sarr", "Ismaïla Sarr"))
+        assertTrue(PhotoWeb.wikiLabelOk("van de Ven", "Micky van de Ven"))
+        assertTrue(!PhotoWeb.wikiLabelOk("Sarr", "Pape Matar"))
+    }
 }

@@ -239,6 +239,11 @@ object PhotoWeb {
 
     /** Chamado pelo monitor, ao abrir o app e ao salvar a chave. Vários chamados juntos viram um só; no máx. 1 rodada por minuto. */
     suspend fun run(ctx: Context, force: Boolean = false) {
+        runApi(ctx, force)
+        runWiki(ctx, force)
+    }
+
+    private suspend fun runApi(ctx: Context, force: Boolean) {
         if (running || !hasKey(ctx) || Settings.get(ctx, "web_photos", "1") != "1") return
         if (!force && System.currentTimeMillis() - lastRun < 60_000L) return
         if (blockedToday(ctx) || usedToday(ctx) >= BUDGET) return
@@ -308,6 +313,120 @@ object PhotoWeb {
 
     /** Chave nova: libera o bloqueio do dia (401/403 da chave antiga). Os "sem acerto" NÃO são limpos: só voltam depois de tentar todos. */
     fun keyChanged(ctx: Context) { prefs(ctx).edit().remove("blocked").apply() }
+
+    // ------------------------------------------------------------------ Wikidata + Wikimedia Commons (sem chave e sem cota)
+
+    private const val WIKI_UA = "OSMCoach/5 (app pessoal de futebol)"
+    private const val WIKI_RETRY_MS = 14L * 86400000L
+    @Volatile private var wikiRunning = false
+    @Volatile private var lastWiki = 0L
+
+    class WikiHit(val qid: String, val desc: String)
+
+    /** A descrição do Wikidata ("Senegalese association football player (born 1998)") tem o ano de nascimento: confere com a idade do jogo (±1 por causa do aniversário). */
+    fun wikiYearOk(desc: String, age: Int?, nowYear: Int): Boolean {
+        val a = age ?: return false
+        val y = Regex("born (\\d{4})").find(desc)?.groupValues?.get(1)?.toIntOrNull() ?: return false
+        return y == nowYear - a || y == nowYear - a - 1
+    }
+
+    /** Candidatos da busca que são jogador de futebol nascido no ano certo; com nacionalidade conhecida e algum candidato dela, só esses. */
+    fun wikiFilter(hits: List<WikiHit>, age: Int?, natEn: String?, nowYear: Int): List<WikiHit> {
+        val ok = hits.filter { val d = it.desc.lowercase(); (d.contains("football") || d.contains("soccer")) && wikiYearOk(it.desc, age, nowYear) }
+        val n4 = natEn?.lowercase()?.take(4)
+        if (n4 != null && n4.length >= 3) ok.filter { it.desc.lowercase().contains(n4) }.takeIf { it.isNotEmpty() }?.let { return it }
+        return ok
+    }
+
+    /** O nome do rótulo da entidade tem que conter as palavras do nome do jogo (sem partículas). */
+    fun wikiLabelOk(osm: String, label: String): Boolean {
+        val mine = toks(osm).filter { it.length >= 3 && it !in PARTICLES }
+        if (mine.isEmpty()) return false
+        val theirs = toks(label).toSet()
+        return mine.all { it in theirs || theirs.any { t -> t.length >= 4 && Txt.sim(t, it) >= 0.88 } }
+    }
+
+    private fun wget(url: String): ByteArray? = try {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 12000; c.readTimeout = 25000
+        c.setRequestProperty("User-Agent", WIKI_UA)
+        if (c.responseCode in 200..299) c.inputStream.use { it.readBytes() } else null
+    } catch (e: Exception) { null }
+
+    private fun wikiFile(filesDir: File) = File(dir(filesDir), "_wiki.json")
+    private fun wikiIdx(filesDir: File): JSONObject = runCatching { JSONObject(wikiFile(filesDir).readText()) }.getOrNull() ?: JSONObject()
+
+    /** Foto real pela Wikidata/Commons para quem ficou sem foto da API (sem acerto/ambíguo, sem chave ou cota do dia usada). Roda sozinho, sem chave. */
+    private suspend fun runWiki(ctx: Context, force: Boolean) {
+        if (wikiRunning || Settings.get(ctx, "web_photos", "1") != "1") return
+        if (!force && System.currentTimeMillis() - lastWiki < 60_000L) return
+        wikiRunning = true
+        try {
+            lastWiki = System.currentTimeMillis()
+            val repo = Repo(ctx)
+            val ix = idx(ctx.filesDir)
+            val wx = wikiIdx(ctx.filesDir)
+            val now = System.currentTimeMillis()
+            val apiOn = hasKey(ctx) && !blockedToday(ctx) && usedToday(ctx) < BUDGET
+            val queue = candidatesAll(repo).filter { p ->
+                file(ctx.filesDir, p.nameKey) == null && now - (wx.optJSONObject(p.nameKey)?.optLong("at", 0L) ?: 0L) > WIKI_RETRY_MS &&
+                    !(apiOn && needsTry(ctx.filesDir, ix, p.nameKey))   // a API vai primeiro enquanto ainda não tentou este jogador
+            }.take(40)
+            if (queue.isEmpty()) return
+            val isoMap = FlagManual.all(repo)
+            val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+            var done = 0
+            for (p in queue) {
+                val q = toks(p.name).joinToString(" ")
+                if (q.length < 3) continue
+                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                fun mark(state: String) { wx.put(p.nameKey, JSONObject().put("s", state).put("at", System.currentTimeMillis())); runCatching { wikiFile(ctx.filesDir).writeText(wx.toString()) } }
+                val sUrl = "https://www.wikidata.org/w/api.php?action=query&list=search&format=json&srlimit=50&srsearch=" +
+                    java.net.URLEncoder.encode("$q haswbstatement:P106=Q937857", "UTF-8")
+                val sBody = wget(sUrl) ?: run { Diag.log("Foto web: sem resposta do Wikidata, tento depois"); return }
+                val hits = runCatching {
+                    val arr = JSONObject(String(sBody, Charsets.UTF_8)).getJSONObject("query").getJSONArray("search")
+                    (0 until arr.length()).map { WikiHit(arr.getJSONObject(it).getString("title"), arr.getJSONObject(it).optString("snippet")) }
+                }.getOrNull()
+                if (hits == null) { delay(2500L); continue }
+                val cand = wikiFilter(hits, p.age, natEnglish(iso), year).take(6)
+                if (cand.isEmpty()) { mark("miss"); Diag.log("Foto web de ${p.name}: nenhum jogador nascido em ${p.age?.let { year - it } ?: "?"} no Wikidata"); delay(1500L); continue }
+                delay(1000L)
+                val eBody = wget("https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&props=claims|labels&languages=en&ids=" + cand.joinToString("|") { it.qid })
+                if (eBody == null) { delay(2500L); continue }
+                val good = ArrayList<Pair<String, String>>()   // (rótulo, arquivo da imagem)
+                runCatching {
+                    val ents = JSONObject(String(eBody, Charsets.UTF_8)).getJSONObject("entities")
+                    for (c in cand) {
+                        val e = ents.optJSONObject(c.qid) ?: continue
+                        val label = e.optJSONObject("labels")?.optJSONObject("en")?.optString("value") ?: continue
+                        if (!wikiLabelOk(p.name, label)) continue
+                        val file = e.optJSONObject("claims")?.optJSONArray("P18")?.optJSONObject(0)?.optJSONObject("mainsnak")?.optJSONObject("datavalue")?.optString("value") ?: continue
+                        good.add(label to file)
+                    }
+                }
+                if (good.size != 1) {
+                    mark(if (good.isEmpty()) "miss" else "amb")
+                    Diag.log("Foto web de ${p.name}: ${if (good.isEmpty()) "sem foto no Wikidata" else "mais de um jogador possível, não escolhi"}")
+                    delay(1500L); continue
+                }
+                delay(1000L)
+                val img = wget("https://commons.wikimedia.org/wiki/Special:FilePath/" + java.net.URLEncoder.encode(good[0].second, "UTF-8").replace("+", "%20") + "?width=360")
+                val bmp = img?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+                if (bmp == null) { Diag.log("Foto web de ${p.name}: não consegui baixar a imagem, tento depois"); delay(2500L); continue }
+                val side = minOf(bmp.width, bmp.height)
+                val x0 = (bmp.width - side) / 2
+                val y0 = if (bmp.height > bmp.width) (bmp.height * 0.02f).toInt().coerceAtMost(bmp.height - side) else (bmp.height - side) / 2   // retrato: rosto no alto
+                val sq = Bitmap.createBitmap(bmp, x0, y0, side, side)
+                val out = Bitmap.createScaledBitmap(sq, 192, 192, true)
+                val ok = runCatching { File(dir(ctx.filesDir), "${p.nameKey}.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) } }.isSuccess
+                bmp.recycle(); if (sq !== bmp) sq.recycle(); out.recycle()
+                if (ok) { mark("ok"); done++; Diag.log("Foto web de ${p.name} ← ${good[0].first} (Wikipedia/Commons)"); if (done % 3 == 0) UiBus.bump() } else mark("err")
+                delay(1500L)
+            }
+            if (done > 0) UiBus.bump()
+        } finally { wikiRunning = false }
+    }
 }
 
 /**

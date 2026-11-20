@@ -225,7 +225,13 @@ class FramePipeline private constructor(private val ctx: Context) {
         val k = Txt.key(shown)
         if (k.length < 3) return false
         val p = dao.playersOf(slot).filter { it.owner == "MY" }
-            .filter { (it.nameKey == k || (it.nameKey.length >= 4 && k.endsWith(it.nameKey)) || Txt.sim(it.nameKey, k) >= 0.85) && (age == null || it.age == null || it.age == age) }
+            .filter { pl ->
+                val mine = Txt.norm(pl.name).split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }
+                val card = Txt.norm(shown).split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }
+                (pl.nameKey == k || (pl.nameKey.length >= 4 && k.contains(pl.nameKey)) || Txt.sim(pl.nameKey, k) >= 0.85 ||
+                    (mine.isNotEmpty() && mine.all { m -> card.any { c -> c == m || (m.length >= 4 && Txt.sim(c, m) >= 0.85) } })) &&
+                    (age == null || pl.age == null || pl.age == age)
+            }
             .distinctBy { it.nameKey }.singleOrNull()
         if (p == null) return false   // pode ser de outro slot (photosFrom tenta os demais)
         val now = System.currentTimeMillis()
