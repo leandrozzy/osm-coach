@@ -411,7 +411,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "squadmissat", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -2276,8 +2276,17 @@ class Repo(private val ctx: Context) {
             // 2 leituras completas seguidas sem ele (plano `squadmiss`: nameKey → passadas completas sem o jogador).
             val miss = planJson(slot, "squadmiss")
             val missNew = org.json.JSONObject()
-            for (p in notSeen) missNew.put(p.nameKey, miss.optInt(p.nameKey, 0) + 1)
+            // o reconcile roda a cada 15 s durante a MESMA rolagem: contar cada chamada como "passada" apagava jogador real (Ba do S2) que a rolagem
+            // só pulou. Uma falta só conta de novo 10 min depois da anterior (plano `squadmissat`: nameKey → hora da última falta contada).
+            val missAt = planJson(slot, "squadmissat"); val missAtNew = org.json.JSONObject()
+            for (p in notSeen) {
+                val last = missAt.optLong(p.nameKey, 0L)
+                val n0 = miss.optInt(p.nameKey, 0)
+                if (last == 0L || now - last >= 10 * 60_000L) { missNew.put(p.nameKey, n0 + 1); missAtNew.put(p.nameKey, now) }
+                else { missNew.put(p.nameKey, n0); missAtNew.put(p.nameKey, last) }
+            }
             dao.putPlan(PlanEntity(slot, "squadmiss", missNew.toString(), now))
+            dao.putPlan(PlanEntity(slot, "squadmissat", missAtNew.toString(), now))
             // uma passada COMPLETA (fim da lista + 4 setores + 14 vistos) basta: o usuário quer só os jogadores reais (12/11 exigia 2 passadas e fantasmas ficavam)
             // quem foi lido há MENOS de 20 min (antes desta passada) só sai na 2ª passada seguida sem ele: o OCR perde linhas e Lukébakio/Hudson-Odoi do S2
             // sumiram do elenco (19/11). Quem não é visto há mais tempo (vendido de verdade) sai já na 1ª passada completa.
@@ -2286,7 +2295,7 @@ class Repo(private val ctx: Context) {
             // Na 1ª passada só sai quem estava À VENDA, tem nome de lixo ou foi lido ≤3 vezes (fantasma).
             val gone = notSeen.filter { p ->
                 val n = missNew.optInt(p.nameKey, 0)
-                n >= 2 || (n >= 1 && (p.forSale == true || looksGarbled(p.name) || reads0.optInt(p.nameKey, 0) <= 3))
+                n >= 2 || (n >= 1 && (p.forSale == true || reads0.optInt(p.nameKey, 0) <= 3))
             }
             if (gone.isEmpty() || gone.size > 20) return 0
             val ledger = Ledger.parse(dao.plan(slot, "ledger")?.json)

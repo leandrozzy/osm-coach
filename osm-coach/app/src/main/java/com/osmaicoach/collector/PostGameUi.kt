@@ -1,6 +1,11 @@
 package com.osmaicoach.collector
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -49,48 +54,80 @@ internal fun postRows(logs: List<JSONObject>): List<PostRow> = logs.mapNotNull {
     )
 }.sortedByDescending { it.round }
 
-/** "Histórico pós-jogo": um cartão por jogo com resultado lido, previsão do app, tática usada e se deu certo. Vale para cada slot. */
+/** Aba "Histórico" do slot: resumo no topo + um cartão por jogo (resultado lido, previsão do app, tática usada, veredito). Vale para cada slot. */
 @Composable
-internal fun PostGameHistory(slot: Int, d: SlotData) {
+internal fun SlotHistory(slot: Int, d: SlotData) {
     val rows = postRows(d.logsAll.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() })
     val done = rows.filter { it.result != null }
     val graded = done.filter { it.hit != null }
+    if (rows.isEmpty()) {
+        EmptyState("📒", "Ainda sem jogos", "Gere a tática antes do jogo e leia o Resultado depois: cada jogo aparece aqui com a previsão do app, a tática usada e o veredito.")
+        return
+    }
+    val v = done.count { it.result == "V" }; val e = done.count { it.result == "E" }; val l = done.count { it.result == "D" }
+    val pts = v * 3 + e
+    val pct = if (done.isEmpty()) 0 else pts * 100 / (done.size * 3)
     val hits = graded.count { it.hit == true }
-    val badge = if (graded.isEmpty()) "${done.size} jogo(s)" else "previsão certa em $hits de ${graded.size}"
-    Fold("📒", "Histórico pós-jogo (S$slot)", badge, startOpen = true) {
-        if (rows.isEmpty()) {
-            Text("Ainda sem jogos. Gere a tática antes do jogo e leia o Resultado depois: cada jogo aparece aqui com a previsão, a tática usada e o veredito.", fontSize = 13.sp, color = C.MUTED)
-            return@Fold
+    val hitPct = if (graded.isEmpty()) null else hits * 100 / graded.size
+    val above = done.count { (it.vsExpected ?: 0.0) >= 0.6 }
+    val below = done.count { (it.vsExpected ?: 0.0) <= -0.9 }
+    val deviated = done.count { it.deviated }
+    val pending = rows.count { it.result == null }
+
+    // ---- resumo
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(16.dp)) {
+        Text("📒 Resumo do S$slot", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("🏆", "${v}V ${e}E ${l}D", "${done.size} jogo(s)", C.PRIMARY, Modifier.weight(1f))
+            StatTile("⭐", "$pct%", "aproveitamento", if (pct >= 60) C.OK else if (pct >= 40) C.GOLD else C.BAD, Modifier.weight(1f))
         }
-        if (graded.isNotEmpty()) {
-            val above = done.count { (it.vsExpected ?: 0.0) >= 0.6 }; val below = done.count { (it.vsExpected ?: 0.0) <= -0.9 }
-            Text("🔮 Previsão certa em $hits de ${graded.size} jogo(s). Tática acima do previsto: $above • abaixo: $below.", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("🔮", hitPct?.let { "$it%" } ?: "—", if (graded.isEmpty()) "previsão (sem dados)" else "previsão certa ($hits/${graded.size})", if ((hitPct ?: 0) >= 50) C.OK else C.GOLD, Modifier.weight(1f))
+            StatTile("🎯", "$above↑ $below↓", "tática acima/abaixo do previsto", C.PRIMARY, Modifier.weight(1f))
         }
-        for (r in rows.take(15)) {
-            val col = when (r.result) { "V" -> C.WIN; "D" -> C.LOSS; "E" -> C.DRAW; else -> C.MUTED }
-            Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                Text(
-                    "J${r.round} • ${r.rival}" + (if (r.home == true) " (casa)" else if (r.home == false) " (fora)" else "") + (if (r.human == true) " 👤" else if (r.human == false) " 🤖" else ""),
-                    fontSize = 14.sp, fontWeight = FontWeight.Bold
-                )
-                Text(
-                    (r.result?.let { "Resultado: $it ${r.score}".trim() } ?: "Resultado: ainda não lido"),
-                    fontSize = 13.sp, color = col, fontWeight = FontWeight.SemiBold
-                )
-                if (r.predW != null) {
-                    val f = r.fav
+        Text(
+            buildString {
+                if (pending > 0) append("⏳ $pending jogo(s) esperando o Resultado. ")
+                if (deviated > 0) append("🛠 Em $deviated jogo(s) você jogou diferente do app. ")
+                append("Veredito = pontos reais contra os esperados pela previsão; com poucos jogos é sinal fraco (sorte conta).")
+            },
+            fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp)
+        )
+    }
+
+    // ---- jogo a jogo
+    Title("Jogo a jogo")
+    for (r in rows.take(30)) {
+        val col = when (r.result) { "V" -> C.WIN; "D" -> C.LOSS; "E" -> C.DRAW; else -> C.MUTED }
+        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).osmPanel().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(34.dp).clip(RoundedCornerShape(50)).background(col), contentAlignment = Alignment.Center) {
+                    Text(r.result ?: "?", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0B1C3E))
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("J${r.round} • ${r.rival}", fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(
-                        "Previsão do app: V ${r.predW}% • E ${r.predE}% • D ${r.predD}%" + (if (r.hit == true) " → ✓ acertou ($f)" else if (r.hit == false) " → ✗ errou (esperava $f)" else ""),
-                        fontSize = 12.5.sp, color = C.MUTED
+                        (if (r.home == true) "casa" else if (r.home == false) "fora" else "") + (if (r.human == true) " • humano" else if (r.human == false) " • CPU" else ""),
+                        fontSize = 12.sp, color = C.MUTED
                     )
-                } else Text("Previsão: não guardada neste jogo", fontSize = 12.5.sp, color = C.MUTED)
-                Text(
-                    "Tática: ${r.formation} • ${r.style}" + (if (r.deviated) " (você jogou diferente do app" + (r.genFormation?.let { ": o app indicou $it" } ?: "") + ")" else ""),
-                    fontSize = 12.5.sp, color = C.MUTED
-                )
-                Text(r.verdict, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(if (r.result != null) (r.score.ifBlank { "—" }) else "⏳", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = col)
+            }
+            Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                HistLine("🔮 Previsão", if (r.predW != null) "V ${r.predW}% • E ${r.predE}% • D ${r.predD}%" + (if (r.hit == true) "  ✓ acertou" else if (r.hit == false) "  ✗ errou (esperava ${r.fav})" else "") else "não guardada neste jogo")
+                HistLine("🧩 Tática", "${r.formation} • ${r.style}" + (if (r.deviated) "  🛠 você jogou diferente" + (r.genFormation?.let { " (app: $it)" } ?: "") else ""))
+                HistLine("📝 Veredito", r.verdict)
             }
         }
-        Text("“Acima/abaixo do previsto” compara os pontos reais com os pontos esperados pela chance de V/E/D guardada na hora de gerar a tática. Poucos jogos = sinal fraco (sorte conta).", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
+    }
+    if (rows.size > 30) Text("Mostrando os 30 jogos mais recentes.", fontSize = 12.sp, color = C.MUTED)
+}
+
+@Composable
+private fun HistLine(label: String, text: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.width(96.dp))
+        Text(text, fontSize = 13.sp, modifier = Modifier.weight(1f))
     }
 }

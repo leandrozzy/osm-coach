@@ -2868,7 +2868,7 @@ internal fun DirectorTab(onOpen: (Int, Int) -> Unit) {
                 if (d.next != null) {
                     Row(
                         Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).background(C.PRIMARY.copy(alpha = 0.18f))
-                            .clickable { onOpen(d.s.slot, 6) }.padding(10.dp),
+                            .clickable { onOpen(d.s.slot, 7) }.padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("👉", fontSize = 18.sp)
@@ -2896,7 +2896,7 @@ internal fun DirectorTab(onOpen: (Int, Int) -> Unit) {
                 if (d.week != null) Text(d.week, fontSize = 13.sp, color = OsmColors.YELLOW, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { onOpen(d.s.slot, 4) }, modifier = Modifier.weight(1f)) { Text("Tática", fontSize = 13.sp) }
-                    OutlinedButton(onClick = { onOpen(d.s.slot, 6) }, modifier = Modifier.weight(1f)) { Text("Plano completo", fontSize = 13.sp) }
+                    OutlinedButton(onClick = { onOpen(d.s.slot, 7) }, modifier = Modifier.weight(1f)) { Text("Plano completo", fontSize = 13.sp) }
                 }
             }
         }
@@ -2942,7 +2942,7 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () ->
     val data = rememberLoaded(SlotData(), tick, Pair(slot, UiBus.version)) { loadSlot(ctx, slot) }
     val idle = data.idle
     // slot sem competição em andamento: só a Visão geral (resumo do que foi) e o estado no topo; nada de Elenco/Calendário/Tática da competição antiga
-    val tabs = if (idle != null) listOf("Visão geral") else listOf("Visão geral", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Diretor", "Aprendizado")
+    val tabs = if (idle != null) listOf("Visão geral") else listOf("Visão geral", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Histórico", "Diretor", "Aprendizado")
     val tab = if (idle != null) 0 else tab
     val title = if (idle != null) "Slot $slot" else known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
@@ -2990,7 +2990,8 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () ->
                     3 -> SlotCalendar(slot, data)
                     4 -> SlotTactic(slot, data)
                     5 -> SlotResult(slot, data) { onTab(4) }
-                    6 -> SlotDirector(slot, data)
+                    6 -> SlotHistory(slot, data)
+                    7 -> SlotDirector(slot, data)
                     else -> SlotLearning(slot, data)
                 }
             }
