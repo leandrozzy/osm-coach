@@ -209,6 +209,6 @@ class CrestFlagTest {
         assertEquals(true, PixelProbe.saleArrows(img(true, true), yc))
         assertEquals(false, PixelProbe.saleArrows(img(false, true), yc))   // camisa verde de goleiro
         assertEquals(false, PixelProbe.saleArrows(img(false, false), yc))
-        assertNull(PixelProbe.saleArrows(img(true, true), 0.95f))           // linha cortada
+        assertNull(PixelProbe.saleArrows(img(true, true), 0.97f))           // linha cortada pela borda (a última linha inteira, y≈0,95, é lida)
     }
 }

@@ -276,9 +276,11 @@ object PixelProbe {
      * na caixa, os outros 0; camisa verde de goleiro só dá verde). null = linha cortada pela rolagem (não dá para afirmar nada).
      */
     fun saleArrows(img: Img, yc: Float): Boolean? {
-        if (yc < 0.12f || yc + 0.042f > 0.97f) return null
-        val r = frac(img, 0.026f, 0.046f, yc + 0.006f, yc + 0.042f, RED)
-        val g = frac(img, 0.026f, 0.046f, yc + 0.006f, yc + 0.042f, GREEN)
+        // Última linha da tela (y≈0,95): as setas vão até y+0,04 ≈ 0,99 e ainda cabem no quadro; só descarta se estiverem cortadas.
+        if (yc < 0.12f || yc + 0.040f > 0.995f) return null
+        val y1 = minOf(yc + 0.042f, 0.995f)
+        val r = frac(img, 0.026f, 0.046f, yc + 0.006f, y1, RED)
+        val g = frac(img, 0.026f, 0.046f, yc + 0.006f, y1, GREEN)
         return r >= 0.05f && g >= 0.05f
     }
 
