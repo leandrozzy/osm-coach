@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -270,6 +271,7 @@ class CaptureService : AccessibilityService() {
     }
 
     /** Monta a lista do cartão: cada dica com ícone, título, detalhe e o "✓ feito". */
+    private var selGroup = ""
     private fun showCard(list: List<Hints.Hint>, head: String, allowDone: Boolean = true) {
         val card = cardView ?: return
         val lv = listView ?: return
@@ -283,17 +285,28 @@ class CaptureService : AccessibilityService() {
                 setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
             })
         }
-        var lastGroup = ""
-        for (h in list.sortedBy { Hints.GROUPS.indexOf(Hints.groupOf(it)) }.take(10)) {
-            val g = Hints.groupOf(h)
-            if (g != lastGroup) {
-                lastGroup = g
-                lv.addView(TextView(this).apply {
-                    text = g; setTextColor(0xFF7CC8FF.toInt()); textSize = 12f
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    setPadding((4 * dp).toInt(), (8 * dp).toInt(), 0, 0)
-                })
+        // botões de grupo (Tática, Treinamento, Jogadores, Administração, Outros): só a lista do grupo escolhido aparece
+        val groups = Hints.GROUPS.filter { g -> list.any { Hints.groupOf(it) == g } }
+        if (groups.size > 1) {
+            if (selGroup !in groups) selGroup = groups.firstOrNull { g -> list.any { it.action && Hints.groupOf(it) == g } } ?: groups.first()
+            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (g in groups) {
+                val n = list.count { Hints.groupOf(it) == g }
+                val on = g == selGroup
+                chips.addView(TextView(this).apply {
+                    text = g.substringBefore(' ') + " " + n
+                    textSize = 13f; gravity = Gravity.CENTER
+                    setTextColor(if (on) android.graphics.Color.WHITE else 0xFFB8C7E6.toInt())
+                    setTypeface(typeface, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                    setPadding((10 * dp).toInt(), (6 * dp).toInt(), (10 * dp).toInt(), (6 * dp).toInt())
+                    background = GradientDrawable().apply { cornerRadius = 16 * dp; setColor(if (on) 0xFF2563EB.toInt() else 0x332AB4FF) }
+                    setOnClickListener { selGroup = g; showCard(list, head, allowDone) }
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = (6 * dp).toInt() })
             }
+            lv.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
+            lv.addView(TextView(this).apply { text = selGroup; setTextColor(0xFF7CC8FF.toInt()); textSize = 12f; setPadding((4 * dp).toInt(), (6 * dp).toInt(), 0, 0) })
+        } else selGroup = groups.firstOrNull() ?: ""
+        for (h in list.filter { groups.size <= 1 || Hints.groupOf(it) == selGroup }.take(6)) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding((8 * dp).toInt(), (5 * dp).toInt(), (8 * dp).toInt(), (5 * dp).toInt())

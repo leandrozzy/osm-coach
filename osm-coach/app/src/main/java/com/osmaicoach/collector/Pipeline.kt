@@ -200,10 +200,10 @@ class FramePipeline private constructor(private val ctx: Context) {
         val slots = listOfNotNull(hint) + (1..4).filter { it != hint }
         val big = runCatching { slots.any { saveBigCard(it, ocr, bmp) } }.getOrDefault(false)
         if (!big) {
-            val idade = ocr.lines.any { Txt.norm(it.text).startsWith("idade") && it.xc < 0.40f }
-            val nm = ocr.lines.firstOrNull { l -> l.xc in 0.10f..0.34f && l.yc in 0.18f..0.40f && Regex("^\\d{1,2}\\s+\\p{L}").containsMatchIn(l.text.trim()) }
-            if (idade && nm != null) {
-                val msg = "Cartão grande visto ('${nm.text.trim()}') mas nenhum jogador do meu elenco casou"
+            val idl = ocr.lines.firstOrNull { Txt.norm(it.text).startsWith("idade") && it.xc < 0.40f }
+            if (idl != null) {
+                val f = { v: Float -> "%.2f".format(java.util.Locale.US, v) }
+                val msg = "Linha IDADE vista (${f(idl.xc)};${f(idl.yc)}) '${idl.text.trim()}'; linhas acima: " + ocr.lines.filter { it.yc < idl.yc && idl.yc - it.yc < 0.07f }.joinToString("|") { it.text.trim() + "@" + f(it.xc) } + " — sem jogador casado"
                 if (msg != lastBigLog) { lastBigLog = msg; Diag.log(msg) }
             }
         }
@@ -217,11 +217,11 @@ class FramePipeline private constructor(private val ctx: Context) {
      * não tem tons de pele e é ignorada. Fica com prioridade sobre os recortes pequenos do campo (q = 100 + nitidez em `_q.json`). Vale mesmo para quem está sendo vendido.
      */
     private suspend fun saveBigCard(slot: Int, ocr: OcrResult, bmp: Bitmap): Boolean {
-        val rx = Regex("^(\\d{1,2})\\s+([\\p{L}][\\p{L}.' -]{2,})$")
-        val nameLine = ocr.lines.firstOrNull { l -> l.xc in 0.10f..0.34f && l.yc in 0.18f..0.40f && rx.containsMatchIn(l.text.trim()) } ?: return false
-        val ageLine = ocr.lines.firstOrNull { l -> Txt.norm(l.text).startsWith("idade") && Math.abs(l.xc - nameLine.xc) < 0.08f && l.yc > nameLine.yc && l.yc - nameLine.yc < 0.10f } ?: return false   // a linha "IDADE: 28" só existe no cartão grande (os cartões do campo também têm "9 LEÃO")
+        // âncora = "IDADE: NN" (só existe no cartão grande); o nome é a linha logo ACIMA dela (com ou sem o nº da camisa)
+        val ageLine = ocr.lines.filter { l -> Txt.norm(l.text).startsWith("idade") && l.xc in 0.08f..0.36f && l.yc in 0.20f..0.46f }.minByOrNull { it.yc } ?: return false
+        val nameLine = ocr.lines.filter { l -> l !== ageLine && l.yc < ageLine.yc && ageLine.yc - l.yc < 0.07f && Math.abs(l.xc - ageLine.xc) < 0.10f && l.text.count { it.isLetter() } >= 3 }.maxByOrNull { it.yc } ?: return false
         val age = Regex("\\d{2}").find(ageLine.text)?.value?.toIntOrNull()
-        val shown = rx.find(nameLine.text.trim())!!.groupValues[2].trim()
+        val shown = nameLine.text.trim().replace(Regex("^\\d{1,2}\\s+"), "").trim()
         val k = Txt.key(shown)
         if (k.length < 3) return false
         val p = dao.playersOf(slot).filter { it.owner == "MY" }
@@ -1136,6 +1136,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             val ocr = OcrEngine.read(bmp)
             lastProcessedAt = now
             Diag.ocr.incrementAndGet()
+            photosFrom(machine.current, ocr, bmp)   // antes de qualquer descarte: o cartão grande pode ter o painel do app por cima
             // Tela do próprio OSM Coach (barra "Hoje/Sessões/Slots/Diretor/Ajustes" ou textos dele): não é o jogo.
             if (OwnApp.looksLikeApp(ocr.fullText)) {
                 Diag.discarded.incrementAndGet()
@@ -1158,7 +1159,6 @@ class FramePipeline private constructor(private val ctx: Context) {
             lastProcessed = h
             // campo com os 11 (Equipa inicial) pode cair em NOISE/OTHER: conta os cartões antes de descartar
             if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { scanLineup(sl, ocr, now) } }
-            photosFrom(machine.current, ocr, bmp)   // também em NON_OSM: o cartão grande escurece o fundo e some a barra do OSM
             if (type == ScreenType.NOISE || type == ScreenType.NON_OSM) {
                 Diag.discarded.incrementAndGet()
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")
