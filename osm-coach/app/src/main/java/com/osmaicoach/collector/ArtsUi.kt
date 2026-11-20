@@ -181,6 +181,12 @@ internal fun ArtsTab() {
             androidx.compose.material3.Switch(checked = autoOn, onCheckedChange = { autoOn = it; Arts.setAuto(ctx, it) })
         }
         msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
+        run {
+            var gl by remember { mutableStateOf(ArtsGpt.link(ctx)) }
+            Text("ChatGPT (realista): cole o link do seu Projeto/conversa. O botão \"ChatGPT\" de cada arte copia o prompt com os dados reais e abre esse link.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+            androidx.compose.material3.OutlinedTextField(value = gl, onValueChange = { gl = it; ArtsGpt.setLink(ctx, it) }, singleLine = true,
+                placeholder = { Text("https://chatgpt.com/g/…") }, modifier = Modifier.fillMaxWidth())
+        }
         Title("Suas artes")
         if (d.items.isEmpty()) EmptyState("🎨", "Nenhuma arte ainda", "Quando o app confirmar uma contratação, goleada, sequência, liderança, título ou objetivo, a arte aparece aqui. Ou crie uma abaixo.")
         for (row in d.items.chunked(2)) {
@@ -220,6 +226,11 @@ internal fun ArtsTab() {
                             },
                             enabled = !done && !busy, modifier = Modifier.height(36.dp)
                         ) { Text(if (done) "✓ feita" else "Criar", fontSize = 12.5.sp) }
+                        OutlinedButton(
+                            onClick = { scope.launch { val t = withContext(Dispatchers.IO) { runCatching { ArtsGpt.prompt(ctx, Repo(ctx), c) }.getOrNull() }
+                                msg = if (t == null) "Faltam dados lidos para montar o prompt desta arte." else ArtsGpt.send(ctx, t) } },
+                            modifier = Modifier.height(36.dp)
+                        ) { Text("ChatGPT", fontSize = 12.5.sp) }
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
