@@ -249,7 +249,7 @@ internal fun ArtsTab() {
                     onDismissRequest = { confirmDel = false }, containerColor = C.SURFACE,
                     title = { Text("Apagar as artes do S$slot?", fontWeight = FontWeight.Bold) },
                     text = { Text("As $mine imagens deste slot serão apagadas do app (as que você já baixou na galeria ficam). Isso não pode ser desfeito.", fontSize = 13.sp) },
-                    confirmButton = { TextButton(onClick = { confirmDel = false; scope.launch { val n = withContext(Dispatchers.IO) { Arts.deleteSlot(Repo(ctx), slot).also { ArtsGpt.dismissUsed(ctx, Repo(ctx), slot) } }; msg = "$n arte(s) do S$slot apagada(s)." } }) { Text("Apagar", color = C.BAD) } },
+                    confirmButton = { TextButton(onClick = { confirmDel = false; scope.launch { val n = withContext(Dispatchers.IO) { ArtsGpt.deleteAndForget(ctx, slot) }; msg = "$n arte(s) do S$slot apagada(s)." } }) { Text("Apagar", color = C.BAD) } },
                     dismissButton = { TextButton(onClick = { confirmDel = false }) { Text("Cancelar") } }
                 )
             }
@@ -265,7 +265,7 @@ internal fun ArtsTab() {
                 onDismissRequest = { confirmAll = false }, containerColor = C.SURFACE,
                 title = { Text("Apagar todas as artes?", fontWeight = FontWeight.Bold) },
                 text = { Text("As $total imagens geradas (todos os slots) serão apagadas do app. As que você já baixou na galeria ficam. Isso não pode ser desfeito.", fontSize = 13.sp) },
-                confirmButton = { TextButton(onClick = { confirmAll = false; scope.launch { val n = withContext(Dispatchers.IO) { Arts.deleteAll(Repo(ctx)).also { ArtsGpt.dismissUsed(ctx, Repo(ctx)) } }; msg = "$n arte(s) apagada(s)." } }) { Text("Apagar tudo", color = C.BAD) } },
+                confirmButton = { TextButton(onClick = { confirmAll = false; scope.launch { val n = withContext(Dispatchers.IO) { ArtsGpt.deleteAndForget(ctx, null) }; msg = "$n arte(s) apagada(s)." } }) { Text("Apagar tudo", color = C.BAD) } },
                 dismissButton = { TextButton(onClick = { confirmAll = false }) { Text("Cancelar") } }
             )
         }

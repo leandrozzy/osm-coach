@@ -34,6 +34,37 @@ object ArtsGpt {
         if (ids.isNotEmpty()) Arts.dismiss(repo, ids)
     }
 
+    /** Apagar artes (app e ChatGPT): os eventos apagados nunca mais voltam à lista. */
+    suspend fun deleteAndForget(ctx: Context, slot: Int?): Int {
+        val repo = Repo(ctx)
+        val ids = Arts.items(repo).filter { slot == null || it.slot == slot }.map { it.id }
+        if (ids.isNotEmpty()) Arts.dismiss(repo, ids)
+        dismissUsed(ctx, repo, slot)
+        return if (slot == null) Arts.deleteAll(repo) else Arts.deleteSlot(repo, slot)
+    }
+
+    private val rnd = java.util.Random()
+    private fun <T> pick(l: List<T>): T = l[rnd.nextInt(l.size)]
+    private val POST_STYLES = listOf(
+        "capa de jornal impresso clássico, papel levemente envelhecido, foto granulada, título em fonte serifada grande, colunas de texto ao fundo",
+        "capa de jornal esportivo popular brasileiro, manchete GIGANTE em caixa alta amarela e branca, fotos coloridas, quadro de placar",
+        "capa de revista esportiva de luxo, jogador em destaque ocupando a página, manchete sobre a imagem, selos e chamadas laterais",
+        "página de tabloide ousado com fundo preto, manchete amarela, recortes de foto com setas e círculos de destaque",
+        "arte de transmissão de TV: foto do lance em tela cheia, placar final em barra de transmissão e chamadas em faixas coloridas"
+    )
+    private val NEWS_STYLES = listOf(
+        "capa de jornal 'Jornal do <clube>' com os retratos em molduras, manchete de mercado da bola e subtítulo",
+        "cartaz oficial de apresentação ao estilo redes sociais: os jogadores posam juntos com a camisa do clube e cachecol, texto 'BEM-VINDOS'",
+        "página de mercado da bola de revista, uma ficha por jogador (retrato, nome, idade, posição, país, força) e chamada principal",
+        "painel de anúncio de reforços em estúdio, fundo escuro com as cores do clube, retratos em recortes inclinados e manchete forte"
+    )
+    private val GENERIC_STYLES = listOf(
+        "composição cinematográfica de poster de filme esportivo",
+        "estilo de capa de videogame de futebol, com muita profundidade e brilho",
+        "estilo de pôster de campanha da TV esportiva, com faixas diagonais e partículas de luz",
+        "estilo de revista esportiva, tipografia ousada, foto em destaque"
+    )
+
     private fun played(ms: List<MatchEntity>) = ms.filter { it.round != null && it.result in listOf("V", "E", "D") }.sortedBy { it.round }
 
     /** Texto do pedido para a arte [c] (null se faltar dado). */
@@ -91,14 +122,46 @@ object ArtsGpt {
                 val m = last ?: return null
                 val opp = m.opponent ?: return null
                 val res = when (m.result) { "V" -> "VITÓRIA"; "D" -> "DERROTA"; else -> "EMPATE" }
+                val j = repo.dao.plan(slot, "mr_R${m.round}")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+                val mineHome = j?.takeIf { it.has("mineHome") }?.optBoolean("mineHome") ?: m.home
+                val goals = ArrayList<Triple<String?, String, Boolean?>>()
+                val evs = j?.optJSONArray("events")
+                if (evs != null) for (i in 0 until evs.length()) {
+                    val ev = evs.optString(i)
+                    if (!ev.contains(" gol de ")) continue
+                    val who = ev.substringAfter(" gol de ").substringBefore(" (").trim()
+                    if (who.isBlank()) continue
+                    val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(ev)?.groupValues?.get(1)
+                    val ours = if (mineHome == null) null else (ev.contains("(casa)") == mineHome)
+                    if (goals.any { it.first == min && it.third == ours && Txt.sim(Txt.key(it.second), Txt.key(who)) >= 0.6f }) continue
+                    goals.add(Triple(min, who, ours))
+                }
+                val cap = mapOf<Boolean?, Int>(true to (m.scoreMine ?: 0), false to (m.scoreOpp ?: 0))
+                val used = HashMap<Boolean?, Int>()
+                val shown = goals.sortedBy { it.first?.substringBefore('+')?.toIntOrNull() ?: 999 }.filter { g ->
+                    val n = used.getOrDefault(g.third, 0)
+                    if (g.third != null && n >= (cap[g.third] ?: 0)) false else { used[g.third] = n + 1; true }
+                }
                 head("PÓS-JOGO / CAPA DE JORNAL", "horizontal 1600x1120")
-                sb.append("Jornal do $team. Resultado: $res de $team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}. Clube: $club. Campanha: ${v}V ${e}E ${d}D.\n")
+                sb.append("Estilo desta vez: ${pick(POST_STYLES)}.\n")
+                sb.append("Jornal do $team. Resultado: $res de $team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}" + (if (mineHome == true) " (em casa)" else if (mineHome == false) " (fora)" else "") + ". Clube: $club. Campanha: ${v}V ${e}E ${d}D.\n")
+                if (shown.isNotEmpty()) sb.append("Gols (só estes, com minuto): " + shown.joinToString("; ") { (it.first?.let { mm -> "$mm' " } ?: "") + it.second + " (" + (if (it.third == true) team else if (it.third == false) opp else "—") + ")" } + ".\n")
                 sb.append(when (m.result) {
-                    "V" -> "Tom: festa e orgulho.\n"
-                    "D" -> "Tom: recuperação, \"vamos melhorar\", sem humilhação. Cena de jogadores unidos no gramado.\n"
+                    "V" -> "Tom: festa e orgulho; torcida e jogadores comemorando.\n"
+                    "D" -> "Tom: recuperação, \"vamos melhorar\", jogadores unidos, sem humilhação.\n"
                     else -> "Tom: equilibrado, \"ponto conquistado, dá para crescer\".\n"
                 })
-                sb.append("Inclua manchete criativa e linha fina SÓ com esses fatos (não invente gols, nomes ou números).\n")
+                sb.append("Escreva uma MANCHETE criativa e uma linha fina curtas, usando SÓ os fatos acima (nomes, minutos e placar exatos; não invente gols, lances, estádio ou público). Use os rostos reais dos goleadores citados. Inclua o escudo dos dois clubes e o placar bem visível.\n")
+            }
+            "NEWS" -> {
+                val mine = all.filter { it.owner == "MY" }
+                val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
+                val buys = ledger.filter { it.type == "buy" }.sortedByDescending { it.at }.distinctBy { it.key }.mapNotNull { b -> mine.firstOrNull { it.nameKey == b.key } }.take(3)
+                if (buys.isEmpty()) return null
+                head("REFORÇOS / MERCADO DA BOLA", "horizontal 1600x1120")
+                sb.append("Estilo desta vez: ${pick(NEWS_STYLES)}.\n")
+                sb.append("Clube: $club. Reforços recentes: " + buys.joinToString("; ") { p -> p.name + (p.age?.let { ", $it anos" } ?: "") + (p.posCode?.let { ", $it" } ?: "") + (p.strength?.let { ", força $it" } ?: "") + (p.valueText?.takeIf { v2 -> v2.isNotBlank() }?.let { ", valor $it" } ?: "") } + ".\n")
+                sb.append("Rostos reais dos jogadores, cada um com a camisa oficial do $team. Manchete criativa sobre a força do elenco" + (my?.let { " (força geral $it)" } ?: "") + (comp?.let { " na $it" } ?: "") + ". Use só estes dados, sem inventar contratos, valores ou declarações.\n")
             }
             "GOLEADA" -> {
                 val m = last ?: return null
@@ -134,6 +197,7 @@ object ArtsGpt {
             }
             else -> return null
         }
+        if (c.kind !in listOf("POST", "NEWS")) sb.append("\nEstilo desta vez: ${pick(GENERIC_STYLES)} (varie a cena, o enquadramento e a luz em relação às artes anteriores).")
         sb.append("\nUse os nomes dos clubes na forma curta e oficial, sem acrescentar cidade, \"Belo Horizonte\", \"FC\" ou qualquer palavra que eu não escrevi. Não invente números nem nomes além dos informados. Texto em português, letras grandes e nítidas.")
         return sb.toString()
     }
