@@ -1620,12 +1620,13 @@ class Repo(private val ctx: Context) {
             }
             // Nome com texto de botão do OSM ("Atribuir número", "MAIS EM BREVE", "Ata") ou lixo de OCR ("MdLK"):
             // se o nome limpo já existe, era fantasma desse jogador; se não sobra nome, não era jogador.
-            val clean = PlayerName.clean(p.name)
+            // minLetters 2: nome curto de verdade ('Ba', 'Wu') é jogador; com 3 esta rotina APAGAVA o Ba do S2 toda vez que rodava (causa dele nunca ficar no Elenco)
+            val clean = PlayerName.clean(p.name, 2)
             if (clean == p.name) continue
             val key = clean?.let { Txt.key(it) }
             val twin = key?.let { k -> all.firstOrNull { it !== p && it.owner == p.owner && (it.nameKey == k || Txt.sim(it.nameKey, k) >= 0.9) } }
             dao.deletePlayer(slot, p.owner, p.nameKey)
-            if (clean != null && key != null && twin == null && key.length >= 3) {
+            if (clean != null && key != null && twin == null && key.length >= 2) {
                 dao.putPlayer(p.copy(nameKey = key, name = clean))
             } else removed.add(p.name)
         }
