@@ -573,8 +573,8 @@ internal fun SettingsTab() {
         var photoOn by remember { mutableStateOf(Settings.get(ctx, "web_photos", "1") == "1") }
         var pKey by remember { mutableStateOf(Settings.get(ctx, PhotoWeb.KEY, "")) }
         val pTick = rememberTick(3000L)
-        val pst = rememberLoaded(Triple(0, 0, 0), pTick, UiBus.version) { PhotoWeb.stats(ctx) }
-        Fold("📷", "Fotos de jogadores", if (!PhotoWeb.hasKey(ctx)) "sem chave" else "${pst.first} de ${pst.second}") {
+        val pst = rememberLoaded(PhotoWeb.Status(0, 0, 0, 0, 0, false, 0, false), pTick, UiBus.version) { PhotoWeb.status(ctx) }
+        Fold("📷", "Fotos de jogadores", if (!PhotoWeb.hasKey(ctx)) "sem chave" else "${pst.api} de ${pst.total}") {
             SwitchRow("Buscar fotos reais dos meus jogadores", photoOn) {
                 photoOn = it
                 Settings.put(ctx, "web_photos", if (it) "1" else "0")
@@ -582,16 +582,11 @@ internal fun SettingsTab() {
             OutlinedTextField(pKey, { pKey = it }, label = { Text("Chave da API-Football") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             GhostButton("Salvar chave e buscar agora") {
                 Settings.put(ctx, PhotoWeb.KEY, pKey)
-                PhotoWeb.retryMisses(ctx)
+                PhotoWeb.keyChanged(ctx)
                 AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { PhotoWeb.run(ctx, force = true) } }
                 android.widget.Toast.makeText(ctx, "Chave salva. As fotos chegam aos poucos.", android.widget.Toast.LENGTH_LONG).show()
             }
-            val used = PhotoWeb.usedToday(ctx).also { pTick.let { _ -> } }
-            Text(
-                "Com foto: ${pst.first} de ${pst.second} jogadores dos slots" + (if (pst.third > 0) " • ${pst.third} sem acerto seguro (uso o atleta fictício)" else "") +
-                    "\nConsultas hoje: $used de ${PhotoWeb.BUDGET}" + (if (PhotoWeb.blockedToday(ctx)) " • cota do dia usada: continuo amanhã" else ""),
-                fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp)
-            )
+            Text(PhotoWeb.statusText(pst), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp))
             Text("Só o NOME do jogador é enviado, e só dos jogadores que já estão nos seus 4 slots. A foto só vale se nome, idade e país conferem; na dúvida fica sem foto. A chave fica só neste aparelho. Plano grátis: 100 consultas por dia; o app usa até ${PhotoWeb.BUDGET} e retoma no dia seguinte.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
         }
         var webCrests by remember { mutableStateOf(Settings.get(ctx, "web_crests", "1") == "1") }

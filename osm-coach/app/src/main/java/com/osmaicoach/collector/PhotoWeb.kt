@@ -120,13 +120,36 @@ object PhotoWeb {
     private fun idx(filesDir: File): JSONObject = runCatching { JSONObject(idxFile(filesDir).readText()) }.getOrNull() ?: JSONObject()
     private fun saveIdx(filesDir: File, o: JSONObject) { runCatching { idxFile(filesDir).writeText(o.toString()) } }
 
-    /** (com foto, jogadores dos slots, sem acerto/ambíguos) para o painel de Ajustes. */
-    suspend fun stats(ctx: Context): Triple<Int, Int, Int> {
+    class Status(val api: Int, val osm: Int, val total: Int, val untried: Int, val miss: Int, val key: Boolean, val used: Int, val blocked: Boolean)
+
+    private fun needsTry(filesDir: File, ix: JSONObject, k: String): Boolean {
+        if (file(filesDir, k) != null) return false
+        val st = ix.optJSONObject(k)?.optString("s")
+        return st == null || st == "ok"   // "ok" sem arquivo = foi apagada: busca de novo
+    }
+
+    suspend fun status(ctx: Context): Status {
         val keys = candidatesAll(Repo(ctx)).map { it.nameKey }.toSet()
         val ix = idx(ctx.filesDir)
-        val withPhoto = keys.count { file(ctx.filesDir, it) != null }
-        val noMatch = keys.count { file(ctx.filesDir, it) == null && (ix.optJSONObject(it)?.optString("s") ?: "") in listOf("miss", "amb") }
-        return Triple(withPhoto, keys.size, noMatch)
+        val api = keys.count { file(ctx.filesDir, it) != null }
+        val osm = keys.count { file(ctx.filesDir, it) == null && File(osmDir(ctx.filesDir), "$it.png").exists() }
+        val untried = keys.count { needsTry(ctx.filesDir, ix, it) }
+        val miss = keys.count { file(ctx.filesDir, it) == null && !needsTry(ctx.filesDir, ix, it) }
+        return Status(api, osm, keys.size, untried, miss, hasKey(ctx), usedToday(ctx), blockedToday(ctx))
+    }
+
+    /** Duas linhas para o Elenco e Ajustes: o que já tem, de onde vem e o que a busca automática está fazendo. */
+    fun statusText(s: Status): String {
+        val sil = s.total - s.api - s.osm
+        val l1 = "${s.api} de ${s.total} com foto da API • ${s.osm} com rosto recortado do OSM • $sil com silhueta"
+        val l2 = when {
+            !s.key -> "Sem chave da API-Football (Ajustes → Fotos de jogadores): uso o recorte do OSM e a silhueta."
+            s.untried > 0 && s.blocked -> "Cota de hoje usada (${s.used}/$BUDGET): continuo amanhã, faltam ${s.untried} jogadores."
+            s.untried > 0 -> "Buscando sozinho: faltam ${s.untried} jogadores (hoje ${s.used}/$BUDGET consultas). Jogador novo entra na fila na hora."
+            s.miss > 0 -> "Todos já foram tentados. ${s.miss} sem acerto seguro ficam com recorte/silhueta; só tento de novo esses depois de uns dias."
+            else -> "Todos os jogadores já têm foto."
+        }
+        return "$l1\n$l2"
     }
 
     // ------------------------------------------------------------------ fila
@@ -151,10 +174,10 @@ object PhotoWeb {
         if (code in 200..299) Triple(code, c.inputStream.use { it.readBytes() }, hdr) else Triple(code, null, hdr)
     } catch (e: Exception) { Triple(-1, null, emptyMap()) }
 
-    /** Chamado pelo monitor, ao abrir o app e ao salvar a chave. Vários chamados juntos viram um só; no máx. 1 rodada a cada 10 min. */
+    /** Chamado pelo monitor, ao abrir o app e ao salvar a chave. Vários chamados juntos viram um só; no máx. 1 rodada por minuto. */
     suspend fun run(ctx: Context, force: Boolean = false) {
         if (running || !hasKey(ctx) || Settings.get(ctx, "web_photos", "1") != "1") return
-        if (!force && System.currentTimeMillis() - lastRun < 10 * 60_000L) return
+        if (!force && System.currentTimeMillis() - lastRun < 60_000L) return
         if (blockedToday(ctx) || usedToday(ctx) >= BUDGET) return
         running = true
         try {
@@ -163,13 +186,13 @@ object PhotoWeb {
             val apiKey = Settings.get(ctx, KEY, "").trim()
             val ix = idx(ctx.filesDir)
             val now = System.currentTimeMillis()
-            val queue = candidatesAll(repo).filter { p ->
-                if (file(ctx.filesDir, p.nameKey) != null) false
-                else {
-                    val e = ix.optJSONObject(p.nameKey)
-                    e == null || now - e.optLong("at", 0L) > RETRY_MS
-                }
-            }
+            val all = candidatesAll(repo).filter { file(ctx.filesDir, it.nameKey) == null }
+            // 1º quem NUNCA foi tentado (jogador comprado agora vem primeiro); só quando todos foram tentados volta aos sem acerto (um por vez, 7 dias de intervalo)
+            val bought = HashSet<String>()
+            for (sl in 1..4) Ledger.parse(repo.dao.plan(sl, "ledger")?.json).filter { it.type == "buy" && now - it.at < 3L * 86400000L }.forEach { bought.add(it.key) }
+            val untried = all.filter { needsTry(ctx.filesDir, ix, it.nameKey) }.sortedByDescending { it.nameKey in bought }
+            val queue = if (untried.isNotEmpty()) untried
+            else all.filter { now - (ix.optJSONObject(it.nameKey)?.optLong("at", 0L) ?: 0L) > RETRY_MS }.sortedBy { ix.optJSONObject(it.nameKey)?.optLong("at", 0L) ?: 0L }
             if (queue.isEmpty()) return
             val isoMap = FlagManual.all(repo)
             var done = 0
@@ -205,13 +228,8 @@ object PhotoWeb {
         } finally { running = false }
     }
 
-    /** Apaga o índice de "sem acerto" (tentar de novo hoje, respeitando a cota). */
-    fun retryMisses(ctx: Context) {
-        val ix = idx(ctx.filesDir)
-        for (k in ix.keys().asSequence().toList()) if (ix.optJSONObject(k)?.optString("s") != "ok") ix.remove(k)
-        saveIdx(ctx.filesDir, ix)
-        prefs(ctx).edit().remove("blocked").apply()
-    }
+    /** Chave nova: libera o bloqueio do dia (401/403 da chave antiga). Os "sem acerto" NÃO são limpos: só voltam depois de tentar todos. */
+    fun keyChanged(ctx: Context) { prefs(ctx).edit().remove("blocked").apply() }
 }
 
 /**

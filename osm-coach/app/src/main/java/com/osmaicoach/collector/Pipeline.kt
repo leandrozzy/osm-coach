@@ -1210,6 +1210,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             var changed = repo.apply(asg.slot, ex, "ocr", now)
             if (changed > 0) UiBus.bump()   // tudo o que a captura gravou aparece no app sozinho
             if (asgSlot != null && type == ScreenType.SQUAD && (ex.ownerTeam != null || pending?.let { it.slot == asgSlot && it.type == ScreenType.SQUAD } == true) && ex.players.isNotEmpty()) runCatching { saveFlagThumbs(bmp, asgSlot, ex.players) }
+            if (type == ScreenType.SQUAD && changed > 0) AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { PhotoWeb.run(ctx) } }   // jogador novo (comprado) entra na fila já
             if (asgSlot != null && type == ScreenType.PREGAME) savePregameCrest(bmp, ex)
             // o Calendário mostra o escudo de cada rival: guarda uma vez por clube (só grava o que ainda não tem)
             if (type == ScreenType.CALENDAR) { saveCalendarCrests(bmp, ex.matches); saveStripCrests(bmp, ex.crests) }

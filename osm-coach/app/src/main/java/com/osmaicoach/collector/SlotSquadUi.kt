@@ -195,6 +195,10 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
             for (f in listOf("TODOS", "ATA", "MEI", "DEF", "GOL")) FilterPill(if (f == "TODOS") "Todos" else f, filter == f) { filter = f }
         }
         Text("⚡ Cond. = condição física • 🙂 Moral", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        val phCtx = LocalContext.current.applicationContext
+        val phTick = rememberTick(5000L)
+        val phSt = rememberLoaded(PhotoWeb.Status(0, 0, 0, 0, 0, false, 0, false), phTick, UiBus.version) { PhotoWeb.status(phCtx) }
+        if (phSt.total > 0) Text("📷 " + PhotoWeb.statusText(phSt), fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 6.dp))
     }
     for (cat in listOf("ATA", "MEI", "DEF", "GOL", "?")) {
         // "?": lidos sem posição — antes ficavam invisíveis (mas contavam), sem como remover.
