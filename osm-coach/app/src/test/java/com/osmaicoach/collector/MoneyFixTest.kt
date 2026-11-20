@@ -44,5 +44,7 @@ class PlayerValueSanityTest {
         assertEquals("13,7M", Money.sanePlayerValue("13,7M", "913,7M"))
         assertEquals("13,7M", Money.sanePlayerValue(null, "913,7M"))
         assertEquals("14,1M", Money.sanePlayerValue("13,7M", "14,1M"))
+        assertEquals("13,7M", Money.sanePlayerValue("913,7M", "913,7M"))
+        assertEquals("13,7M", Money.sanePlayerValue("913,7M", "13,7M"))
     }
 }

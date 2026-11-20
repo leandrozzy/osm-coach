@@ -317,21 +317,24 @@ object Money {
 
     fun valid(s: String?): Boolean = parse(s) != null
 
-    fun sanePlayerValue(old: String?, new: String?): String? {
-        if (new == null) return old
-        val o = Money.parse(old); val n = Money.parse(new)
+    fun sanePlayerValue(old: String?, new0: String?): String? {
+        if (new0 == null) return old
+        // valor absurdo para um jogador (≥250M com 3 dígitos inteiros, ex.: "913,7M"): o 1º dígito é o ícone da moeda lido como número
+        fun strip(t: String): String {
+            val v = parse(t) ?: return t
+            if (v >= 250.0) Regex("^\\d(\\d{2}[,.]\\d{1,2}M)$", RegexOption.IGNORE_CASE).find(t.trim())?.let { return it.groupValues[1] }
+            return t
+        }
+        val new = strip(new0)
+        val oldFixed = old?.let { strip(it) }
+        val o = parse(oldFixed); val n = parse(new)
         if (o != null && n != null && o > 0 && n > 0) {
             val r = n / o
-            // salto de 8× ou mais (vírgula perdida OU ícone da moeda lido como dígito: "13,7M" → "913,7M", 20/11 Hudson-Odoi no S2): jogador não muda de valor assim
-            if (r >= 8.0 || r <= 0.125) return old
-        }
-        // 1ª leitura com valor absurdo para um jogador (≥250M com vírgula, ex.: "913,7M"): o 1º dígito é o ícone da moeda lido como número
-        if (o == null && n != null && n >= 250.0) {
-            Regex("^\\d(\\d{2}[,.]\\d{1,2}M)$", RegexOption.IGNORE_CASE).find(new.trim())?.let { return it.groupValues[1] }
+            // salto de 8× ou mais (vírgula perdida): jogador não muda de valor assim, mantém o anterior (já corrigido)
+            if (r >= 8.0 || r <= 0.125) return oldFixed
         }
         return new
     }
-
 
     private val reFind = Regex("(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*([MKmk])(?![A-Za-z])")
 

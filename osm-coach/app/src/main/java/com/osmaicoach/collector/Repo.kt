@@ -693,7 +693,7 @@ class Repo(private val ctx: Context) {
                 if (near != null) key = near.nameKey else if (twin != null) key = twin.nameKey
             }
             // Removido à mão pelo usuário (jogador que não existe): nunca volta.
-            if (key in blocked) continue
+            if (key in blocked) { Diag.log("Elenco S$slot: ${p.name} lido, mas BLOQUEADO (foi removido à mão antes): não entra"); continue }
             val old = dao.player(slot, owner, key)
             // A IA lendo imagem pode inventar nomes: ela só completa jogadores que o OCR já encontrou.
             if (old == null && source == "ai") continue
@@ -2295,6 +2295,7 @@ class Repo(private val ctx: Context) {
             for (p in gone) {
                 goneAt.put(p.nameKey, now)
                 dao.deletePlayer(slot, "MY", p.nameKey)
+                Diag.log("Elenco S$slot: ${p.name} (${p.cat ?: "?"} ${p.strength ?: "?"}) saiu na conferência: não apareceu em passadas completas seguidas")
                 removed++
                 // o livro de caixa só ganha a venda quando o jogador ESTAVA À VENDA (setas lidas); sem isso não dá para saber se foi venda ou erro de leitura
                 if (p.forSale == true && !looksGarbled(p.name) && p.valueText != null) {
@@ -2347,12 +2348,14 @@ class Repo(private val ctx: Context) {
         val drop = SquadDedupe.duplicates(mine.map { SquadDedupe.P(it.nameKey, it.name, it.age, it.strength, it.cat, it.valueText, seenAt.optLong(it.nameKey, it.updatedAt)) })
         for ((bad, keep) in drop) {
             dao.deletePlayer(slot, "MY", bad)
+            Diag.log("Elenco S$slot: ${mine.first { it.nameKey == bad }.name} removido como REPETIDO de ${mine.first { it.nameKey == keep }.name}")
             learn(slot, "elenco", "Jogador repetido removido: \"${mine.first { it.nameKey == bad }.name}\" era o mesmo que \"${mine.first { it.nameKey == keep }.name}\".", now)
         }
         val left = mine.filter { m -> drop.none { it.first == m.nameKey } }
         val ghosts = SquadDedupe.ghosts(left.map { SquadDedupe.P(it.nameKey, it.name, it.age, it.strength, it.cat, it.valueText, seenAt.optLong(it.nameKey, it.updatedAt)) })
         for ((bad, keep) in ghosts) {
             dao.deletePlayer(slot, "MY", bad)
+            Diag.log("Elenco S$slot: ${left.first { it.nameKey == bad }.name} removido como NOME MAL LIDO de ${left.first { it.nameKey == keep }.name}")
             learn(slot, "elenco", "Nome mal lido removido: \"${left.first { it.nameKey == bad }.name}\" (agora lido como \"${left.first { it.nameKey == keep }.name}\").", now)
         }
         // fantasma por contagem de leituras: mesma idade, posição, força e valor + nome ainda parecido; o nome lido só 1× (ou nenhuma) contra o

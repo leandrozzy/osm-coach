@@ -138,14 +138,6 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
     val mine = d.players.filter { it.owner == "MY" }
     val counts = HashMap<String, Int>()
     for (p in mine) p.cat?.let { counts[it] = (counts[it] ?: 0) + 1 }
-    // titulares da tática gerada (só quando ela vale para o próximo jogo)
-    val xiNames: Set<String> = run {
-        val tp = d.tactic ?: return@run emptySet<String>()
-        val o = runCatching { JSONObject(tp.json) }.getOrNull() ?: return@run emptySet<String>()
-        if (!Director.tacticValid(o, tp.at, d.fields, System.currentTimeMillis())) return@run emptySet<String>()
-        val rows = o.optJSONArray("lineup") ?: return@run emptySet<String>()
-        buildSet { for (i in 0 until rows.length()) { val r = rows.optJSONArray(i) ?: continue; for (k in 0 until r.length()) r.optJSONObject(k)?.optString("n")?.let { add(it) } } }
-    }
     var filter by remember { mutableStateOf("TODOS") }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -202,7 +194,7 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (f in listOf("TODOS", "ATA", "MEI", "DEF", "GOL")) FilterPill(if (f == "TODOS") "Todos" else f, filter == f) { filter = f }
         }
-        Text("⚡ Cond. = condição física • 🙂 Moral • 👕 titular da tática gerada", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        Text("⚡ Cond. = condição física • 🙂 Moral", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
     }
     for (cat in listOf("ATA", "MEI", "DEF", "GOL", "?")) {
         // "?": lidos sem posição — antes ficavam invisíveis (mas contavam), sem como remover.
@@ -220,7 +212,6 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                            if (p.name.take(14) in xiNames) Text("  👕", fontSize = 14.sp)
                             if (p.forSale == true) Text("  🏷 À venda", color = C.WARN, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
