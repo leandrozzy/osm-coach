@@ -3488,6 +3488,16 @@ internal fun TrainingDialog(slot: Int, p: PlayerEntity, out: Boolean, onFlag: ()
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = if (out) C.OK else C.WARN)
                 ) { Text(if (out) "✓ Volta a jogar (tirar o ⛔)" else "⛔ Fora do próximo jogo (lesão/suspensão)") }
+                Text("📷 Foto", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                    if (uri != null) {
+                        val bmp = PhotoWeb.decodeUri(ctx, uri)
+                        val ok = bmp != null && PhotoWeb.saveManual(ctx, p.nameKey, bmp)
+                        android.widget.Toast.makeText(ctx, if (ok) "Foto de ${p.name} salva (fundo removido e enquadrada)." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_LONG).show()
+                        if (ok) onDone()
+                    }
+                }
+                OutlinedButton(onClick = { pickPhoto.launch("image/*") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Alterar a foto deste jogador") }
                 Text("🏳 Bandeira", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
                 OutlinedButton(onClick = { onDone(); onFlag() }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Escolher o país deste jogador") }
                 Text("🏋 Treino", fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))

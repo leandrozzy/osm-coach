@@ -376,15 +376,20 @@ object PhotoWeb {
         return ok to miss
     }
 
+    /** Lê a imagem escolhida na galeria já reduzida (foto de câmera tem 12+ MP). */
+    fun decodeUri(ctx: Context, uri: android.net.Uri): Bitmap? = runCatching {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+        var sample = 1
+        while (maxOf(o.outWidth, o.outHeight) / sample > 1600) sample *= 2
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+    }.getOrNull()
+
     /** Foto escolhida à mão: recorta o quadrado (retrato: do alto), grava como as outras (`photos/<nameKey>.png`) e marca como manual. */
     fun saveManual(ctx: Context, key: String, bmp: Bitmap): Boolean {
-        val side = minOf(bmp.width, bmp.height)
-        val x0 = (bmp.width - side) / 2
-        val y0 = if (bmp.height > bmp.width) (bmp.height * 0.02f).toInt().coerceAtMost(bmp.height - side) else (bmp.height - side) / 2
-        val sq = Bitmap.createBitmap(bmp, x0, y0, side, side)
-        val out = Bitmap.createScaledBitmap(sq, 192, 192, true)
+        val out = PhotoFit.fitBitmap(bmp)
         val ok = runCatching { File(dir(ctx.filesDir), "$key.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) } }.isSuccess
-        if (sq !== bmp) sq.recycle(); out.recycle()
+        out.recycle()
         if (ok) {
             val wx = wikiIdx(ctx.filesDir)
             wx.put(key, JSONObject().put("s", "manual").put("at", System.currentTimeMillis()))
@@ -455,13 +460,9 @@ object PhotoWeb {
                 val img = wget("https://commons.wikimedia.org/wiki/Special:FilePath/" + java.net.URLEncoder.encode(good[0].second, "UTF-8").replace("+", "%20") + "?width=360")
                 val bmp = img?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
                 if (bmp == null) { Diag.log("Foto web de ${p.name}: não consegui baixar a imagem, tento depois"); delay(2500L); continue }
-                val side = minOf(bmp.width, bmp.height)
-                val x0 = (bmp.width - side) / 2
-                val y0 = if (bmp.height > bmp.width) (bmp.height * 0.02f).toInt().coerceAtMost(bmp.height - side) else (bmp.height - side) / 2   // retrato: rosto no alto
-                val sq = Bitmap.createBitmap(bmp, x0, y0, side, side)
-                val out = Bitmap.createScaledBitmap(sq, 192, 192, true)
+                val out = PhotoFit.fitBitmap(bmp)
                 val ok = runCatching { File(dir(ctx.filesDir), "${p.nameKey}.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) } }.isSuccess
-                bmp.recycle(); if (sq !== bmp) sq.recycle(); out.recycle()
+                bmp.recycle(); out.recycle()
                 if (ok) { mark("ok"); done++; Diag.log("Foto web de ${p.name} ← ${good[0].first} (Wikipedia/Commons)"); if (done % 3 == 0) UiBus.bump() } else mark("err")
                 delay(1500L)
             }

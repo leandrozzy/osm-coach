@@ -593,7 +593,7 @@ internal fun SettingsTab() {
             val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
                 val k = pickFor; pickFor = null
                 if (uri != null && k != null) {
-                    val bmp = runCatching { ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull()
+                    val bmp = PhotoWeb.decodeUri(ctx, uri)
                     val ok = bmp != null && PhotoWeb.saveManual(ctx, k, bmp)
                     android.widget.Toast.makeText(ctx, if (ok) "Foto salva." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_SHORT).show()
                 }
