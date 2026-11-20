@@ -146,14 +146,15 @@ class FramePipeline private constructor(private val ctx: Context) {
         val qf = java.io.File(dir, "_q.json")
         val q = runCatching { JSONObject(qf.readText()) }.getOrNull() ?: JSONObject()
         var changed = false
+        var noMatch = 0; var tooSmall = 0; var silhouette = 0; var blurry = 0; var saved = 0; var kept = 0
         for ((line, nm) in cards) {
             val k = Txt.key(nm)
             if (k.length < 3) continue
             val p = mine.filter { it.nameKey == k || (k.length >= 4 && it.nameKey.length >= 4 && (it.nameKey.endsWith(k) || k.endsWith(it.nameKey))) || Txt.sim(it.nameKey, k) >= 0.85 }
-                .distinctBy { it.nameKey }.singleOrNull() ?: continue
-            val w = (0.031f * bmp.width).toInt(); val h = (0.070f * bmp.height).toInt()
-            if (w < 56 || h < 56) continue
-            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.0693f) * bmp.height - h / 2f).toInt()
+                .distinctBy { it.nameKey }.singleOrNull() ?: run { noMatch++; null } ?: continue
+            val h = (0.084f * bmp.height).toInt(); val w = h   // quadrado: do cabelo ao queixo (o queixo termina logo acima da faixa amarela do nome)
+            if (w < 44) { tooSmall++; continue }
+            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.070f) * bmp.height - h / 2f).toInt()
             if (x < 0 || y < 0 || x + w > bmp.width || y + h > bmp.height) continue
             val crop = Bitmap.createBitmap(bmp, x, y, w, h)
             val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
@@ -168,20 +169,26 @@ class FramePipeline private constructor(private val ctx: Context) {
             var gsum = 0f; var gn = 0
             for (yy in 0 until h - 1) for (xx in 0 until w - 1) { val i = yy * w + xx; gsum += Math.abs(lum[i + 1] - lum[i]) + Math.abs(lum[i + w] - lum[i]); gn += 2 }
             val grad = gsum / gn
-            if (warm.toFloat() / px.size < 0.15f || grad < 4.2f || grad <= q.optDouble(p.nameKey, 0.0)) { crop.recycle(); continue }
+            if (warm.toFloat() / px.size < 0.15f) { silhouette++; crop.recycle(); continue }          // silhueta: o OSM não tem foto desse jogador
+            if (grad < 4.2f) { blurry++; crop.recycle(); continue }                                    // quadro borrado (rolagem/transição)
+            if (grad <= q.optDouble(p.nameKey, 0.0)) { kept++; crop.recycle(); continue }              // já tem um recorte igual ou mais nítido
             // sem fundo, sobre o mesmo fundo claro das fotos da API (120×120; a tela corta em círculo)
             val sc = Bitmap.createScaledBitmap(crop, 120, 120, true)
             val spx = IntArray(120 * 120); sc.getPixels(spx, 0, 120, 0, 0, 120, 120)
             val cut = Bitmap.createBitmap(FaceCut.cutout(spx, 120), 120, 120, Bitmap.Config.ARGB_8888)
             sc.recycle()
             runCatching { java.io.File(dir, "${p.nameKey}.png").outputStream().use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) } }.onSuccess {
-                q.put(p.nameKey, grad.toDouble()); changed = true
+                q.put(p.nameKey, grad.toDouble()); changed = true; saved++
                 Diag.log("Rosto de ${p.name} recortado do cartão do OSM (nitidez ${"%.1f".format(java.util.Locale.US, grad)})")
             }
             cut.recycle(); crop.recycle()
         }
         if (changed) { runCatching { qf.writeText(q.toString()) }; UiBus.bump() }
+        // diagnóstico (log ao vivo, só quando muda): o que aconteceu com cada cartão desta tela
+        val msg = "Cartões do campo S$slot: ${cards.size} lidos • $saved recortados agora • $kept já tinham recorte • $silhouette silhueta (sem foto no OSM) • $blurry borrados • $noMatch sem jogador casado • $tooSmall pequenos (${bmp.width}×${bmp.height})"
+        if (msg != lastFaceLog) { lastFaceLog = msg; Diag.log(msg) }
     }
+    private var lastFaceLog = ""
 
     private suspend fun checkTactic(slot: Int, ocr: OcrResult, now: Long) {
         val f = repo.fieldMap(slot)

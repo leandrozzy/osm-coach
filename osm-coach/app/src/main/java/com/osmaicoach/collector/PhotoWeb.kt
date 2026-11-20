@@ -36,7 +36,19 @@ object PhotoWeb {
     fun file(filesDir: File, nameKey: String): File? = File(dir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }
     fun bitmap(filesDir: File, nameKey: String): Bitmap? = file(filesDir, nameKey)?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     /** Recortes do rosto tirados dos cartões do campo do OSM (plano B quando a API não achou o jogador). */
-    fun osmDir(filesDir: File): File = File(filesDir, "photos/osm").apply { mkdirs() }
+    private const val OSM_VER = "2"   // 2: rosto menor e alinhado embaixo (o recorte 1 enchia o círculo e cortava o queixo): refaz os recortes antigos
+    @Volatile private var osmChecked = false
+    fun osmDir(filesDir: File): File = File(filesDir, "photos/osm").apply {
+        mkdirs()
+        if (!osmChecked) {
+            osmChecked = true
+            val v = File(this, "_v.txt")
+            if (!v.exists() || runCatching { v.readText().trim() }.getOrNull() != OSM_VER) {
+                listFiles()?.filter { it.name.endsWith(".png") || it.name == "_q.json" }?.forEach { it.delete() }
+                v.writeText(OSM_VER)
+            }
+        }
+    }
     fun osmBitmap(filesDir: File, nameKey: String): Bitmap? =
         File(osmDir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     /** Foto para o Elenco: a da API; senão o recorte do cartão do OSM; senão null (a tela desenha a silhueta no mesmo estilo). */
@@ -249,7 +261,8 @@ object FaceCut {
             val navy = (b - r) > 20 && lum < 150f                     // fundo do cartão
             val line = (g > r + 25 && g > b + 25) || (r > 180 && g > 150 && b < 110)   // moldura verde/amarela e barras
             val dx = (x - s * 0.5f) / (s * 0.47f); val dy = (y - s * 0.5f) / (s * 0.54f)
-            bg[y * s + x] = navy || line || dx * dx + dy * dy > 1f
+            val outside = if (y < s * 0.55f) dx * dx + dy * dy > 1f else Math.abs(x - s * 0.5f) > s * 0.47f   // elipse só no alto; embaixo o pescoço segue até a borda
+            bg[y * s + x] = navy || line || outside
         }
         val keep = BooleanArray(s * s) { !bg[it] }
         // maior região conectada
@@ -280,6 +293,7 @@ object FaceCut {
             if (y > 0) seed(p - s); if (y < s - 1) seed(p + s); if (x > 0) seed(p - 1); if (x < s - 1) seed(p + 1)
         }
         var a = FloatArray(s * s) { if (!out[it]) 1f else 0f }
+        for (y in 0 until s) { val f = (1f - (y.toFloat() / s - 0.94f) / 0.06f).coerceIn(0f, 1f); if (f < 1f) for (x in 0 until s) a[y * s + x] *= f }   // pescoço desbota no fim do recorte
         repeat(2) {   // borda suave (caixa 3×3)
             val n = FloatArray(s * s)
             for (y in 0 until s) for (x in 0 until s) {
@@ -295,6 +309,24 @@ object FaceCut {
             fun mix(sh: Int) = (((c shr sh) and 255) * k + ((BG shr sh) and 255) * (1f - k)).toInt().coerceIn(0, 255)
             res[i] = (255 shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
         }
-        return res
+        return place(res, s)
+    }
+
+    /** Rosto inteiro (cabelo ao queixo) a 94% do quadro, centrado, com margem de fundo claro: a tela corta em círculo como nas fotos da API. */
+    private fun place(src: IntArray, s: Int): IntArray {
+        val n = (s * 0.94f).toInt(); val x0 = (s - n) / 2; val y0 = (s - n) / 2
+        val out = IntArray(s * s) { BG }
+        for (y in 0 until n) for (x in 0 until n) {
+            val fx = (x + 0.5f) * s / n - 0.5f; val fy = (y + 0.5f) * s / n - 0.5f
+            val ix = fx.toInt().coerceIn(0, s - 2); val iy = fy.toInt().coerceIn(0, s - 2)
+            val tx = (fx - ix).coerceIn(0f, 1f); val ty = (fy - iy).coerceIn(0f, 1f)
+            fun ch(sh: Int): Int {
+                val a = (src[iy * s + ix] shr sh) and 255; val b = (src[iy * s + ix + 1] shr sh) and 255
+                val c = (src[(iy + 1) * s + ix] shr sh) and 255; val d = (src[(iy + 1) * s + ix + 1] shr sh) and 255
+                return ((a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty).toInt().coerceIn(0, 255)
+            }
+            out[(y0 + y) * s + x0 + x] = (255 shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+        }
+        return out
     }
 }
