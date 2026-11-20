@@ -553,7 +553,7 @@ object Arts {
                 val awayM = f[K.HOME]?.value?.lowercase() == "fora"   // em casa à esquerda
                 banner = "DIA DE JOGO"; big = if (my != null && rv != null) (if (awayM) "$rv × $my" else "$my × $rv") else "J${round ?: ""}"
                 info = listOfNotNull(round?.let { "Rodada $it" }, home?.lowercase(), if (f[K.RIVAL_HUMAN]?.value == "Sim") "rival humano" else "rival CPU").joinToString("  •  ")
-                plate = prob?.let { "CHANCE DE VITÓRIA" to "$team ${it.win}%  •  Empate ${it.draw}%  •  $rival ${it.loss}%" }
+                plate = prob?.let { "CHANCE DE VITÓRIA" to (if (awayM) "${it.loss}%|${it.draw}%|${it.win}%" else "${it.win}%|${it.draw}%|${it.loss}%") }
                 foot = "Hoje é dia de decidir!"
                 val sceneV = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
                 val oppT = theme(oppCrest, (slot % 4) + 1)

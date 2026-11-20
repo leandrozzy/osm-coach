@@ -219,11 +219,16 @@ internal object ArtsDraw {
                     text(c, n.first.uppercase(), (30f + W / 2f + 36f) / 2f, 915f, 38f, onColor(th.kit), maxw = W / 2f - 110f, align = 'c', skew = -0.12f)
                     text(c, n.second.uppercase(), (W / 2f - 36f + W - 30f) / 2f, 915f, 38f, onColor(opp.kit), maxw = W / 2f - 110f, align = 'c', skew = -0.12f)
                 }
-                title(c, big, W / 2f, 1030f, 76f, maxw = W - 140f)
                 if (plate != null) {
-                    text(c, plate.first, W / 2f, 1092f, 32f, argb(255, 255, 214, 120), maxw = W - 100f, align = 'c', skew = -0.08f)
-                    text(c, plate.second, W / 2f, 1146f, 34f, Color.WHITE, maxw = W - 80f, align = 'c', skew = -0.08f)
+                    val pc = plate.second.split("|")
+                    text(c, plate.first, W / 2f, 990f, 30f, argb(255, 255, 214, 120), maxw = W - 100f, align = 'c', skew = -0.08f)
+                    if (pc.size == 3) {
+                        title(c, pc[0], (30f + W / 2f + 36f) / 2f, 1062f, 72f, maxw = W / 2f - 110f)
+                        title(c, pc[2], (W / 2f - 36f + W - 30f) / 2f, 1062f, 72f, maxw = W / 2f - 110f)
+                        text(c, "Empate " + pc[1], W / 2f, 1116f, 36f, Color.WHITE, maxw = W - 200f, align = 'c', skew = -0.08f)
+                    }
                 }
+                text(c, "Força  $big", W / 2f, 1166f, 30f, argb(255, 220, 226, 240), maxw = W - 200f, align = 'c', skew = -0.08f)
                 footBand(c, th, 1200f, footer)
             }
             oppCrest != null -> {   // goleada: placar com os dois escudos
