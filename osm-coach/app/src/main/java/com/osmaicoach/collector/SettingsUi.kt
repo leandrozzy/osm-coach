@@ -661,16 +661,46 @@ internal fun SettingsTab() {
         }
         SectionLabel("Dados", "Capturas guardadas, leitura com IA e diagnóstico")
         Fold("📼", "Capturas e leitura com IA") { SessionsBody() }
-        Fold("📜", "Log ao vivo (o que o app leu, avisou e pediu)") {
-            Hint("Registro em uma linha por decisão: telas lidas, avisos da bolha e o que está em \"Para fazer\" e por quê. Fica salvo mesmo com o app fechado e vai dentro do diagnóstico (campo \"live\"): não precisa gravar a tela.", "log ao vivo")
-            var lines by remember { mutableStateOf(Diag.liveTail(60)) }
-            OutlinedButton(onClick = { lines = Diag.liveTail(60) }, modifier = Modifier.fillMaxWidth()) { Text("🔄 Atualizar lista", fontSize = 13.sp) }
+        Fold("📜", "Log ao vivo (o que o app leu, avisou e pediu)", startOpen = false) {
+            Hint("Atualiza sozinho, o MAIS NOVO em cima. Use os filtros e a busca para achar uma linha (ex.: digite \"Plantel\" ou \"S2\"). Fica salvo mesmo com o app fechado. \"Compartilhar\" envia só o que está na tela.", "log ao vivo")
+            val tick = rememberTick(3000L)
+            var filter by remember { mutableStateOf("Tudo") }
+            var query by remember { mutableStateOf("") }
+            val all = remember(tick) { Diag.liveTail(1500) }
+            fun cat(l: String): String = when {
+                l.contains("BOLHA") -> "Avisos"
+                l.contains("PARA FAZER") -> "Para fazer"
+                l.contains("Elenco") || l.contains("Plantel") -> "Plantel"
+                l.contains("Descartada") || l.contains("Outra tela") -> "Ruído"
+                else -> "Leituras"
+            }
+            val filters = listOf("Tudo", "Plantel", "Leituras", "Avisos", "Para fazer")
+            val shown = all.asReversed().filter { l ->
+                (filter == "Tudo" && cat(l) != "Ruído" || cat(l) == filter) && (query.isBlank() || l.contains(query.trim(), ignoreCase = true))
+            }.take(200)
+            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(filters.size) { i ->
+                    val f = filters[i]
+                    OutlinedButton(onClick = { filter = f }, modifier = Modifier.height(36.dp)) {
+                        Text(f + if (filter == f) " ✓" else "", fontSize = 12.5.sp, fontWeight = if (filter == f) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+            OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, label = { Text("Buscar (ex.: Plantel, S2, Hudson)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Text("${shown.size} linha(s) • total guardado: ${all.size}", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
             OutlinedButton(onClick = {
-                val txt = Diag.liveTail(1500).joinToString("\n")
+                val txt = shown.joinToString("\n")
                 ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, txt) }, "Compartilhar log").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-            }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("📤 Compartilhar o log (últimas 1500 linhas)", fontSize = 13.sp) }
-            for (l in lines.asReversed()) Text(l, fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-            if (lines.isEmpty()) Text("Ainda sem registros.", fontSize = 13.sp, color = C.MUTED)
+            }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("📤 Compartilhar o que está na tela", fontSize = 13.sp) }
+            var lastDay = ""
+            for (l in shown) {
+                val day = l.take(5)
+                if (day != lastDay && day.length == 5 && day[2] == '/') { lastDay = day; Text("— dia $day —", fontSize = 12.sp, color = C.GOLD, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp)) }
+                val c = cat(l)
+                val col = when (c) { "Avisos" -> C.GOLD; "Para fazer" -> C.PRIMARY; "Plantel" -> C.OK; else -> C.MUTED }
+                Text(l.drop(6).trim(), fontSize = 11.5.sp, color = col, modifier = Modifier.padding(top = 3.dp))
+            }
+            if (shown.isEmpty()) Text("Nada com esse filtro.", fontSize = 13.sp, color = C.MUTED)
         }
         Fold("📦", "Exportar diagnóstico") {
             Hint(
