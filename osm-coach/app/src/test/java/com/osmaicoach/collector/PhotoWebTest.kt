@@ -16,6 +16,13 @@ class PhotoWebTest {
         assertEquals("paz", PhotoWeb.searchTerm("N. Paz"))
     }
 
+    @Test fun fullNameFirstThenMainWord() {
+        assertEquals(listOf("van de ven", "ven"), PhotoWeb.searchTerms("van de Ven"))
+        assertEquals(listOf("hudson odoi", "hudson"), PhotoWeb.searchTerms("Hudson-Odoi"))
+        assertEquals(listOf("marquinhos"), PhotoWeb.searchTerms("Marquinhos"))
+        assertTrue(PhotoWeb.searchTerms("Ba").isEmpty())
+    }
+
     @Test fun oneCandidateWithNameAndAgeIsAccepted() {
         val r = PhotoWeb.pick("Van Dijk", 35, "nl", listOf(c(1, "V. van Dijk", "Virgil", "van Dijk", 35, "Netherlands"), c(2, "J. Dijk", "John", "Dijk", 20, "England")))
         assertEquals("ok", r.state); assertEquals(1, r.cand!!.id)

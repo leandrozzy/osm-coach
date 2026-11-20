@@ -23,7 +23,7 @@ import java.util.TimeZone
 object PhotoWeb {
     const val KEY = "apifootball_key"
     const val BUDGET = 90
-    private const val ALGO = "2"   // 2: termo sem partículas ("ven") e escolha por pontos
+    private const val ALGO = "3"   // 3: busca pelo NOME INTEIRO (2ª tentativa: palavra principal sem partículas) e escolha por pontos
     private const val HOST = "https://v3.football.api-sports.io"
     private const val RETRY_MS = 7L * 86400000L
     private const val GAP_MS = 6500L          // plano grátis: 10 consultas/min
@@ -37,7 +37,7 @@ object PhotoWeb {
     fun file(filesDir: File, nameKey: String): File? = File(dir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }
     fun bitmap(filesDir: File, nameKey: String): Bitmap? = file(filesDir, nameKey)?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     /** Recortes do rosto tirados dos cartões do campo do OSM (plano B quando a API não achou o jogador). */
-    private const val OSM_VER = "3"   // 2: rosto menor e alinhado embaixo (o recorte 1 enchia o círculo e cortava o queixo): refaz os recortes antigos
+    private const val OSM_VER = "4"   // 4: corte mais baixo (queixo), ombros atrás, cartão grande: refaz os recortes antigos
     @Volatile private var osmChecked = false
     fun osmDir(filesDir: File): File = File(filesDir, "photos/osm").apply {
         mkdirs()
@@ -59,6 +59,15 @@ object PhotoWeb {
     // ------------------------------------------------------------------ escolha do jogador (pura, testada)
 
     private fun toks(s: String): List<String> = Txt.norm(s).split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }
+
+    /** Termos da busca em ordem: o NOME INTEIRO como aparece ("van de Ven"; sem acento/hífen) e, só se vier vazio, a palavra principal. */
+    fun searchTerms(name: String): List<String> {
+        val full = toks(name).joinToString(" ")
+        val out = ArrayList<String>()
+        if (full.replace(" ", "").length >= 3) out.add(full)
+        searchTerm(name)?.let { if (it != full) out.add(it) }
+        return out
+    }
 
     private val PARTICLES = setOf("van", "von", "der", "den", "de", "da", "do", "dos", "das", "del", "di", "el", "al", "bin", "ben", "le", "la", "ter", "ten")
 
@@ -231,16 +240,27 @@ object PhotoWeb {
             var done = 0
             for (p in queue) {
                 if (usedToday(ctx) >= BUDGET) { block(ctx); Diag.log("Fotos: cota do dia usada ($BUDGET), volto amanhã"); break }
-                val term = searchTerm(p.name) ?: continue
+                val terms = searchTerms(p.name)
+                if (terms.isEmpty()) continue
                 val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
-                val (code, body, hdr) = get("$HOST/players/profiles?search=" + java.net.URLEncoder.encode(term, "UTF-8"), apiKey)
-                addUsed(ctx)
-                if (code == 429) { Diag.log("Fotos: limite por minuto, espero e tento de novo"); delay(65_000L); continue }
-                if (code == 401 || code == 403) { Diag.log("Fotos: chave recusada pela API ($code)"); block(ctx); break }
-                if (body == null) { Diag.log("Fotos: sem resposta da API ($code)"); break }
-                val (cands, daily, minute) = parseCands(String(body, Charsets.UTF_8))
-                if (daily) { block(ctx); Diag.log("Fotos: a API avisou que a cota do dia acabou, volto amanhã"); break }
-                if (minute) { delay(65_000L); continue }
+                var cands: List<Cand> = emptyList()
+                var stop = false; var again = false; var zero = false
+                for ((ti, term) in terms.withIndex()) {
+                    val (code, body, hdr) = get("$HOST/players/profiles?search=" + java.net.URLEncoder.encode(term, "UTF-8"), apiKey)
+                    addUsed(ctx)
+                    if (code == 429) { Diag.log("Fotos: limite por minuto, espero e tento de novo"); delay(65_000L); again = true; break }
+                    if (code == 401 || code == 403) { Diag.log("Fotos: chave recusada pela API ($code)"); block(ctx); stop = true; break }
+                    if (body == null) { Diag.log("Fotos: sem resposta da API ($code)"); stop = true; break }
+                    val parsed = parseCands(String(body, Charsets.UTF_8))
+                    if (parsed.second) { block(ctx); Diag.log("Fotos: a API avisou que a cota do dia acabou, volto amanhã"); stop = true; break }
+                    if (parsed.third) { delay(65_000L); again = true; break }
+                    cands = parsed.first
+                    if (hdr["daily"] == "0") zero = true
+                    if (cands.isNotEmpty() || ti == terms.lastIndex || usedToday(ctx) >= BUDGET || zero) break
+                    delay(GAP_MS)   // nome inteiro sem resultado: tenta a palavra principal
+                }
+                if (stop) break
+                if (again) continue
                 val pk = pick(p.name, p.age, iso, cands)
                 val e = JSONObject().put("s", pk.state).put("at", System.currentTimeMillis())
                 if (pk.cand != null) {
@@ -254,7 +274,7 @@ object PhotoWeb {
                 } else Diag.log("Foto de ${p.name}: ${if (pk.state == "amb") "mais de um candidato, não escolhi" else "sem acerto seguro"} (${cands.size} resultados)")
                 ix.put(p.nameKey, e); saveIdx(ctx.filesDir, ix)
                 if (done > 0 && done % 3 == 0) UiBus.bump()
-                if (hdr["daily"] == "0") { block(ctx); break }
+                if (zero) { block(ctx); break }
                 delay(GAP_MS)
             }
             if (done > 0) UiBus.bump()
@@ -266,20 +286,22 @@ object PhotoWeb {
 }
 
 /**
- * Recorte do rosto do cartão do OSM: tira o fundo azul-marinho (e a moldura/barras), mantém só a maior região do rosto e põe sobre o MESMO fundo claro das
- * fotos da API-Football, para o Elenco ficar padronizado (a tela corta em círculo). Prototipado nos rostos de um print real (Sarr, Musiala, Van Dijk…).
+ * Recorte do rosto do cartão do OSM: tira o fundo azul (e a moldura/barras), mantém só a maior região do rosto e põe sobre o MESMO fundo claro das fotos
+ * da API-Football, com uma silhueta de ombros cinza atrás (o cartão termina no queixo/pescoço; os ombros dão o fecho, como no marcador de "sem foto").
+ * A tela corta em círculo. Prototipado nos rostos de prints reais (Sarr, Sano, Musiala, Van de Ven…).
  */
 object FaceCut {
     const val BG = 0xFFF3F5F9.toInt()
+    private const val SHOULDER = 0xFFC9D0DE.toInt()
 
-    /** [px] = recorte já redimensionado [s]×[s]; devolve os pixels finais (opacos, rosto sobre [BG]). */
-    fun cutout(px: IntArray, s: Int): IntArray {
+    /** [px] = recorte [s]×[s]; [big] = cartão grande (fundo azul claro com brilho: tira qualquer pixel azulado). Devolve os pixels finais (opacos). */
+    fun cutout(px: IntArray, s: Int, big: Boolean = false): IntArray {
         val bg = BooleanArray(s * s)
         for (y in 0 until s) for (x in 0 until s) {
             val c = px[y * s + x]
             val r = (c shr 16) and 255; val g = (c shr 8) and 255; val b = c and 255
             val lum = 0.299f * r + 0.587f * g + 0.114f * b
-            val navy = (b - r) > 20 && lum < 150f                     // fundo do cartão
+            val navy = (b - r) > 20 && (big || lum < 150f)            // fundo do cartão
             val line = (g > r + 25 && g > b + 25) || (r > 180 && g > 150 && b < 110)   // moldura verde/amarela e barras
             val dx = (x - s * 0.5f) / (s * 0.47f); val dy = (y - s * 0.5f) / (s * 0.54f)
             val outside = if (y < s * 0.55f) dx * dx + dy * dy > 1f else Math.abs(x - s * 0.5f) > s * 0.47f   // elipse só no alto; embaixo o pescoço segue até a borda
@@ -324,27 +346,31 @@ object FaceCut {
             }
             a = n
         }
-        val res = IntArray(s * s)
-        for (i in 0 until s * s) {
-            val c = px[i]; val k = a[i]
-            fun mix(sh: Int) = (((c shr sh) and 255) * k + ((BG shr sh) and 255) * (1f - k)).toInt().coerceIn(0, 255)
-            res[i] = (255 shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
-        }
-        return place(res, s)
+        return place(px, a, s)
     }
 
-    /** Rosto inteiro (cabelo ao queixo) a 78% do quadro, um pouco acima do centro, com margem de fundo claro: a tela corta em círculo como nas fotos da API. */
-    private fun place(src: IntArray, s: Int): IntArray {
-        val n = (s * 0.78f).toInt(); val x0 = (s - n) / 2; val y0 = ((s - n) * 0.6f).toInt()
+    /** Rosto a 78% do quadro (um pouco acima do centro) sobre ombros cinza e fundo claro. */
+    private fun place(src: IntArray, alpha: FloatArray, s: Int): IntArray {
         val out = IntArray(s * s) { BG }
+        for (y in 0 until s) for (x in 0 until s) {
+            val dx = (x - s * 0.5f) / (s * 0.40f); val dy = (y - s * 1.02f) / (s * 0.36f)
+            if (dx * dx + dy * dy <= 1f) out[y * s + x] = SHOULDER
+        }
+        val n = (s * 0.78f).toInt(); val x0 = (s - n) / 2; val y0 = ((s - n) * 0.6f).toInt()
         for (y in 0 until n) for (x in 0 until n) {
-            val fx = (x + 0.5f) * s / n - 0.5f; val fy = (y + 0.5f) * s / n - 0.5f
-            val ix = fx.toInt().coerceIn(0, s - 2); val iy = fy.toInt().coerceIn(0, s - 2)
-            val tx = (fx - ix).coerceIn(0f, 1f); val ty = (fy - iy).coerceIn(0f, 1f)
+            val fx = ((x + 0.5f) * s / n - 0.5f).coerceIn(0f, s - 1.001f); val fy = ((y + 0.5f) * s / n - 0.5f).coerceIn(0f, s - 1.001f)
+            val ix = fx.toInt(); val iy = fy.toInt(); val tx = fx - ix; val ty = fy - iy
+            fun bil(f: (Int) -> Float): Float {
+                val p00 = iy * s + ix
+                return (f(p00) * (1 - tx) + f(p00 + 1) * tx) * (1 - ty) + (f(p00 + s) * (1 - tx) + f(p00 + s + 1) * tx) * ty
+            }
+            val al = bil { alpha[it] }
+            if (al <= 0f) continue
+            val dst = out[(y0 + y) * s + x0 + x]
             fun ch(sh: Int): Int {
-                val a = (src[iy * s + ix] shr sh) and 255; val b = (src[iy * s + ix + 1] shr sh) and 255
-                val c = (src[(iy + 1) * s + ix] shr sh) and 255; val d = (src[(iy + 1) * s + ix + 1] shr sh) and 255
-                return ((a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty).toInt().coerceIn(0, 255)
+                val c = bil { ((src[it] shr sh) and 255).toFloat() }
+                val d = ((dst shr sh) and 255).toFloat()
+                return (c * al + d * (1f - al)).toInt().coerceIn(0, 255)
             }
             out[(y0 + y) * s + x0 + x] = (255 shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
         }

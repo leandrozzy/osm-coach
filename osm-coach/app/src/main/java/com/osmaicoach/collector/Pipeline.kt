@@ -154,7 +154,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 .distinctBy { it.nameKey }.singleOrNull() ?: run { noMatch++; null } ?: continue
             val h = (0.084f * bmp.height).toInt(); val w = h   // quadrado: do cabelo ao queixo (o queixo termina logo acima da faixa amarela do nome)
             if (w < 44) { tooSmall++; continue }
-            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.0727f) * bmp.height - h / 2f).toInt()
+            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.0648f) * bmp.height - h / 2f).toInt()
             if (x < 0 || y < 0 || x + w > bmp.width || y + h > bmp.height) continue
             val crop = Bitmap.createBitmap(bmp, x, y, w, h)
             val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
@@ -170,7 +170,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             for (yy in 0 until h - 1) for (xx in 0 until w - 1) { val i = yy * w + xx; gsum += Math.abs(lum[i + 1] - lum[i]) + Math.abs(lum[i + w] - lum[i]); gn += 2 }
             val grad = gsum / gn
             if (warm.toFloat() / px.size < 0.15f) { silhouette++; crop.recycle(); continue }          // silhueta: o OSM não tem foto desse jogador
-            if (grad < 4.2f) { blurry++; crop.recycle(); continue }                                    // quadro borrado (rolagem/transição)
+            if (grad < 3.6f) { blurry++; crop.recycle(); continue }                                    // quadro borrado (rolagem/transição)
             if (grad <= q.optDouble(p.nameKey, 0.0)) { kept++; crop.recycle(); continue }              // já tem um recorte igual ou mais nítido
             // sem fundo, sobre o mesmo fundo claro das fotos da API (120×120; a tela corta em círculo)
             val sc = Bitmap.createScaledBitmap(crop, 120, 120, true)
@@ -189,6 +189,57 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (msg != lastFaceLog) { lastFaceLog = msg; Diag.log(msg) }
     }
     private var lastFaceLog = ""
+
+    /**
+     * Cartão GRANDE do jogador (Plantel → toque no jogador; também aparece ao pôr à venda): foto maior, cabeça inteira. Nome "11 ISMAÏLA SARR" em (0,20; 0,28) e
+     * "IDADE: 28" logo abaixo; o jogador é casado com UM do meu elenco (sobrenome + idade igual). A foto fica ~0,241 da altura abaixo do nome, centro +0,003
+     * da largura; recorte quadrado de 0,25 da altura (medido no print: cabelo y 0,40 → queixo y 0,63, a barra de % começa logo abaixo). Silhueta (sem foto no OSM)
+     * não tem tons de pele e é ignorada. Fica com prioridade sobre os recortes pequenos do campo (q = 100 + nitidez em `_q.json`). Vale mesmo para quem está sendo vendido.
+     */
+    private suspend fun saveBigCard(slot: Int, ocr: OcrResult, bmp: Bitmap) {
+        val rx = Regex("^(\\d{1,2})\\s+([\\p{L}][\\p{L}.' -]{2,})$")
+        val nameLine = ocr.lines.firstOrNull { l -> l.xc in 0.12f..0.30f && l.yc in 0.20f..0.36f && rx.containsMatchIn(l.text.trim()) } ?: return
+        val ageLine = ocr.lines.firstOrNull { l -> Txt.norm(l.text).startsWith("idade") && Math.abs(l.xc - nameLine.xc) < 0.06f && l.yc > nameLine.yc && l.yc - nameLine.yc < 0.08f } ?: return
+        val age = Regex("\\d{2}").find(ageLine.text)?.value?.toIntOrNull()
+        val k = Txt.key(rx.find(nameLine.text.trim())!!.groupValues[2])
+        if (k.length < 3) return
+        val p = dao.playersOf(slot).filter { it.owner == "MY" }
+            .filter { (it.nameKey == k || (it.nameKey.length >= 4 && k.endsWith(it.nameKey)) || Txt.sim(it.nameKey, k) >= 0.85) && (age == null || it.age == null || it.age == age) }
+            .distinctBy { it.nameKey }.singleOrNull() ?: return
+        val side = (0.25f * bmp.height).toInt()
+        if (side < 90) return
+        val x = ((nameLine.xc + 0.003f) * bmp.width).toInt() - side / 2
+        val y = ((nameLine.yc + 0.241f) * bmp.height).toInt() - side / 2
+        if (x < 0 || y < 0 || x + side > bmp.width || y + side > bmp.height) return
+        val crop = Bitmap.createBitmap(bmp, x, y, side, side)
+        val px = IntArray(side * side); crop.getPixels(px, 0, side, 0, 0, side, side)
+        var warm = 0
+        val lum = FloatArray(side * side)
+        for (i in px.indices) {
+            val r = (px[i] shr 16) and 255; val g = (px[i] shr 8) and 255; val b = px[i] and 255
+            lum[i] = 0.299f * r + 0.587f * g + 0.114f * b
+            if (r > b + 10 && r + g + b > 150 && !(g > 200 && b < 90)) warm++
+        }
+        var gsum = 0f; var gn = 0
+        for (yy in 0 until side - 1) for (xx in 0 until side - 1) { val i = yy * side + xx; gsum += Math.abs(lum[i + 1] - lum[i]) + Math.abs(lum[i + side] - lum[i]); gn += 2 }
+        val grad = gsum / gn
+        if (warm.toFloat() / px.size < 0.10f || grad < 3.0f) { crop.recycle(); return }   // silhueta ou quadro borrado (a tela abre animada)
+        val dir = PhotoWeb.osmDir(ctx.filesDir)
+        val qf = java.io.File(dir, "_q.json")
+        val q = runCatching { JSONObject(qf.readText()) }.getOrNull() ?: JSONObject()
+        val cur = q.optDouble(p.nameKey, 0.0)
+        if (cur >= 100.0 && 100.0 + grad <= cur) { crop.recycle(); return }
+        val sc = Bitmap.createScaledBitmap(crop, 160, 160, true)
+        val spx = IntArray(160 * 160); sc.getPixels(spx, 0, 160, 0, 0, 160, 160)
+        val cut = Bitmap.createBitmap(FaceCut.cutout(spx, 160, big = true), 160, 160, Bitmap.Config.ARGB_8888)
+        sc.recycle()
+        runCatching { java.io.File(dir, "${p.nameKey}.png").outputStream().use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) } }.onSuccess {
+            q.put(p.nameKey, 100.0 + grad); runCatching { qf.writeText(q.toString()) }
+            Diag.log("Rosto de ${p.name} recortado do CARTÃO GRANDE (nitidez ${"%.1f".format(java.util.Locale.US, grad)})")
+            UiBus.bump()
+        }
+        cut.recycle(); crop.recycle()
+    }
 
     private suspend fun checkTactic(slot: Int, ocr: OcrResult, now: Long) {
         val f = repo.fieldMap(slot)
@@ -1073,6 +1124,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             // campo com os 11 (Equipa inicial) pode cair em NOISE/OTHER: conta os cartões antes de descartar
             if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { scanLineup(sl, ocr, now) } }
             if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { saveCardFaces(sl, ocr, bmp) } }
+            if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { saveBigCard(sl, ocr, bmp) } }
             if (type == ScreenType.NOISE || type == ScreenType.NON_OSM) {
                 Diag.discarded.incrementAndGet()
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")
