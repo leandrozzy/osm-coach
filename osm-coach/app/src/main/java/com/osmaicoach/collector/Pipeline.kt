@@ -198,7 +198,15 @@ class FramePipeline private constructor(private val ctx: Context) {
     /** Cartões do campo/Banco e cartão grande, testando o slot da tela primeiro e depois os outros (o slot herdado da sessão pode estar errado). */
     private suspend fun photosFrom(hint: Int?, ocr: OcrResult, bmp: Bitmap) {
         val slots = listOfNotNull(hint) + (1..4).filter { it != hint }
-        runCatching { for (sl in slots) if (saveBigCard(sl, ocr, bmp)) break }
+        val big = runCatching { slots.any { saveBigCard(it, ocr, bmp) } }.getOrDefault(false)
+        if (!big) {
+            val idade = ocr.lines.any { Txt.norm(it.text).startsWith("idade") && it.xc < 0.40f }
+            val nm = ocr.lines.firstOrNull { l -> l.xc in 0.10f..0.34f && l.yc in 0.18f..0.40f && Regex("^\\d{1,2}\\s+\\p{L}").containsMatchIn(l.text.trim()) }
+            if (idade && nm != null) {
+                val msg = "Cartão grande visto ('${nm.text.trim()}') mas nenhum jogador do meu elenco casou"
+                if (msg != lastBigLog) { lastBigLog = msg; Diag.log(msg) }
+            }
+        }
         runCatching { for (sl in slots) if (saveCardFaces(sl, ocr, bmp) > 0) break }
     }
 
@@ -1150,7 +1158,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             lastProcessed = h
             // campo com os 11 (Equipa inicial) pode cair em NOISE/OTHER: conta os cartões antes de descartar
             if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { scanLineup(sl, ocr, now) } }
-            if (type != ScreenType.NON_OSM) photosFrom(machine.current, ocr, bmp)
+            photosFrom(machine.current, ocr, bmp)   // também em NON_OSM: o cartão grande escurece o fundo e some a barra do OSM
             if (type == ScreenType.NOISE || type == ScreenType.NON_OSM) {
                 Diag.discarded.incrementAndGet()
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")
@@ -1472,7 +1480,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 val img = ImageIo.toImg(bmp)
                 val ocr = OcrEngine.read(bmp)
                 val type = ScreenClassifier.classify(ocr, PixelProbe.isOsmTopBar(img))
-                if (type != ScreenType.NON_OSM) photosFrom(s.slotId.takeIf { it in 1..4 }, ocr, bmp)
+                photosFrom(s.slotId.takeIf { it in 1..4 }, ocr, bmp)
                 var ex = parse(ocr, type, img, s.at)
                 read++
                 val known = repo.knownIdentities()

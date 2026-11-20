@@ -15,6 +15,23 @@ object Hints {
     /** Dicas que são "ainda não fiz": treinador parado, faltam jogadores, preparação, patrocínio vencido. Sugestão de melhoria não conta. */
     private val ACTION_ICONS = setOf("🏋", "🚨", "📝", "🤝", "🔄", "🏗", "🏟", "⏰", "⚖", "🩹", "🧩", "💼")
 
+    /** Grupos da bolha, na ordem em que aparecem. */
+    val GROUPS = listOf("⚔ Tática", "🏋 Treinamento", "👥 Jogadores", "🏢 Administração", "📌 Outros")
+
+    /** Em que grupo a dica fica (pelo ícone e por palavras do título). */
+    fun groupOf(h: Hint): String {
+        val t = Txt.norm(h.title)
+        return when {
+            h.icon in setOf("⚡", "⚠", "📋", "🔎", "🟨") || "tatica" in t || "rival" in t -> GROUPS[0]
+            h.icon == "🏋" || "treino" in t || "treinador" in t -> GROUPS[1]
+            h.icon in setOf("📷", "🚑", "🩹", "🌍", "➕", "💰", "🧩") && h.icon != "➕" -> GROUPS[2]
+            h.icon == "➕" && ("elenco" in t) -> GROUPS[2]
+            "jogador" in t || "elenco" in t || "plantel" in t || "onze" in t -> GROUPS[2]
+            h.icon in setOf("🏗", "🏟", "🤝", "💼", "⚖", "🎉", "📅", "🏁", "⏰") || "medico" in t || "advogado" in t || "estadio" in t || "patroc" in t || "olheiro" in t || "missao" in t || "missoes" in t -> GROUPS[3]
+            else -> GROUPS[4]
+        }
+    }
+
     fun asHint(t: Playbook.Tip): Hint = Hint(t.icon, t.title, t.why, t.icon in ACTION_ICONS && !(t.icon == "🤝" && t.priority < 88))
 
     suspend fun trainRates(repo: Repo): Map<String, Pair<Double, Int>> = runCatching {

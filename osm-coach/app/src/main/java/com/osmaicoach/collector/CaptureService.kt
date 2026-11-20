@@ -283,7 +283,17 @@ class CaptureService : AccessibilityService() {
                 setPadding(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
             })
         }
-        for (h in list.take(6)) {
+        var lastGroup = ""
+        for (h in list.sortedBy { Hints.GROUPS.indexOf(Hints.groupOf(it)) }.take(10)) {
+            val g = Hints.groupOf(h)
+            if (g != lastGroup) {
+                lastGroup = g
+                lv.addView(TextView(this).apply {
+                    text = g; setTextColor(0xFF7CC8FF.toInt()); textSize = 12f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setPadding((4 * dp).toInt(), (8 * dp).toInt(), 0, 0)
+                })
+            }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding((8 * dp).toInt(), (5 * dp).toInt(), (8 * dp).toInt(), (5 * dp).toInt())
