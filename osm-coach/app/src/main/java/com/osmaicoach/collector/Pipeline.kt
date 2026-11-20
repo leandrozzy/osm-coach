@@ -548,6 +548,7 @@ class FramePipeline private constructor(private val ctx: Context) {
     private var seasonSaved = 0
     private var tacticSaved = 0
     private var calendarSaved = 0
+    private var lastSaleSig = ""
     private var lastOsmAcceptedAt = 0L
     private val pregameAiAt = HashMap<Int, Long>()
     private var imagesThisSession = 0
@@ -1032,6 +1033,13 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (type == ScreenType.SQUAD) ex = runCatching { repairBubbles(bmp, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) ex = runCatching { repairRows(bmp, ocr, ex) }.getOrDefault(ex)
             if (type == ScreenType.SQUAD) { ex.dropped.take(3).forEach { Diag.log("Plantel: linha descartada — $it") }; ex = runCatching { repairNames(bmp, ex) }.getOrDefault(ex) }
+            if (type == ScreenType.SQUAD) {
+                // o que a leitura achou À VENDA neste quadro (setas na camisa): aparece no log só quando muda, para achar jogador que não entra como venda
+                val sale = ex.players.filter { it.forSale == true }.joinToString { it.name }
+                val unk = ex.players.count { it.forSale == null }
+                val sig = "$sale|$unk"
+                if (sig != lastSaleSig && ex.players.size >= 3) { lastSaleSig = sig; Diag.log("Plantel: à venda neste quadro = [${sale.ifBlank { "nenhum" }}]" + (if (unk > 0) " ($unk linha(s) cortada(s) sem leitura de venda)" else "")) }
+            }
             Diag.parsed.incrementAndGet()
 
             // Rolando a lista o cabeçalho some: reaproveita o dono lido por último (mesmo tipo e slot, até 10 min).
