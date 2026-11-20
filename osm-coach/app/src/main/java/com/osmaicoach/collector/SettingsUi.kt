@@ -702,6 +702,26 @@ internal fun SettingsTab() {
             }
             if (shown.isEmpty()) Text("Nada com esse filtro.", fontSize = 13.sp, color = C.MUTED)
         }
+        Fold("🚫", "Jogadores removidos à mão") {
+            Hint("Quem você removeu do Elenco (diálogo do jogador → Remover) fica aqui e NUNCA volta sozinho. Se removeu por engano, toque em Restaurar: ele volta na próxima leitura do Plantel.", "removidos")
+            val tickB = rememberTick(4000L)
+            var reload by remember { mutableIntStateOf(0) }
+            val blocked = rememberLoaded(emptyList<Pair<Int, Triple<String, String, Long>>>(), tickB, reload) {
+                val r = Repo(ctx)
+                (1..4).flatMap { sl -> r.blockedList(sl).map { sl to it } }
+            }
+            val scopeB = rememberCoroutineScope()
+            if (blocked.isEmpty()) Text("Nenhum jogador removido à mão.", fontSize = 13.sp, color = C.MUTED)
+            for ((sl, b) in blocked) {
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("S$sl • ${b.second}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("removido em " + (if (b.third > 0) fmtTime(b.third) else "data desconhecida") + (if (b.second == b.first) " (nome não guardado)" else ""), fontSize = 11.5.sp, color = C.MUTED)
+                    }
+                    OutlinedButton(onClick = { scopeB.launch(Dispatchers.IO) { Repo(ctx).unblockPlayer(sl, b.first); reload++ } }, modifier = Modifier.height(38.dp)) { Text("Restaurar", fontSize = 12.5.sp) }
+                }
+            }
+        }
         Fold("📦", "Exportar diagnóstico") {
             Hint(
                 "Gera um arquivo com TUDO o que o app tem (campos, elenco, calendário, análises do fim do jogo, táticas, telas lidas, " +

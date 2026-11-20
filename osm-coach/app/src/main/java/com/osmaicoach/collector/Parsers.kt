@@ -172,6 +172,9 @@ object Parsers {
                 f[K.RIVAL_HUMAN] = Reading("Sim", 0.85)
                 f[K.RIVAL_NICK] = Reading(rivalNick.text.trim(), 0.8)
             }
+            // Apelido em outro alfabeto (árabe etc.): o OCR não lê, mas a bandeira do usuário aparece sob o nome do rival = humano
+            val rivalFlag = rivalNick == null && img != null && PixelProbe.nickFlag(img, !mineLeft)
+            if (rivalFlag) f[K.RIVAL_HUMAN] = Reading("Sim", 0.85)
             // Sem apelido legível NÃO marca CPU: o OCR pode só ter perdido o nome do usuário.
             var left: Int? = null
             var right: Int? = null
@@ -218,11 +221,11 @@ object Parsers {
             if (rivalStr != null) f[K.RIVAL_STRENGTH] = Reading(rivalStr.toString(), 0.8)
             // Os círculos alternam força <-> bônus ao mesmo tempo. Se o meu mostra o bônus e o do rival continua
             // com a força (e não há usuário sob o nome dele), o rival é CPU: time de CPU não tem bônus de login.
-            if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick == null) {
+            if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick == null && !rivalFlag) {
                 f[K.RIVAL_HUMAN] = Reading("Não", 0.95)
             }
             // Sem usuário embaixo do nome do rival e com a força dele à vista: é CPU (se depois aparecer o apelido, "Sim" vence).
-            if (rivalNick == null && rivalStr != null && f[K.RIVAL_HUMAN] == null) f[K.RIVAL_HUMAN] = Reading("Não", 0.7)
+            if (rivalNick == null && !rivalFlag && rivalStr != null && f[K.RIVAL_HUMAN] == null) f[K.RIVAL_HUMAN] = Reading("Não", 0.7)
             // Humano (nome de usuário embaixo) sem bônus de login hoje: o círculo dele fica na força -> bônus 0%.
             if (myBonus != null && rivalBonus == null && rivalStr != null && rivalNick != null) {
                 f[K.RIVAL_LOGIN_BONUS] = Reading("+0%", 0.8)

@@ -309,6 +309,26 @@ object PixelProbe {
         return best >= 0.30f
     }
 
+    /**
+     * Humano com apelido em OUTRO alfabeto (árabe, chinês, cirílico…): o OCR (ML Kit latino) não lê o texto, mas a BANDEIRA do usuário
+     * (retângulo colorido sólido ~0,02×0,03 à esquerda do apelido, y≈0,40, centrado sob o nome do time) aparece. Time de CPU não tem bandeira/apelido.
+     * Medido no print do Pré-jogo (Defensa y Justicia × leandrozzy): janela sólida saturada 0,83 (rival) e 0,90 (meu), 0 nas laterais e no meio.
+     */
+    fun nickFlag(img: Img, left: Boolean): Boolean {
+        val xc = if (left) 0.232f else 0.768f
+        var best = 0f
+        var x = xc - 0.09f
+        while (x <= xc + 0.07f) {
+            var y = 0.385f
+            while (y <= 0.41f) {
+                best = max(best, frac(img, x, x + 0.02f, y, y + 0.03f) { _, sa, v -> sa > 0.5f && v > 0.43f })
+                y += 0.005f
+            }
+            x += 0.004f
+        }
+        return best >= 0.45f
+    }
+
     /** A central dos 4 slots não tem barra superior; ela é azul. Serve só para decidir se vale rodar OCR. */
     fun hubBackdrop(img: Img): Boolean = frac(img, 0f, 1f, 0f, 1f, HUB_BLUE) >= 0.25f
 

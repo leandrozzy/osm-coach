@@ -107,32 +107,44 @@ internal fun SlotHistory(slot: Int, d: SlotData) {
         if (deviated > 0) Text("🛠 Em $deviated jogo(s) você jogou diferente do que o app indicou.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }
 
-    Title("Jogo a jogo")
-    for (r in rows.take(30)) {
-        val col = when (r.result) { "V" -> C.WIN; "D" -> C.LOSS; "E" -> C.DRAW; else -> C.MUTED }
-        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).osmPanel().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(34.dp).clip(RoundedCornerShape(50)).background(col), contentAlignment = Alignment.Center) {
-                    Text(r.result ?: "?", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0B1C3E))
+    Title("Jogo a jogo, por temporada")
+    // um dropdown por temporada (a atual abre sozinha; as encerradas ficam fechadas)
+    val groups = d.logsAll.mapNotNull { p -> runCatching { JSONObject(p.json) }.getOrNull()?.let { p.kind to it } }
+        .groupBy { (k, _) -> if (k.startsWith("tlog_R")) "ATUAL" else k.removePrefix("tlog_").substringBefore("_R") }
+    val order = groups.keys.sortedWith(compareBy({ it != "ATUAL" }, { it.removePrefix("X").toLongOrNull()?.let { t -> -t } ?: 0L }))
+    for (g in order) {
+        val gr = postRows(groups[g].orEmpty().map { it.second })
+        if (gr.isEmpty()) continue
+        val gd = gr.filter { it.result != null }
+        val label = if (g == "ATUAL") "Temporada atual" + (known(d.fields, K.COMPETITION)?.let { " • $it" } ?: "")
+        else "Temporada encerrada em " + (g.removePrefix("X").toLongOrNull()?.let { java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(it * 1000)) } ?: "?")
+        Fold("📅", label, "${gr.size} jogo(s) • ${gd.count { it.result == "V" }}V ${gd.count { it.result == "E" }}E ${gd.count { it.result == "D" }}D", startOpen = g == "ATUAL") {
+            for (r in gr) {
+            val col = when (r.result) { "V" -> C.WIN; "D" -> C.LOSS; "E" -> C.DRAW; else -> C.MUTED }
+            Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).osmPanel().padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).clip(RoundedCornerShape(50)).background(col), contentAlignment = Alignment.Center) {
+                        Text(r.result ?: "?", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0B1C3E))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Rodada ${r.round} • ${r.rival}", fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(
+                            (if (r.result != null) r.resultWord.replaceFirstChar { it.uppercase() } + (if (r.score.isNotBlank()) " ${r.score}" else "") else "Ainda não jogado/lido") +
+                                (if (r.home == true) " • em casa" else if (r.home == false) " • fora" else "") + (if (r.human == true) " • humano" else if (r.human == false) " • CPU" else ""),
+                            fontSize = 12.5.sp, color = col, fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Rodada ${r.round} • ${r.rival}", fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    Text(
-                        (if (r.result != null) r.resultWord.replaceFirstChar { it.uppercase() } + (if (r.score.isNotBlank()) " ${r.score}" else "") else "Ainda não jogado/lido") +
-                            (if (r.home == true) " • em casa" else if (r.home == false) " • fora" else "") + (if (r.human == true) " • humano" else if (r.human == false) " • CPU" else ""),
-                        fontSize = 12.5.sp, color = col, fontWeight = FontWeight.SemiBold
-                    )
-                }
+                if (r.predW != null) Text("Previsão do app: vitória ${r.predW}% • empate ${r.predE}% • derrota ${r.predD}%", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+                Text(r.hitText, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                Text(r.verdict, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
+                Text(
+                    "Tática usada: ${r.formation} • ${r.style}" + (if (r.deviated) " (você trocou" + (r.genFormation?.let { "; o app indicou $it" } ?: "") + ")" else ""),
+                    fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
+                )
             }
-            if (r.predW != null) Text("Previsão do app: vitória ${r.predW}% • empate ${r.predE}% • derrota ${r.predD}%", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
-            Text(r.hitText, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-            Text(r.verdict, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
-            Text(
-                "Tática usada: ${r.formation} • ${r.style}" + (if (r.deviated) " (você trocou" + (r.genFormation?.let { "; o app indicou $it" } ?: "") + ")" else ""),
-                fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
-            )
+            }
         }
     }
-    if (rows.size > 30) Text("Mostrando os 30 jogos mais recentes.", fontSize = 12.sp, color = C.MUTED)
 }

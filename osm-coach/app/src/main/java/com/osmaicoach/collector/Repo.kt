@@ -2229,8 +2229,29 @@ class Repo(private val ctx: Context) {
         return true
     }
 
+    /** Jogadores removidos à mão (bloqueados): (chave, nome, quando). O nome só existe para remoções feitas a partir desta versão. */
+    suspend fun blockedList(slot: Int): List<Triple<String, String, Long>> {
+        val j = planJson(slot, "squadblock"); val nm = planJson(slot, "squadblockname")
+        val out = ArrayList<Triple<String, String, Long>>()
+        for (k in j.keys()) out.add(Triple(k, nm.optString(k).ifBlank { k }, j.optLong(k, 0L)))
+        return out.sortedByDescending { it.third }
+    }
+
+    /** Devolve o jogador à leitura: tira da lista de removidos (ele volta a entrar na próxima leitura do Plantel). */
+    suspend fun unblockPlayer(slot: Int, nameKey: String) {
+        val now = System.currentTimeMillis()
+        val j = planJson(slot, "squadblock"); j.remove(nameKey)
+        dao.putPlan(PlanEntity(slot, "squadblock", j.toString(), now))
+        dao.deletePlan(slot, "squadgone")
+        learn(slot, "elenco", "Jogador devolvido à leitura (estava removido à mão): $nameKey.", now)
+    }
+
     suspend fun removePlayer(slot: Int, nameKey: String) {
         val now = System.currentTimeMillis()
+        dao.player(slot, "MY", nameKey)?.name?.let { nm ->
+            val nj = planJson(slot, "squadblockname"); nj.put(nameKey, nm)
+            dao.putPlan(PlanEntity(slot, "squadblockname", nj.toString(), now))
+        }
         dao.deletePlayer(slot, "MY", nameKey)
         val j = planJson(slot, "squadblock")
         j.put(nameKey, now)
