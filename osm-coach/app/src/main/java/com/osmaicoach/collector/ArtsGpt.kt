@@ -26,6 +26,14 @@ object ArtsGpt {
         prefs(ctx).edit().putStringSet("gpt_done", cur).apply()
     }
 
+    /** Depois de Limpar/Apagar: o que já foi usado no ChatGPT nunca mais volta à lista (vai para os dispensados). */
+    suspend fun dismissUsed(ctx: Context, repo: Repo, slot: Int? = null) {
+        val used = prefs(ctx).getStringSet("gpt_done", emptySet()).orEmpty()
+        if (used.isEmpty()) return
+        val ids = (if (slot != null) listOf(slot) else (1..4)).flatMap { sl -> Arts.candidates(repo, sl, includeDismissed = true).map { it.id } }.filter { it in used }
+        if (ids.isNotEmpty()) Arts.dismiss(repo, ids)
+    }
+
     private fun played(ms: List<MatchEntity>) = ms.filter { it.round != null && it.result in listOf("V", "E", "D") }.sortedBy { it.round }
 
     /** Texto do pedido para a arte [c] (null se faltar dado). */
