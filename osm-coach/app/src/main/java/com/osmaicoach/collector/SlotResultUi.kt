@@ -430,6 +430,7 @@ internal fun GameCard(g: Coach.Game, rv: Coach.Review?) {
 
 @Composable
 internal fun SlotLearning(slot: Int, d: SlotData) {
+    PostGameHistory(slot, d)
     d.progress?.let { ScoreboardCard(it.score) }
     Results.of(d.logsAll.mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() })?.let { ResultsCard(it, "S$slot, todas as competições") }
     Accuracy.of(Accuracy.parse(slot, d.logsAll.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }))?.let { AccuracyCard(it, "S$slot, todas as competições") }

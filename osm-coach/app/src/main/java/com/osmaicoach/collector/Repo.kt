@@ -2281,7 +2281,13 @@ class Repo(private val ctx: Context) {
             // uma passada COMPLETA (fim da lista + 4 setores + 14 vistos) basta: o usuário quer só os jogadores reais (12/11 exigia 2 passadas e fantasmas ficavam)
             // quem foi lido há MENOS de 20 min (antes desta passada) só sai na 2ª passada seguida sem ele: o OCR perde linhas e Lukébakio/Hudson-Odoi do S2
             // sumiram do elenco (19/11). Quem não é visto há mais tempo (vendido de verdade) sai já na 1ª passada completa.
-            val gone = notSeen.filter { p -> val n = missNew.optInt(p.nameKey, 0); n >= 2 || (n >= 1 && seenAt.optLong(p.nameKey, 0L) < since - 20 * 60_000L) }
+            val reads0 = planJson(slot, "squadreads")
+            // jogador lido muitas vezes é real (Lukébakio/Hudson-Odoi do S2 sumiam por linha perdida no OCR): só sai na 2ª passada completa seguida sem ele.
+            // Na 1ª passada só sai quem estava À VENDA, tem nome de lixo ou foi lido ≤3 vezes (fantasma).
+            val gone = notSeen.filter { p ->
+                val n = missNew.optInt(p.nameKey, 0)
+                n >= 2 || (n >= 1 && (p.forSale == true || looksGarbled(p.name) || reads0.optInt(p.nameKey, 0) <= 3))
+            }
             if (gone.isEmpty() || gone.size > 20) return 0
             val ledger = Ledger.parse(dao.plan(slot, "ledger")?.json)
             val goneAt = planJson(slot, "squadgone")

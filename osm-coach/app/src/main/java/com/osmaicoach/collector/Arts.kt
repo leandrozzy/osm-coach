@@ -105,6 +105,16 @@ object Arts {
         return mine.size
     }
 
+    /** Apaga TODAS as artes já feitas (os 4 slots): arquivos, lista e qualquer imagem solta na pasta `arts`. Devolve quantas. */
+    suspend fun deleteAll(repo: Repo): Int {
+        val all = items(repo)
+        for (i in all) runCatching { File(i.file).delete() }
+        saveItems(repo, emptyList())
+        runCatching { all.firstOrNull()?.let { File(it.file).parentFile } ?.listFiles()?.forEach { if (it.isFile) it.delete() } }
+        UiBus.bump()
+        return all.size
+    }
+
     // ------------------------------------------------------------------ o que pode virar arte
     /** Jogador visto em 3+ passadas de leitura do Plantel: nome lido uma vez só pode ser erro de OCR (fantasma) e não vira arte. */
     private suspend fun confirmed(repo: Repo, slot: Int): Set<String> {

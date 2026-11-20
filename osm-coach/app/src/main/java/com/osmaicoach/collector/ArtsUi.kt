@@ -239,6 +239,21 @@ internal fun ArtsTab() {
                 )
             }
         }
+        run {
+            var confirmAll by remember { mutableStateOf(false) }
+            val total = d.items.size
+            OutlinedButton(
+                onClick = { confirmAll = true }, enabled = total > 0, modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)
+            ) { Text("🗑 Apagar TODAS as artes ($total)", fontSize = 13.sp) }
+            if (confirmAll) androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmAll = false }, containerColor = C.SURFACE,
+                title = { Text("Apagar todas as artes?", fontWeight = FontWeight.Bold) },
+                text = { Text("As $total imagens geradas (todos os slots) serão apagadas do app. As que você já baixou na galeria ficam. Isso não pode ser desfeito.", fontSize = 13.sp) },
+                confirmButton = { TextButton(onClick = { confirmAll = false; scope.launch { val n = withContext(Dispatchers.IO) { Arts.deleteAll(Repo(ctx)) }; msg = "$n arte(s) apagada(s)." } }) { Text("Apagar tudo", color = C.BAD) } },
+                dismissButton = { TextButton(onClick = { confirmAll = false }) { Text("Cancelar") } }
+            )
+        }
         Text("As artes ficam só no aparelho. \"Baixar\" salva na galeria (Pictures/OSM Coach); \"Compartilhar\" abre o menu do Android.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
     }
     preview?.let { ArtPreview(it) { preview = null } }
