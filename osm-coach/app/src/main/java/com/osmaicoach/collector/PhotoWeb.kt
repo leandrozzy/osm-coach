@@ -54,6 +54,31 @@ object PhotoWeb {
         File(osmDir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     /** Foto para o Elenco: a da API; senão o recorte do cartão do OSM; senão null (a tela desenha a silhueta no mesmo estilo). */
     fun bitmapAny(filesDir: File, nameKey: String): Bitmap? = bitmap(filesDir, nameKey) ?: osmBitmap(filesDir, nameKey)
+    private fun noneFile(filesDir: File) = File(osmDir(filesDir), "_none.json")
+    /** Jogadores que o OSM mostra com SILHUETA (sem foto): abrir o cartão não adianta, só a API pode achar a foto. */
+    fun noneSet(filesDir: File): Set<String> = runCatching { org.json.JSONArray(noneFile(filesDir).readText()).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } }.getOrNull() ?: emptySet()
+    fun markNone(filesDir: File, key: String, on: Boolean) {
+        val cur = noneSet(filesDir).toMutableSet()
+        if (!(if (on) cur.add(key) else cur.remove(key))) return
+        runCatching { noneFile(filesDir).writeText(org.json.JSONArray(cur.toList()).toString()) }
+    }
+
+    /**
+     * Quem o usuário precisa abrir no Plantel (toque no jogador = cartão grande): sem foto da API, sem recorte do OSM e que NÃO é silhueta no OSM.
+     * Só entra depois de a API já ter tentado (sem acerto/ambíguo) ou se não há chave: quem ainda está na fila da API pode ganhar a foto sozinho.
+     */
+    suspend fun openList(ctx: Context, slot: Int): List<String> {
+        val repo = Repo(ctx)
+        val st = repo.fieldMap(slot)[K.SLOT_STATE]?.value?.lowercase().orEmpty()
+        if (st in listOf("preepoca", "procurando", "vazio")) return emptyList()
+        val ix = idx(ctx.filesDir); val none = noneSet(ctx.filesDir)
+        val apiOn = hasKey(ctx) && Settings.get(ctx, "web_photos", "1") == "1"
+        return repo.dao.playersOf(slot).filter { it.owner == "MY" }.filter { p ->
+            file(ctx.filesDir, p.nameKey) == null && !File(osmDir(ctx.filesDir), "${p.nameKey}.png").exists() && p.nameKey !in none &&
+                (!apiOn || (ix.optJSONObject(p.nameKey)?.optString("s") ?: "") in listOf("miss", "amb"))
+        }.sortedByDescending { it.strength ?: 0 }.map { it.name }
+    }
+
     fun hasKey(ctx: Context) = Settings.get(ctx, KEY, "").trim().length >= 16
 
     // ------------------------------------------------------------------ escolha do jogador (pura, testada)

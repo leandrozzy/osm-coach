@@ -224,6 +224,11 @@ object Hints {
         }
         tips.filter { it.icon != "🔄" }.map { asHint(it) }.filter { it.action }
             .filter { !(type == ScreenType.PREP && (it.icon == "📝" || it.icon == "🗒")) }.forEach { pend.add(it) }
+        // fotos: quem ainda não tem foto nem recorte e o OSM tem foto -> abrir o cartão grande no Plantel (conta como pendência)
+        if (activeSlot) {
+            val open = runCatching { PhotoWeb.openList(ctx, slot) }.getOrDefault(emptyList())
+            if (open.isNotEmpty()) pend.add(Hint("📷", "Abra o cartão de: " + open.take(5).joinToString(", ") + if (open.size > 5) " +${open.size - 5}" else "", "No OSM: Plantel → toque no jogador. A foto grande é salva sozinha e eu aviso aqui.", true))
+        }
         val tp = repo.dao.plan(slot, "tactic")
         val tj = tp?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val tacticOk = tp != null && tj != null && Director.tacticValid(tj, tp.at, f, now)
