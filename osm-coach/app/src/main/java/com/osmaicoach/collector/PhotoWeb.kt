@@ -287,12 +287,11 @@ object PhotoWeb {
 
 /**
  * Recorte do rosto do cartão do OSM: tira o fundo azul (e a moldura/barras), mantém só a maior região do rosto e põe sobre o MESMO fundo claro das fotos
- * da API-Football, com uma silhueta de ombros cinza atrás (o cartão termina no queixo/pescoço; os ombros dão o fecho, como no marcador de "sem foto").
+ * da API-Football, (o cartão termina no queixo/pescoço: o rosto fica alinhado embaixo e a borda do círculo faz o corte).
  * A tela corta em círculo. Prototipado nos rostos de prints reais (Sarr, Sano, Musiala, Van de Ven…).
  */
 object FaceCut {
     const val BG = 0xFFF3F5F9.toInt()
-    private const val SHOULDER = 0xFFC9D0DE.toInt()
 
     /** [px] = recorte [s]×[s]; [big] = cartão grande (fundo azul claro com brilho: tira qualquer pixel azulado). Devolve os pixels finais (opacos). */
     fun cutout(px: IntArray, s: Int, big: Boolean = false): IntArray {
@@ -349,14 +348,10 @@ object FaceCut {
         return place(px, a, s)
     }
 
-    /** Rosto a 78% do quadro (um pouco acima do centro) sobre ombros cinza e fundo claro. */
+    /** Rosto a 84% do quadro, centrado e ALINHADO EMBAIXO (o pescoço sai pela borda do círculo, como numa foto recortada de verdade), sobre o fundo claro. */
     private fun place(src: IntArray, alpha: FloatArray, s: Int): IntArray {
         val out = IntArray(s * s) { BG }
-        for (y in 0 until s) for (x in 0 until s) {
-            val dx = (x - s * 0.5f) / (s * 0.40f); val dy = (y - s * 1.02f) / (s * 0.36f)
-            if (dx * dx + dy * dy <= 1f) out[y * s + x] = SHOULDER
-        }
-        val n = (s * 0.78f).toInt(); val x0 = (s - n) / 2; val y0 = ((s - n) * 0.6f).toInt()
+        val n = (s * 0.84f).toInt(); val x0 = (s - n) / 2; val y0 = s - n - (s * 0.015f).toInt()
         for (y in 0 until n) for (x in 0 until n) {
             val fx = ((x + 0.5f) * s / n - 0.5f).coerceIn(0f, s - 1.001f); val fy = ((y + 0.5f) * s / n - 0.5f).coerceIn(0f, s - 1.001f)
             val ix = fx.toInt(); val iy = fy.toInt(); val tx = fx - ix; val ty = fy - iy
