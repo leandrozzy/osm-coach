@@ -11,6 +11,9 @@ class PhotoWebTest {
         assertEquals("hudson", PhotoWeb.searchTerm("Hudson-Odoi"))
         assertEquals("marquinhos", PhotoWeb.searchTerm("Marquinhos"))
         assertNull(PhotoWeb.searchTerm("Ba"))
+        assertEquals("ven", PhotoWeb.searchTerm("van de Ven"))     // partícula não vira termo (antes dava "van" e 0 resultados)
+        assertEquals("dijk", PhotoWeb.searchTerm("van Dijk"))
+        assertEquals("paz", PhotoWeb.searchTerm("N. Paz"))
     }
 
     @Test fun oneCandidateWithNameAndAgeIsAccepted() {
@@ -34,5 +37,15 @@ class PhotoWebTest {
         assertTrue(daily); assertFalse(minute); assertTrue(l.isEmpty())
         val ok = PhotoWeb.parseCands("""{"errors":[],"results":1,"response":[{"player":{"id":9,"name":"Kobel","firstname":"Gregor","lastname":"Kobel","age":28,"nationality":"Switzerland","photo":"https://media.api-sports.io/football/players/9.png"}}]}""")
         assertFalse(ok.second); assertEquals(1, ok.first.size); assertEquals("Switzerland", ok.first[0].nationality)
+    }
+
+    @Test fun bestScoreWinsWhenClearlyAheadOtherwiseAmbiguous() {
+        // vários "Dijk" de idade parecida: o de nome inteiro igual e país certo vence com folga
+        val v = c(1, "V. van Dijk", "Virgil", "van Dijk", 35, "Netherlands")
+        val o = c(2, "S. Dijk", "Sam", "Dijk", 34, "Belgium")
+        assertEquals(1, PhotoWeb.pick("van Dijk", 35, "nl", listOf(v, o)).cand!!.id)
+        // dois homônimos iguais em tudo: ambíguo
+        val a = c(3, "A. Silva", "Andre", "Silva", 31, "Brazil"); val b = c(4, "B. Silva", "Bruno", "Silva", 31, "Brazil")
+        assertEquals("amb", PhotoWeb.pick("Silva", 31, "br", listOf(a, b)).state)
     }
 }

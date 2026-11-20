@@ -23,6 +23,7 @@ import java.util.TimeZone
 object PhotoWeb {
     const val KEY = "apifootball_key"
     const val BUDGET = 90
+    private const val ALGO = "2"   // 2: termo sem partículas ("ven") e escolha por pontos
     private const val HOST = "https://v3.football.api-sports.io"
     private const val RETRY_MS = 7L * 86400000L
     private const val GAP_MS = 6500L          // plano grátis: 10 consultas/min
@@ -36,7 +37,7 @@ object PhotoWeb {
     fun file(filesDir: File, nameKey: String): File? = File(dir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }
     fun bitmap(filesDir: File, nameKey: String): Bitmap? = file(filesDir, nameKey)?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
     /** Recortes do rosto tirados dos cartões do campo do OSM (plano B quando a API não achou o jogador). */
-    private const val OSM_VER = "2"   // 2: rosto menor e alinhado embaixo (o recorte 1 enchia o círculo e cortava o queixo): refaz os recortes antigos
+    private const val OSM_VER = "3"   // 2: rosto menor e alinhado embaixo (o recorte 1 enchia o círculo e cortava o queixo): refaz os recortes antigos
     @Volatile private var osmChecked = false
     fun osmDir(filesDir: File): File = File(filesDir, "photos/osm").apply {
         mkdirs()
@@ -59,9 +60,15 @@ object PhotoWeb {
 
     private fun toks(s: String): List<String> = Txt.norm(s).split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }
 
-    /** Termo da busca: a maior palavra do nome (≥3 letras, sem acento), que o campo `search` da API exige. */
-    fun searchTerm(name: String): String? =
-        toks(name).filter { it.length >= 3 }.maxByOrNull { it.length }
+    private val PARTICLES = setOf("van", "von", "der", "den", "de", "da", "do", "dos", "das", "del", "di", "el", "al", "bin", "ben", "le", "la", "ter", "ten")
+
+    /** Termo da busca: a maior palavra do nome (≥3 letras, sem acento) que não seja partícula ("van de Ven" → "ven"); empate = a última. */
+    fun searchTerm(name: String): String? {
+        val t = toks(name).filter { it.length >= 3 }
+        val real = t.filter { it !in PARTICLES }.ifEmpty { t }
+        val max = real.maxOfOrNull { it.length } ?: return null
+        return real.last { it.length == max }
+    }
 
     private fun nameOk(osm: String, c: Cand): Boolean {
         val mine = toks(osm).filter { it.length >= 3 }
@@ -85,17 +92,27 @@ object PhotoWeb {
         return n == w || n.contains(w) || w.contains(n)
     }
 
-    /** Escolhe entre os candidatos da busca: nome E idade (±1) obrigatórios; vários → desempata por nacionalidade/idade exata; ainda vários = ambíguo. */
+    private fun score(osmName: String, age: Int?, want: String?, c: Cand): Int {
+        var sc = 0
+        val k = Txt.key(osmName)
+        if (k == Txt.key(c.first + c.last) || k == Txt.key(c.last) || k == Txt.key(c.name)) sc += 4   // nome igual (inteiro, só o sobrenome ou como a API abrevia)
+        else if (Txt.sim(k, Txt.key(c.first + c.last)) >= 0.85) sc += 2
+        if (age != null && c.age != null) sc += if (c.age == age) 3 else 1
+        when (natMatch(want, c)) { true -> sc += 3; false -> sc -= 2; null -> {} }
+        return sc
+    }
+
+    /**
+     * Escolhe entre os candidatos da busca: nome E idade (±1) são obrigatórios; entre os que sobram vence quem tem MAIS pontos (nome igual, idade exata,
+     * nacionalidade) com 3 pontos de vantagem sobre o 2º; sem essa vantagem é ambíguo e fica sem foto (foto de outro jogador é pior que nenhuma).
+     */
     fun pick(osmName: String, age: Int?, iso: String?, cands: List<Cand>): Pick {
         val want = natEnglish(iso)
         val ok = cands.filter { it.photo != null && nameOk(osmName, it) && (age == null || it.age == null || Math.abs(it.age - age) <= 1) }
         if (ok.isEmpty()) return Pick(null, "miss")
         if (ok.size == 1) return Pick(ok[0], "ok")
-        val byNat = ok.filter { natMatch(want, it) == true }
-        val pool = if (byNat.isNotEmpty()) byNat else return Pick(null, "amb")
-        if (pool.size == 1) return Pick(pool[0], "ok")
-        val exact = pool.filter { age != null && it.age == age }
-        return if (exact.size == 1) Pick(exact[0], "ok") else Pick(null, "amb")
+        val ranked = ok.map { it to score(osmName, age, want, it) }.sortedByDescending { it.second }
+        return if (ranked[0].second - ranked[1].second >= 3) Pick(ranked[0].first, "ok") else Pick(null, "amb")
     }
 
     fun parseCands(json: String): Triple<List<Cand>, Boolean, Boolean> {   // (candidatos, cota do dia esgotada, limite por minuto)
@@ -197,6 +214,10 @@ object PhotoWeb {
             val repo = Repo(ctx)
             val apiKey = Settings.get(ctx, KEY, "").trim()
             val ix = idx(ctx.filesDir)
+            if (ix.optString("_algo") != ALGO) {   // regra de escolha melhorada: reavalia UMA vez os sem acerto/ambíguos (os que já têm foto ficam)
+                for (k in ix.keys().asSequence().toList()) if (k != "_algo" && ix.optJSONObject(k)?.optString("s") != "ok") ix.remove(k)
+                ix.put("_algo", ALGO); saveIdx(ctx.filesDir, ix)
+            }
             val now = System.currentTimeMillis()
             val all = candidatesAll(repo).filter { file(ctx.filesDir, it.nameKey) == null }
             // 1º quem NUNCA foi tentado (jogador comprado agora vem primeiro); só quando todos foram tentados volta aos sem acerto (um por vez, 7 dias de intervalo)
@@ -293,7 +314,7 @@ object FaceCut {
             if (y > 0) seed(p - s); if (y < s - 1) seed(p + s); if (x > 0) seed(p - 1); if (x < s - 1) seed(p + 1)
         }
         var a = FloatArray(s * s) { if (!out[it]) 1f else 0f }
-        for (y in 0 until s) { val f = (1f - (y.toFloat() / s - 0.94f) / 0.06f).coerceIn(0f, 1f); if (f < 1f) for (x in 0 until s) a[y * s + x] *= f }   // pescoço desbota no fim do recorte
+        for (y in 0 until s) { val f = (1f - (y.toFloat() / s - 0.95f) / 0.05f).coerceIn(0f, 1f); if (f < 1f) for (x in 0 until s) a[y * s + x] *= f }   // pescoço desbota no fim do recorte
         repeat(2) {   // borda suave (caixa 3×3)
             val n = FloatArray(s * s)
             for (y in 0 until s) for (x in 0 until s) {
@@ -312,9 +333,9 @@ object FaceCut {
         return place(res, s)
     }
 
-    /** Rosto inteiro (cabelo ao queixo) a 94% do quadro, centrado, com margem de fundo claro: a tela corta em círculo como nas fotos da API. */
+    /** Rosto inteiro (cabelo ao queixo) a 78% do quadro, um pouco acima do centro, com margem de fundo claro: a tela corta em círculo como nas fotos da API. */
     private fun place(src: IntArray, s: Int): IntArray {
-        val n = (s * 0.94f).toInt(); val x0 = (s - n) / 2; val y0 = (s - n) / 2
+        val n = (s * 0.78f).toInt(); val x0 = (s - n) / 2; val y0 = ((s - n) * 0.6f).toInt()
         val out = IntArray(s * s) { BG }
         for (y in 0 until n) for (x in 0 until n) {
             val fx = (x + 0.5f) * s / n - 0.5f; val fy = (y + 0.5f) * s / n - 0.5f

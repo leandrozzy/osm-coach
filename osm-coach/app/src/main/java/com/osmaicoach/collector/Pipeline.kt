@@ -154,7 +154,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 .distinctBy { it.nameKey }.singleOrNull() ?: run { noMatch++; null } ?: continue
             val h = (0.084f * bmp.height).toInt(); val w = h   // quadrado: do cabelo ao queixo (o queixo termina logo acima da faixa amarela do nome)
             if (w < 44) { tooSmall++; continue }
-            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.070f) * bmp.height - h / 2f).toInt()
+            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.0727f) * bmp.height - h / 2f).toInt()
             if (x < 0 || y < 0 || x + w > bmp.width || y + h > bmp.height) continue
             val crop = Bitmap.createBitmap(bmp, x, y, w, h)
             val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
