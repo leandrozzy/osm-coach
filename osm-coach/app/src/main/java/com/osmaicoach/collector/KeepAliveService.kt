@@ -54,6 +54,7 @@ class KeepAliveService : Service() {
                 try { Notifier.reschedule(applicationContext) } catch (e: Exception) { Diag.lastError = "Avisos: " + (e.message ?: e.javaClass.simpleName) }
                 runCatching { Coins.refreshIfStale(applicationContext) }
                 runCatching { WebKnow.refreshIfStale(applicationContext) }
+                runCatching { PhotoWeb.run(applicationContext) }
                 delay(60_000L)
             }
         }

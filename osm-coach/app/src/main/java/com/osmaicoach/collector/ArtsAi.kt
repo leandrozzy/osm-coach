@@ -79,7 +79,9 @@ object ArtsAi {
     }
 
     private const val STYLE = "Cinematic sports press photograph for a football club announcement, vertical poster, ultra realistic, sharp focus, dramatic lighting, " +
-        "shallow depth of field, rich contrast, no text, no letters, no logos, no watermark"
+        "shallow depth of field, rich contrast, no text, no letters, no logos, no watermark, " +
+        "men's professional association football (soccer) only, never American football, no helmets, no shoulder pads, every person is an adult man aged 25 to 32 " +
+        "with a mature masculine face, no women, no children, natural realistic faces and proportions, photographic skin texture"
 
     /** Pedido da cena por tipo de arte. [colors] vem do escudo; [kit] é a camisa do clube descrita pela IA de texto (pode ser vazia); [look] são cabelo/barba. */
     fun prompt(kind: String, colors: String, kit: String, look: String): String {

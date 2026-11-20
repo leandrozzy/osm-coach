@@ -245,7 +245,12 @@ object Arts {
     suspend fun make(ctx: Context, c: Cand, reroll: Int = 0): Item? {
         ArtsAi.lastError = null
         val repo = Repo(ctx)
-        val b = draw(ctx, repo, c, reroll) ?: return null
+        val raw = draw(ctx, repo, c, reroll) ?: return null
+        // cartaz novo: faixa própria com a logo do app embaixo (não cobre a arte); as capas de jornal (NEWS/POST) ficam como estavam
+        val b = if (c.kind == "NEWS" || c.kind == "POST") raw else {
+            val logo = runCatching { BitmapFactory.decodeResource(ctx.resources, R.drawable.g_logo) }.getOrNull()
+            ArtsDraw.withStrip(raw, logo).also { raw.recycle(); logo?.recycle() }
+        }
         val f = File(dir(ctx), "${System.currentTimeMillis()}_${c.slot}.png")
         f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         b.recycle()
@@ -432,6 +437,7 @@ object Arts {
         val seed = (c.id.hashCode() and 0xFFFFF) + reroll * 104729
         var kit = ""; var look = ""
         var oppCrest: Bitmap? = null
+        var photo: Bitmap? = null
         val banner: String; val big: String; val info: String; val plate: Pair<String, String>?; val foot: String
         when (c.kind) {
             "BUY", "PLAYER" -> {
@@ -441,6 +447,8 @@ object Arts {
                 val country = Flags.countryName(iso)
                 kit = ArtsAi.kitFor(ctx, repo, team, comp)
                 look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
+                if (!country.isNullOrBlank()) look += ", the typical appearance of a man from $country"
+                photo = PhotoWeb.bitmap(ctx.filesDir, key)   // foto real (API-Football) quando há; senão a cena traz um atleta fictício
                 banner = if (c.kind == "BUY") "CONTRATAÇÃO CONFIRMADA" else "DESTAQUE DO ELENCO"
                 big = p.name.trim().split(Regex("\\s+")).last()
                 info = listOfNotNull(country, p.age?.let { "$it anos" }, posLabel(p.cat, p.posCode).takeIf { it.isNotBlank() }).joinToString("  •  ")
@@ -478,7 +486,7 @@ object Arts {
             }
             "STARS" -> {
                 val top = repo.dao.playersOf(slot).filter { it.owner == "MY" && it.strength != null }.sortedByDescending { it.strength }.take(4)
-                val rowsS = top.map { ArtsDraw.Row(it.name + (it.posCode?.let { p -> "  •  $p" } ?: ""), it.strength.toString(), it.strength!! / 100f) }
+                val rowsS = top.map { ArtsDraw.Row(it.name + (it.posCode?.let { p -> "  •  $p" } ?: ""), it.strength.toString(), it.strength!! / 100f, PhotoWeb.bitmap(ctx.filesDir, it.nameKey)) }
                 val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, ArtsAi.kitFor(ctx, repo, team, comp), ""), seed) ?: return null
                 val outS = ArtsDraw.list(th, scene, crest, null, "CRAQUES DO TIME", rowsS, "Quem vai decidir a temporada!")
                 scene.recycle(); return outS
@@ -506,7 +514,7 @@ object Arts {
                     val rowsC = listOfNotNull(side(K.MY_ATK, K.RIVAL_ATK, "Ataque"), side(K.MY_MID, K.RIVAL_MID, "Meio-campo"), side(K.MY_DEF, K.RIVAL_DEF, "Defesa"), side(K.MY_GOL, K.RIVAL_GOL, "Goleiro")) +
                         listOfNotNull(if (my != null && rv != null) { val (l, r) = if (away) rv to my else my to rv; ArtsDraw.Row("Força geral", "$l × $r", l / (l + r).toFloat()) } else null)
                     val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
-                    val outC = ArtsDraw.list(th, scene, if (away) oppCrest else crest, if (away) crest else oppCrest, "LADO A LADO", rowsC, "Quem leva a melhor?")
+                    val outC = ArtsDraw.list(th, scene, if (away) oppCrest else crest, if (away) crest else oppCrest, "LADO A LADO", rowsC, "Quem leva a melhor?", oppTh = if (away) th else theme(oppCrest, (slot % 4) + 1), mineLeft = !away)
                     scene.recycle(); return outC
                 }
                 val prob = runCatching { Director.winProb(repo, slot) }.getOrNull()
@@ -517,7 +525,10 @@ object Arts {
                 plate = prob?.let { "CHANCE DE VITÓRIA" to "${it.win}%" }
                 foot = "Hoje é dia de decidir!"
                 val sceneV = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null
-                val outV = ArtsDraw.poster(th, sceneV, if (awayM) oppCrest else crest, if (awayM) crest else oppCrest, banner, big, info, plate, foot, versus = true)
+                val oppT = theme(oppCrest, (slot % 4) + 1)
+                val names = if (awayM) rival to team else team to rival
+                val outV = ArtsDraw.poster(if (awayM) oppT else th, sceneV, if (awayM) oppCrest else crest, if (awayM) crest else oppCrest, banner, big, info, plate, foot, versus = true,
+                    look = ArtsDraw.Look(oppTh = if (awayM) th else oppT, names = names, kind = c.kind))
                 sceneV.recycle(); return outV
             }
             "LEADER" -> { banner = "LÍDER DA LIGA!"; big = "1º"; info = "NA RODADA ${last?.round ?: ""}" + (comp?.let { " • $it" } ?: ""); plate = "CAMPANHA" to rec; foot = "No topo da tabela!" }
@@ -533,10 +544,11 @@ object Arts {
                 foot = if (c.kind == "SEASON") "Obrigado, torcida!" else "A jornada continua!"
             }
         }
-        val scene = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, kit, look), seed) ?: return null
+        // com foto real do jogador a cena é só o estádio (sem atleta fictício ao lado do rosto verdadeiro)
+        val scene = ArtsAi.scene(ArtsAi.prompt(if (photo != null) "SEASON" else c.kind, colors, kit, look), seed) ?: return null
         val hero = c.kind in listOf("EXPECT", "STREAK", "LEADER", "CAMP", "SEASON")
         val awayG = c.kind == "GOLEADA" && last?.home == false
-        val out = ArtsDraw.poster(th, scene, if (awayG) oppCrest else crest, if (awayG) crest else oppCrest, banner, big, info, plate, foot, heroCrest = hero)
+        val out = ArtsDraw.poster(th, scene, if (awayG) oppCrest else crest, if (awayG) crest else oppCrest, banner, big, info, plate, foot, heroCrest = hero, look = ArtsDraw.Look(photo = photo, kind = c.kind))
         scene.recycle()
         return out
     }

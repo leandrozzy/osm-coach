@@ -209,6 +209,7 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
                         Text(p.strength?.toString() ?: "?", fontWeight = FontWeight.ExtraBold)
                     }
                     Spacer(Modifier.width(10.dp))
+                    PlayerPhoto(p.nameKey, 44.dp)
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
@@ -476,3 +477,14 @@ internal fun SlotCalendar(slot: Int, d: SlotData) {
     if (er != null) MatchDialog(slot, er, byRound[er]) { editRound = null }
 }
 
+
+/** Foto REAL do jogador (API-Football, guardada em `photos/`) em círculo; some quando ainda não há foto (a linha continua igual). */
+@Composable
+internal fun PlayerPhoto(nameKey: String, size: Dp) {
+    val ctx = LocalContext.current
+    val ver = UiBus.version
+    val img = remember(nameKey, ver) { PhotoWeb.bitmap(ctx.filesDir, nameKey)?.asImageBitmap() }
+    if (img != null) {
+        Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.padding(end = 10.dp).size(size).clip(androidx.compose.foundation.shape.CircleShape))
+    }
+}

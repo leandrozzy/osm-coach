@@ -110,7 +110,6 @@ internal object ArtsDraw {
         c.drawRect(0f, fade, W, H, P(shader = lin(0f, fade, 0f, H, intArrayOf(withA(veil, 0), withA(veil, 205), withA(veil, 245)), floatArrayOf(0f, 0.35f, 1f))))
     }
 
-    class Row(val label: String, val value: String, val frac: Float? = null)
 
     private fun banner(c: Canvas, txt: String, y: Float, h: Float, dark: Int) {
         val rnd = java.util.Random(4)
@@ -139,64 +138,172 @@ internal object ArtsDraw {
         }
     }
 
-    /**
-     * Cartaz final. [scene] = cena da IA; [big] = texto grande em ouro (nome do jogador, placar, número…); [plate] = (rótulo, valor) da placa, ou null.
-     * [oppCrest] só na goleada (escudo do rival no canto direito).
-     */
-    fun poster(
-        th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, big: String, info: String,
-        plate: Pair<String, String>?, footer: String, versus: Boolean = false, heroCrest: Boolean = false
-    ): Bitmap {
-        val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
-        val c = Canvas(out)
-        sceneBase(c, th, scene, 690f)
-        if (versus) {
-            // dois escudos grandes com "VS" no meio (dia de jogo)
-            ring(c, 250f, 500f, crest, th, 150f); ring(c, W - 250f, 500f, oppCrest, th, 150f)
-            gold(c, "VS", W / 2f, 560f, 130f, align = 'c', skew = -0.1f)
-        } else if (heroCrest) {
-            // sem pessoa na cena: o escudo do time é o foco, grande no centro, com brilho
-            c.drawCircle(540f, 400f, 250f, P(color = withA(th.accent, 90), blur = 50f))
-            ring(c, 540f, 400f, crest, th, 190f)
-        } else {
-            ring(c, 140f, 140f, crest, th, 120f)
-            if (oppCrest != null) ring(c, W - 140f, 140f, oppCrest, th, 120f)
+    // ------------------------------------------------------------------ cartazes (estilo de revista esportiva: faixas inclinadas na cor do time, escudo SEM aro)
+
+    /** Extras do cartaz: foto real do jogador, tema do rival (dois times), nomes dos dois times e o tipo da arte. */
+    class Look(val photo: Bitmap? = null, val oppTh: Theme? = null, val names: Pair<String, String>? = null, val kind: String = "")
+
+    private fun lum(c: Int) = (0.299f * Color.red(c) + 0.587f * Color.green(c) + 0.114f * Color.blue(c)) / 255f
+    /** Cor de texto legível sobre [bg]. */
+    private fun onColor(bg: Int) = if (lum(bg) > 0.62f) argb(255, 12, 16, 28) else Color.WHITE
+
+    /** Escudo SOLTO (sem círculo/aro), centralizado em [cx],[cy] dentro de um quadrado [size], com sombra suave. */
+    private fun crestPlain(c: Canvas, b: Bitmap?, cx: Float, cy: Float, size: Float) {
+        if (b == null) return
+        val s = min(size / b.width, size / b.height)
+        val w = b.width * s; val h = b.height * s
+        val r = RectF(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
+        runCatching {
+            val a = b.extractAlpha()
+            c.drawBitmap(a, null, RectF(r.left, r.top + 10f, r.right, r.bottom + 10f), P(color = black(170), blur = 12f))
+            a.recycle()
         }
-        banner(c, banner, 704f, 104f, shade(th.bg, 0.45f))
-        gold(c, big.uppercase(), W / 2f, 990f, 200f, maxw = W - 100f, align = 'c', skew = -0.08f, scale = 0.86f)
-        text(c, info, W / 2f, 1056f, 46f, Color.WHITE, maxw = W - 120f, align = 'c', skew = 0f, scale = 1f, bold = false)
-        c.drawLine(120f, 1082f, W - 120f, 1082f, P(shader = lin(120f, 0f, W - 120f, 0f, intArrayOf(argb(0, 255, 214, 100), argb(255, 255, 214, 100), argb(0, 255, 214, 100)), floatArrayOf(0f, 0.5f, 1f)), stroke = 3f))
-        if (plate != null) {
-            val (lab, v) = plate
-            val lp = txtPaint(56f, true, -0.12f, 0.9f); val vp = txtPaint(76f, true, -0.1f, 0.9f)
-            val total = lp.measureText(lab) + 28f + vp.measureText(v)
-            val half = max(200f, total / 2f + 56f)
-            val l = W / 2f - half; val r = W / 2f + half
-            val plateP = Path()
-            plateP.moveTo(l + 36f, 1108f); plateP.lineTo(r - 36f, 1108f); plateP.lineTo(r, 1156f); plateP.lineTo(r - 36f, 1204f); plateP.lineTo(l + 36f, 1204f); plateP.lineTo(l, 1156f); plateP.close()
-            c.drawPath(plateP, P(color = black(150), blur = 10f))
-            c.drawPath(plateP, P(shader = lin(0f, 1108f, 0f, 1204f, intArrayOf(shade(th.bg, 0.55f), shade(th.bg, 0.25f)))))
-            c.drawPath(plateP, P(shader = lin(0f, 1108f, 0f, 1204f, GOLD, GPOS), stroke = 5f))
-            val x0 = W / 2f - total / 2f
-            gold(c, lab, x0, 1176f, 56f)
-            gold(c, v, x0 + lp.measureText(lab) + 28f, 1180f, 76f, skew = -0.1f)
-            laurel(c, l - 8f, 1160f, -1f); laurel(c, r + 8f, 1160f, 1f)
-        }
-        gold(c, footer, W / 2f, 1290f, 60f, maxw = W - 90f, align = 'c', skew = -0.16f, scale = 0.92f)
-        return out
+        c.drawBitmap(b, null, r, P())
+    }
+
+    /** Faixa inclinada (paralelogramo) com sombra. */
+    private fun band2(c: Canvas, x0: Float, y: Float, x1: Float, h: Float, color: Int, skew: Float = 22f) {
+        val p = Path(); p.moveTo(x0 + skew, y); p.lineTo(x1, y); p.lineTo(x1 - skew, y + h); p.lineTo(x0, y + h); p.close()
+        c.save(); c.translate(0f, 6f); c.drawPath(p, P(color = black(120), blur = 8f)); c.restore()
+        c.drawPath(p, P(color = color))
+    }
+
+    /** Texto branco com contorno escuro por cópias deslocadas (legível sobre qualquer cena). */
+    private fun title(c: Canvas, s: String, x: Float, y: Float, size: Float, maxw: Float = 0f, align: Char = 'c', color: Int = Color.WHITE) {
+        for ((dx, dy) in listOf(-3f to 0f, 3f to 0f, 0f to -3f, 0f to 4f, 4f to 5f)) text(c, s, x + dx, y + dy, size, black(190), maxw, align, skew = -0.1f, scale = 0.88f)
+        text(c, s, x, y, size, color, maxw, align, skew = -0.1f, scale = 0.88f)
+    }
+
+    /** Painel de vidro com rótulo à esquerda e valor à direita. */
+    private fun glass(c: Canvas, x0: Float, y: Float, x1: Float, h: Float, edge: Int, label: String, value: String) {
+        val box = RectF(x0, y, x1, y + h)
+        c.drawRoundRect(box, 20f, 20f, P(color = argb(205, 8, 10, 16)))
+        c.drawRoundRect(box, 20f, 20f, P(color = edge, stroke = 3f))
+        text(c, label, x0 + 36f, y + h * 0.64f, 28f, argb(255, 225, 228, 236), maxw = (x1 - x0) * 0.46f, skew = -0.05f, scale = 0.95f)
+        text(c, value, x1 - 36f, y + h * 0.68f, 40f, Color.WHITE, maxw = (x1 - x0) * 0.5f, align = 'r', skew = -0.1f)
+    }
+
+    private fun footBand(c: Canvas, th: Theme, y: Float, txt: String) {
+        band2(c, 40f, y, W - 40f, 90f, th.kit)
+        text(c, txt, W / 2f, y + 60f, 38f, onColor(th.kit), maxw = W - 160f, align = 'c', skew = -0.15f, scale = 0.92f)
     }
 
     /**
-     * Cartaz em lista (craques, lado a lado, momento): linhas em vidro com valor em ouro e barra opcional; [dots] = últimos resultados (V/E/D) em bolinhas.
+     * Cartaz final. [scene] = cena da IA (pano de fundo); [big] = texto grande (nome, placar, número…); [plate] = (rótulo, valor) ou null.
+     * O layout depende do tipo: dia de jogo (dois times, tela dividida), goleada (placar com os dois escudos), troféu (escudo no topo),
+     * herói (escudo grande no centro) e jogador (painel na cor do time; com [Look.photo] a foto real entra num cartão).
      */
-    fun list(th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, rows: List<Row>, footer: String, dots: String? = null): Bitmap {
+    fun poster(
+        th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, big: String, info: String,
+        plate: Pair<String, String>?, footer: String, versus: Boolean = false, heroCrest: Boolean = false, look: Look = Look()
+    ): Bitmap {
         val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
-        sceneBase(c, th, scene, 560f)
-        ring(c, 140f, 140f, crest, th, 120f)
-        if (oppCrest != null) ring(c, W - 140f, 140f, oppCrest, th, 120f)
-        banner(c, banner, 600f, 104f, shade(th.bg, 0.45f))
-        var y = 740f
+        val opp = look.oppTh ?: Theme(th.bg, th.accent, th.accent)
+        val isTitle = look.kind == "TITLE" || look.kind == "OBJECTIVE"
+        when {
+            versus -> {
+                sceneBase(c, th, scene, 880f)
+                val left = Path().apply { moveTo(0f, 0f); lineTo(W / 2f + 90f, 0f); lineTo(W / 2f - 90f, H); lineTo(0f, H); close() }
+                val right = Path().apply { moveTo(W / 2f + 90f, 0f); lineTo(W, 0f); lineTo(W, H); lineTo(W / 2f - 90f, H); close() }
+                c.drawPath(left, P(color = withA(th.kit, 85))); c.drawPath(right, P(color = withA(opp.kit, 85)))
+                c.drawLine(W / 2f + 90f, 0f, W / 2f - 90f, H, P(color = white(230), blur = 10f, stroke = 12f))
+                c.drawLine(W / 2f + 90f, 0f, W / 2f - 90f, H, P(color = Color.WHITE, stroke = 6f))
+                title(c, banner, W / 2f, 96f, 70f, maxw = W - 120f)
+                text(c, info, W / 2f, 150f, 32f, argb(255, 255, 214, 120), maxw = W - 120f, align = 'c', skew = -0.1f)
+                crestPlain(c, crest, 235f, 640f, 320f); crestPlain(c, oppCrest, W - 235f, 640f, 320f)
+                title(c, "X", W / 2f, 720f, 130f)
+                val n = look.names
+                band2(c, 30f, 850f, W / 2f + 36f, 100f, th.kit); band2(c, W / 2f - 36f, 850f, W - 30f, 100f, opp.kit)
+                if (n != null) {
+                    text(c, n.first.uppercase(), (30f + W / 2f + 36f) / 2f, 915f, 38f, onColor(th.kit), maxw = W / 2f - 110f, align = 'c', skew = -0.12f)
+                    text(c, n.second.uppercase(), (W / 2f - 36f + W - 30f) / 2f, 915f, 38f, onColor(opp.kit), maxw = W / 2f - 110f, align = 'c', skew = -0.12f)
+                }
+                title(c, big, W / 2f, 1060f, 80f, maxw = W - 140f)
+                if (plate != null) text(c, plate.first + "  " + plate.second, W / 2f, 1130f, 40f, Color.WHITE, maxw = W - 100f, align = 'c', skew = -0.08f)
+                footBand(c, th, 1200f, footer)
+            }
+            oppCrest != null -> {   // goleada: placar com os dois escudos
+                sceneBase(c, th, scene, 700f)
+                title(c, banner, W / 2f, 130f, 120f, maxw = W - 100f)
+                band2(c, 160f, 165f, W - 160f, 62f, th.kit)
+                text(c, info, W / 2f, 208f, 30f, onColor(th.kit), maxw = W - 380f, align = 'c', skew = -0.12f)
+                crestPlain(c, crest, 190f, 400f, 240f); crestPlain(c, oppCrest, W - 190f, 400f, 240f)
+                title(c, big, W / 2f, 470f, 180f, maxw = 560f)
+                if (plate != null) glass(c, 90f, 1020f, W - 90f, 90f, th.kit, plate.first, plate.second)
+                footBand(c, th, 1150f, footer)
+            }
+            isTitle -> {
+                sceneBase(c, th, scene, 700f)
+                crestPlain(c, crest, W / 2f, 190f, 250f)
+                band2(c, 90f, 380f, W - 90f, 84f, th.kit)
+                text(c, banner, W / 2f, 440f, 44f, onColor(th.kit), maxw = W - 240f, align = 'c', skew = -0.12f)
+                gold(c, big.uppercase(), W / 2f, 930f, 170f, maxw = W - 100f, align = 'c', skew = -0.08f, scale = 0.86f)
+                text(c, info, W / 2f, 1000f, 38f, Color.WHITE, maxw = W - 120f, align = 'c', skew = 0f, scale = 1f, bold = false)
+                if (plate != null) glass(c, 90f, 1040f, W - 90f, 90f, th.kit, plate.first, plate.second)
+                footBand(c, th, 1160f, footer)
+            }
+            heroCrest -> {
+                sceneBase(c, th, scene, 560f)
+                c.drawCircle(W / 2f, 360f, 280f, P(color = withA(th.kit, 80), blur = 60f))
+                crestPlain(c, crest, W / 2f, 360f, 420f)
+                title(c, big.uppercase(), W / 2f, 800f, 220f, maxw = W - 80f)
+                band2(c, 60f, 850f, W - 60f, 88f, th.kit)
+                text(c, banner, W / 2f, 912f, 44f, onColor(th.kit), maxw = W - 200f, align = 'c', skew = -0.12f)
+                text(c, info, W / 2f, 1000f, 38f, Color.WHITE, maxw = W - 120f, align = 'c', skew = 0f, scale = 1f, bold = false)
+                if (plate != null) glass(c, 90f, 1040f, W - 90f, 90f, th.kit, plate.first, plate.second)
+                footBand(c, th, 1160f, footer)
+            }
+            else -> {   // jogador (contratação, destaque)
+                sceneBase(c, th, scene, 820f)
+                val panel = Path().apply { moveTo(0f, 0f); lineTo(W * 0.58f, 0f); lineTo(W * 0.36f, H); lineTo(0f, H); close() }
+                c.drawPath(panel, P(color = withA(th.kit, if (look.photo != null) 215 else 160)))
+                crestPlain(c, crest, 105f, 105f, 130f)
+                text(c, banner, 190f, 112f, 34f, onColor(th.kit), maxw = 440f, skew = -0.12f)
+                title(c, big.uppercase(), 50f, 500f, 150f, maxw = 540f, align = 'l')
+                band2(c, 40f, 560f, 600f, 76f, Color.WHITE)
+                text(c, info, 320f, 612f, 28f, argb(255, 12, 16, 28), maxw = 520f, align = 'c', skew = -0.1f)
+                if (plate != null) {
+                    text(c, plate.first, 50f, 760f, 38f, onColor(th.kit), skew = -0.1f)
+                    title(c, plate.second, 50f, 900f, 170f, maxw = 420f, align = 'l', color = onColor(th.kit))
+                }
+                val ph = look.photo
+                if (ph != null) {
+                    val box = RectF(W - 450f, 220f, W - 70f, 600f)
+                    c.drawRoundRect(RectF(box.left + 6f, box.top + 12f, box.right + 6f, box.bottom + 12f), 36f, 36f, P(color = black(150), blur = 14f))
+                    val clip = Path().apply { addRoundRect(box, 36f, 36f, Path.Direction.CW) }
+                    c.save(); c.clipPath(clip)
+                    val sc = max(box.width() / ph.width, box.height() / ph.height)
+                    val dw = ph.width * sc; val dh = ph.height * sc
+                    c.drawRect(box, P(color = argb(255, 230, 234, 242)))
+                    c.drawBitmap(ph, null, RectF(box.centerX() - dw / 2f, box.top, box.centerX() + dw / 2f, box.top + dh), P())
+                    c.restore()
+                    c.drawRoundRect(box, 36f, 36f, P(color = th.kit, stroke = 10f))
+                }
+                footBand(c, th, 1160f, footer)
+            }
+        }
+        return out
+    }
+
+    class Row(val label: String, val value: String, val frac: Float? = null, val photo: Bitmap? = null)
+
+    /**
+     * Cartaz em lista (craques, lado a lado, momento): título em faixa, linhas em vidro com valor e barra (dois times = barra dividida nas cores dos dois);
+     * [dots] = últimos resultados (V/E/D) em bolinhas; linhas com [Row.photo] mostram a foto real do jogador num círculo.
+     */
+    fun list(th: Theme, scene: Bitmap, crest: Bitmap?, oppCrest: Bitmap?, banner: String, rows: List<Row>, footer: String, dots: String? = null, oppTh: Theme? = null, mineLeft: Boolean = true): Bitmap {
+        val out = Bitmap.createBitmap(W.toInt(), H.toInt(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        sceneBase(c, th, scene, 420f)
+        val opp = oppTh ?: Theme(th.bg, th.accent, th.accent)
+        if (oppCrest != null) {
+            crestPlain(c, crest, 230f, 200f, 290f); crestPlain(c, oppCrest, W - 230f, 200f, 290f)
+            title(c, "VS", W / 2f, 240f, 110f)
+        } else crestPlain(c, crest, W / 2f, 200f, 290f)
+        band2(c, 40f, 370f, W - 40f, 92f, th.kit)
+        text(c, banner, W / 2f, 432f, 46f, onColor(th.kit), maxw = W - 180f, align = 'c', skew = -0.12f)
+        var y = 500f
         if (!dots.isNullOrEmpty()) {
             val n = dots.length; val gap = 130f; val x0 = W / 2f - (n - 1) * gap / 2f
             for (i in 0 until n) {
@@ -210,21 +317,55 @@ internal object ArtsDraw {
             y += 130f
         }
         val shown = rows.take(5)
-        val step = minOf(112f, (1232f - y) / maxOf(1, shown.size))
+        val step = minOf(124f, (1130f - y) / maxOf(1, shown.size))
         val hh = step - 16f
         for (r in shown) {
             val box = RectF(60f, y, W - 60f, y + hh)
-            c.drawRoundRect(box, 18f, 18f, P(color = argb(150, 8, 12, 20)))
-            c.drawRoundRect(box, 18f, 18f, P(color = white(70), stroke = 2f))
-            text(c, r.label, 92f, y + hh * 0.64f, 42f * hh / 96f, Color.WHITE, maxw = 560f, skew = -0.1f, scale = 0.95f)
-            gold(c, r.value, W - 92f, y + hh * 0.68f, 50f * hh / 96f, maxw = 380f, align = 'r', skew = -0.1f)
+            c.drawRoundRect(box, 20f, 20f, P(color = argb(205, 8, 10, 16)))
+            c.drawRoundRect(box, 20f, 20f, P(color = withA(th.kit, 200), stroke = 3f))
+            var lx = 92f
+            if (r.photo != null) {
+                val rr = hh * 0.34f
+                val cx = 92f + rr; val cy = y + hh * 0.46f
+                c.save(); c.clipPath(Path().apply { addCircle(cx, cy, rr, Path.Direction.CW) })
+                val sc = max(2 * rr / r.photo.width, 2 * rr / r.photo.height)
+                val dw = r.photo.width * sc; val dh = r.photo.height * sc
+                c.drawBitmap(r.photo, null, RectF(cx - dw / 2f, cy - rr, cx + dw / 2f, cy - rr + dh), P())
+                c.restore()
+                c.drawCircle(cx, cy, rr, P(color = th.kit, stroke = 4f))
+                lx = 92f + 2 * rr + 20f
+            }
+            text(c, r.label, lx, y + hh * 0.60f, 38f * hh / 96f, Color.WHITE, maxw = 560f - (lx - 92f), skew = -0.1f, scale = 0.95f)
+            text(c, r.value, W - 92f, y + hh * 0.62f, 50f * hh / 96f, Color.WHITE, maxw = 340f, align = 'r', skew = -0.1f)
             if (r.frac != null) {
-                c.drawRoundRect(RectF(92f, y + hh - 16f, W - 92f, y + hh - 8f), 4f, 4f, P(color = white(70)))
-                c.drawRoundRect(RectF(92f, y + hh - 16f, 92f + (W - 184f) * r.frac.coerceIn(0f, 1f), y + hh - 8f), 4f, 4f, P(shader = lin(92f, 0f, W - 92f, 0f, GOLD, GPOS)))
+                val f = r.frac.coerceIn(0f, 1f)
+                val bar = RectF(92f, y + hh - 22f, W - 92f, y + hh - 12f)
+                val leftCol = if (mineLeft) th.kit else opp.kit; val rightCol = if (mineLeft) opp.kit else th.kit
+                c.drawRoundRect(bar, 5f, 5f, P(color = if (oppCrest != null) withA(rightCol, 230) else white(70)))
+                c.drawRoundRect(RectF(bar.left, bar.top, bar.left + bar.width() * f, bar.bottom), 5f, 5f, P(color = leftCol))
             }
             y += step
         }
-        gold(c, footer, W / 2f, 1290f, 60f, maxw = W - 90f, align = 'c', skew = -0.16f, scale = 0.92f)
+        footBand(c, th, 1160f, footer)
+        return out
+    }
+
+    /** Faixa de baixo com a logo e o nome do app, FORA da arte (a imagem fica acima dela e nada é coberto). */
+    fun withStrip(art: Bitmap, logo: Bitmap?): Bitmap {
+        val strip = 96
+        val out = Bitmap.createBitmap(art.width, art.height + strip, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawBitmap(art, 0f, 0f, null)
+        val y0 = art.height.toFloat()
+        c.drawRect(0f, y0, art.width.toFloat(), y0 + strip, P(color = argb(255, 8, 12, 24)))
+        c.drawLine(0f, y0, art.width.toFloat(), y0, P(color = argb(255, 60, 70, 95), stroke = 2f))
+        var x = 30f
+        if (logo != null) {
+            val s = 72f / max(logo.width, logo.height)
+            c.drawBitmap(logo, null, RectF(x, y0 + 12f, x + logo.width * s, y0 + 12f + logo.height * s), P())
+            x += logo.width * s + 18f
+        }
+        text(c, "OSM AI Coach", x, y0 + 61f, 38f, Color.WHITE, skew = -0.08f, scale = 0.95f)
         return out
     }
 
