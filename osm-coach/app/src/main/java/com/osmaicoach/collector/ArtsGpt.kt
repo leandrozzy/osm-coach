@@ -15,6 +15,17 @@ object ArtsGpt {
     fun link(ctx: Context): String = prefs(ctx).getString("gpt_link", "").orEmpty()
     fun setLink(ctx: Context, v: String) { prefs(ctx).edit().putString("gpt_link", v.trim()).apply() }
 
+    /** Artes cujo prompt já foi enviado ao ChatGPT: aparecem como feitas na lista (como as geradas pelo app). */
+    fun isDone(ctx: Context, id: String): Boolean = prefs(ctx).getStringSet("gpt_done", emptySet())?.contains(id) == true
+    fun markDone(ctx: Context, id: String) {
+        val cur = prefs(ctx).getStringSet("gpt_done", emptySet()).orEmpty().toMutableSet(); cur.add(id)
+        prefs(ctx).edit().putStringSet("gpt_done", cur).apply()
+    }
+    fun unmark(ctx: Context, id: String) {
+        val cur = prefs(ctx).getStringSet("gpt_done", emptySet()).orEmpty().toMutableSet(); cur.remove(id)
+        prefs(ctx).edit().putStringSet("gpt_done", cur).apply()
+    }
+
     private fun played(ms: List<MatchEntity>) = ms.filter { it.round != null && it.result in listOf("V", "E", "D") }.sortedBy { it.round }
 
     /** Texto do pedido para a arte [c] (null se faltar dado). */
@@ -34,6 +45,12 @@ object ArtsGpt {
         val away = f[K.HOME]?.value?.lowercase() == "fora"
         val my = f[K.MY_STRENGTH]?.value; val rv = f[K.RIVAL_STRENGTH]?.value
         val bad = ms.size >= 3 && aprov < 40
+        val all = repo.dao.playersOf(slot)
+        val myStar = all.filter { it.owner == "MY" && it.strength != null }.maxByOrNull { it.strength ?: 0 }
+        val rivStar = all.filter { it.owner == "RIVAL" && it.strength != null }.maxByOrNull { it.strength ?: 0 }
+        fun pl(p: PlayerEntity?, clubName: String?) = p?.let { "${it.name}" + (it.age?.let { a -> ", $a anos" } ?: "") + (it.strength?.let { x -> ", força $x" } ?: "") + (clubName?.let { c -> " ($c)" } ?: "") }
+        val myLine = pl(myStar, team)
+        val rivLine = pl(rivStar, rival)
         val sb = StringBuilder()
         fun head(kind: String, fmt: String = "vertical 1080x1350") =
             sb.append("Crie um pôster de futebol $fmt: $kind. Siga as instruções do projeto (realista, estádio à noite, futebol de campo, escudos e nomes exatos). Gere uma composição NOVA e criativa, diferente das anteriores.\n\n")
@@ -44,7 +61,8 @@ object ArtsGpt {
                 val (l, rt) = if (away) r to team else team to r
                 head("DIA DE JOGO")
                 sb.append("Jogo: $l × $rt (casa à esquerda, fora à direita). Rodada ${round ?: "—"}. Meu clube: $club. Rival: $r.\n")
-                sb.append("Cena: tela dividida na diagonal, uma cor para cada clube (cores reais dos dois), escudos grandes no topo com um X entre eles, e um jogador do $team em destaque, de braços cruzados.\n")
+                sb.append("Cena: tela dividida na diagonal, uma cor para cada clube (cores reais dos dois), escudos grandes no topo com um X entre eles.\n")
+                sb.append("Jogadores (use os rostos reais deles): melhor do meu time = ${myLine ?: "um jogador do $team"}, em destaque, de braços cruzados; melhor do adversário = ${rivLine ?: "um jogador do $r"}, menor, ao fundo do outro lado, com a camisa do $r.\n")
                 if (p != null) {
                     val (pl, pr) = if (away) p.loss to p.win else p.win to p.loss
                     sb.append("Texto na imagem: \"DIA DE JOGO\"; \"Rodada ${round ?: ""} • $l × $rt\"; faixa esquerda: \"${l.uppercase()}\" e \"$pl%\"; centro: \"Empate ${p.draw}%\"; faixa direita: \"${rt.uppercase()}\" e \"$pr%\"; linha pequena: \"Força ${if (away) "$rv × $my" else "$my × $rv"}\".\n")
@@ -58,7 +76,8 @@ object ArtsGpt {
                     val x = f[a]?.value; val y = f[b]?.value
                     if (x != null && y != null) sb.append("$n: $x × $y\n")
                 }
-                sb.append("Cena: dois jogadores frente a frente, uma cor por clube, barras comparativas por setor.\n")
+                sb.append("Cena: dois jogadores de perfil, frente a frente, uma cor por clube, barras comparativas por setor entre eles.\n")
+                sb.append("Jogadores (rostos reais): ${myLine ?: "um jogador do $team"} contra ${rivLine ?: "um jogador do $r"}, cada um com a camisa oficial do seu clube.\n")
             }
             "POST" -> {
                 val m = last ?: return null
@@ -107,7 +126,7 @@ object ArtsGpt {
             }
             else -> return null
         }
-        sb.append("\nNão invente números nem nomes além dos informados. Texto em português, letras grandes e nítidas.")
+        sb.append("\nUse os nomes dos clubes na forma curta e oficial, sem acrescentar cidade, \"Belo Horizonte\", \"FC\" ou qualquer palavra que eu não escrevi. Não invente números nem nomes além dos informados. Texto em português, letras grandes e nítidas.")
         return sb.toString()
     }
 

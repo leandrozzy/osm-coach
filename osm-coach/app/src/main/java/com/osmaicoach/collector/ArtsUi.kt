@@ -211,7 +211,9 @@ internal fun ArtsTab() {
                 if (!on) Text("Slot desligado: não cria artes (nem sozinho nem pelo botão de cima). Ligue o interruptor para voltar a criar.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 else if (cs.isEmpty()) Text("Sem eventos ainda.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 for (c in cs) {
-                    val done = d.items.any { it.id == c.id }
+                    var gptTick by remember(c.id) { mutableStateOf(0) }
+                    val gdone = remember(c.id, gptTick) { ArtsGpt.isDone(ctx, c.id) }
+                    val done = d.items.any { it.id == c.id } || gdone
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(c.title, fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 2)
                         TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { Arts.dismiss(Repo(ctx), listOf(c.id)) } } }, modifier = Modifier.height(36.dp)) { Text("✕", fontSize = 15.sp, color = C.MUTED) }
@@ -225,10 +227,10 @@ internal fun ArtsTab() {
                                 }
                             },
                             enabled = !done && !busy, modifier = Modifier.height(36.dp)
-                        ) { Text(if (done) "✓ feita" else "Criar", fontSize = 12.5.sp) }
+                        ) { Text(if (done) (if (gdone) "✓ feita (ChatGPT)" else "✓ feita") else "Criar", fontSize = 12.5.sp) }
                         OutlinedButton(
                             onClick = { scope.launch { val t = withContext(Dispatchers.IO) { runCatching { ArtsGpt.prompt(ctx, Repo(ctx), c) }.getOrNull() }
-                                msg = if (t == null) "Faltam dados lidos para montar o prompt desta arte." else ArtsGpt.send(ctx, t) } },
+                                msg = if (t == null) "Faltam dados lidos para montar o prompt desta arte." else { ArtsGpt.markDone(ctx, c.id); gptTick++; ArtsGpt.send(ctx, t) } } },
                             modifier = Modifier.height(36.dp)
                         ) { Text("ChatGPT", fontSize = 12.5.sp) }
                     }

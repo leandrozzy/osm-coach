@@ -239,7 +239,7 @@ object Arts {
             if (!slotOn(ctx, slot)) continue
             for (c in candidates(repo, slot)) {
                 if (c.kind == "NEWS") continue
-                if (c.id in have) { skipped++; continue }
+                if (c.id in have || ArtsGpt.isDone(ctx, c.id)) { skipped++; continue }
                 if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; streak = 0; seenSet.add(c.id) } else { streak++; if (streak >= 2) break@loop }
             }
         }
