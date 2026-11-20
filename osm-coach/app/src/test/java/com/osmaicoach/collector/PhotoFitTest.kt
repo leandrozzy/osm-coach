@@ -58,4 +58,20 @@ class PhotoFitTest {
         assertTrue(f.removedBg)
         assertEquals(PhotoFit.BG, f.px[0])
     }
+
+    @Test fun darkBackgroundWithDarkHairIsNotRemoved() {
+        // fundo preto liso e "cabelo" também preto, colado no fundo: a máscara comeria o cabelo → não remove, só enquadra
+        val w = 300; val h = 300
+        val px = IntArray(w * h) { 0xFF0A0A0C.toInt() }
+        for (y in 60 until 300) for (x in 100 until 200) px[y * w + x] = if (y < 90) 0xFF0C0C0E.toInt() else if (y < 200) 0xFFC68B6B.toInt() else 0xFF1E3CAA.toInt()
+        val f = PhotoFit.fit(px, w, h, 96, null, floatArrayOf(150f, 130f, 90f), faceFromDetector = true)
+        assertTrue(!f.removedBg)
+    }
+
+    @Test fun uneven_background_is_not_treated_as_single_color() {
+        val w = 200; val h = 200
+        val px = IntArray(w * h) { i -> val x = i % w; val v = 20 + x; (0xFF shl 24) or (v shl 16) or (v shl 8) or (255 - v) }   // gradiente forte na moldura
+        val f = PhotoFit.fit(px, w, h, 64, null, floatArrayOf(100f, 90f, 60f), faceFromDetector = true)
+        assertTrue(!f.removedBg)
+    }
 }

@@ -27,6 +27,11 @@ object PhotoFit {
         for (y in 0 until h) for (x in 0 until w) if (x < 4 || y < 4 || x >= w - 4 || y >= h - 4) bs.add(y * w + x)
         fun med(c: IntArray): Float { val v = IntArray(bs.size) { c[bs[it]] }; v.sort(); return v[v.size / 2].toFloat() }
         val mr = med(rr); val mg = med(gg); val mb = med(bb)
+        // fundo ÚNICO = a moldura do alto e das laterais (60% de cima) quase não varia; o fundo de baixo tem corpo/camisa encostando
+        val top = ArrayList<Int>()
+        for (y in 0 until (h * 0.6f).toInt()) for (x in 0 until w) if (x < 4 || y < 4 || x >= w - 4) top.add(y * w + x)
+        fun sd(c: IntArray, m: Float): Float { var a = 0f; for (i in top) { val d = c[i] - m; a += d * d }; return Math.sqrt((a / top.size.coerceAtLeast(1)).toDouble()).toFloat() }
+        if (top.isEmpty() || maxOf(sd(rr, mr), sd(gg, mg), sd(bb, mb)) > 14f) return null
         val fL = lum(mr.toInt(), mg.toInt(), mb.toInt()); val fU = mr - mg; val fV = mb - (mr + mg) / 2f
         val cand = BooleanArray(w * h) {
             val l = lum(rr[it], gg[it], bb[it]); val u = (rr[it] - gg[it]).toFloat(); val v = bb[it] - (rr[it] + gg[it]) / 2f
@@ -45,6 +50,16 @@ object PhotoFit {
         val frac = fg.toFloat() / (w * h)
         if (frac !in 0.06f..0.92f) return null
         return FloatArray(w * h) { if (isBg[it]) 0f else 1f }
+    }
+
+    /** Pelo menos 92% da caixa do rosto (e da faixa de cabelo acima dela) tem que continuar como primeiro plano. */
+    fun maskKeepsPerson(alpha: FloatArray, w: Int, h: Int, face: FloatArray): Boolean {
+        val cx = face[0]; val cy = face[1]; val fw = face[2]
+        val x0 = (cx - fw / 2f).toInt().coerceIn(0, w - 1); val x1 = (cx + fw / 2f).toInt().coerceIn(x0 + 1, w)
+        val y0 = (cy - fw * 0.62f).toInt().coerceIn(0, h - 1); val y1 = (cy + fw * 0.45f).toInt().coerceIn(y0 + 1, h)
+        var keep = 0; var n = 0
+        for (y in y0 until y1) for (x in x0 until x1) { n++; if (alpha[y * w + x] > 0.5f) keep++ }
+        return n > 0 && keep.toFloat() / n >= 0.92f
     }
 
     /** Rosto pela cor da pele dentro do primeiro plano → [cx, cy, largura]; null se não achou. */
@@ -76,8 +91,10 @@ object PhotoFit {
         val bb = IntArray(w * h) { px[it] and 255 }
         val maskAlpha = alphaIn ?: colorMask(rr, gg, bb, w, h)
         // fundo com coisas atrás: não remove (alfa 1 em tudo), só enquadra no rosto achado pelo detector
-        val removeBg = maskAlpha != null
-        val alpha = maskAlpha ?: if (face != null) FloatArray(w * h) { 1f } else null
+        // a máscara por cor não pode comer o rosto nem o cabelo (cabelo escuro em fundo escuro): confere a caixa do rosto e a faixa acima dela
+        val maskOk = maskAlpha != null && (face == null || maskKeepsPerson(maskAlpha, w, h, face))
+        val removeBg = maskOk
+        val alpha = (if (maskOk) maskAlpha else null) ?: if (face != null) FloatArray(w * h) { 1f } else null
         val f = if (alpha == null) null else (face ?: skinFace(rr, gg, bb, w, h, alpha))
         val fromDet = face != null && faceFromDetector
         val out = IntArray(s * s)
