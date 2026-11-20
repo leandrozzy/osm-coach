@@ -166,11 +166,13 @@ internal fun ArtsTab() {
             fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 8.dp)
         )
         var autoOn by remember { mutableStateOf(Arts.autoOn(ctx)) }
-        CtaButton(if (busy) "Gerando com IA… pode levar 1 min" else "🎨 Criar artes novas agora", Modifier.fillMaxWidth(), !busy) {
+        CtaButton(if (busy) "Gerando com IA… leva ~1 min por arte" else "🎨 Criar todas as artes agora", Modifier.fillMaxWidth(), !busy) {
             busy = true; msg = null
             scope.launch {
-                val n = withContext(Dispatchers.IO) { runCatching { Arts.auto(ctx) }.getOrDefault(0) }
-                msg = if (n > 0) "Criei $n arte(s) nova(s)." else (ArtsAi.lastError ?: "Nenhum evento NOVO nos slots ligados (o que já foi visto não se repete). Use \"Criar\" na lista de cada slot para escolher um evento.")
+                val (n, sk) = withContext(Dispatchers.IO) { runCatching { Arts.createAll(ctx) }.getOrDefault(0 to 0) }
+                msg = if (n > 0) "Criei $n arte(s)." + (if (sk > 0) " $sk já existiam." else "")
+                else if (sk > 0 && ArtsAi.lastError == null) "Todas as artes dos slots ligados já foram criadas ($sk)."
+                else (ArtsAi.lastError ?: "Nenhum slot ligado com artes para criar. Ligue o interruptor de um slot.")
                 busy = false
             }
         }

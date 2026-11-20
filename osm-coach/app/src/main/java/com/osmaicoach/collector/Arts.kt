@@ -224,6 +224,35 @@ object Arts {
         return made
     }
 
+    /**
+     * Botão "Criar artes novas agora": cria TODAS as artes listadas dos slots LIGADOS (inclusive as que o automático pularia: dia de jogo longe, craques, momento,
+     * campanha…), menos as que já existem e a capa de jornal de contratações (demora minutos e é só à mão). Uma por vez; 2 falhas seguidas (serviço fora) param.
+     * Devolve (criadas, puladas por já existirem).
+     */
+    suspend fun createAll(ctx: Context): Pair<Int, Int> {
+        migrate(ctx)
+        val repo = Repo(ctx)
+        val have = items(repo).map { it.id }.toSet()
+        val seenSet = seen(repo) ?: mutableSetOf()
+        var made = 0; var skipped = 0; var streak = 0
+        loop@ for (slot in 1..4) {
+            if (!slotOn(ctx, slot)) continue
+            for (c in candidates(repo, slot)) {
+                if (c.kind == "NEWS") continue
+                if (c.id in have) { skipped++; continue }
+                if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; streak = 0; seenSet.add(c.id) } else { streak++; if (streak >= 2) break@loop }
+            }
+        }
+        putSeen(repo, seenSet)
+        if (made > 0) {
+            val sp = ctx.getSharedPreferences("arts", Context.MODE_PRIVATE)
+            sp.edit().putInt("new", sp.getInt("new", 0) + made).apply()
+            Diag.log("Artes: $made criada(s) pelo botão")
+            UiBus.bump()
+        }
+        return made to skipped
+    }
+
     fun unseenCount(ctx: Context): Int = ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getInt("new", 0)
     fun clearUnseen(ctx: Context) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putInt("new", 0).apply() }
     fun autoOn(ctx: Context): Boolean = !ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getBoolean("auto_off", false)
