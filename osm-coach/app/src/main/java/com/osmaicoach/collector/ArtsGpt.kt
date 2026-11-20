@@ -71,15 +71,17 @@ object ArtsGpt {
     suspend fun prompt(ctx: Context, repo: Repo, c: Arts.Cand): String? {
         val slot = c.slot
         val f = repo.fieldMap(slot)
-        val team = f[K.TEAM]?.value ?: return null
+        val teamRaw = f[K.TEAM]?.value ?: return null
+        val team = repo.realClub(teamRaw) ?: teamRaw
         val comp = f[K.COMPETITION]?.value
         val country = Flags.countryName(Flags.isoFromCompetition(comp))
-        val club = "$team" + (country?.let { " (clube de $it)" } ?: "") + (comp?.let { ", competição: $it" } ?: "")
+        val club = "$team" + (if (team != teamRaw) " (no OSM aparece como \"$teamRaw\")" else "") + (country?.let { " (clube de $it)" } ?: "") + (comp?.let { ", competição: $it" } ?: "")
         val ms = played(repo.dao.matchesOf(slot))
         val v = ms.count { it.result == "V" }; val e = ms.count { it.result == "E" }; val d = ms.count { it.result == "D" }
         val aprov = if (ms.isEmpty()) 0 else Math.round(100f * (3 * v + e) / (3 * ms.size))
         val last = ms.lastOrNull()
-        val rival = f[K.RIVAL_TEAM]?.value
+        val rivalRaw = f[K.RIVAL_TEAM]?.value
+        val rival = repo.realClub(rivalRaw)
         val round = f[K.ROUND]?.value?.let { Regex("\\d+").find(it)?.value }
         val away = f[K.HOME]?.value?.lowercase() == "fora"
         val my = f[K.MY_STRENGTH]?.value; val rv = f[K.RIVAL_STRENGTH]?.value
@@ -120,7 +122,7 @@ object ArtsGpt {
             }
             "POST" -> {
                 val m = last ?: return null
-                val opp = m.opponent ?: return null
+                val opp = repo.realClub(m.opponent) ?: return null
                 val res = when (m.result) { "V" -> "VITÓRIA"; "D" -> "DERROTA"; else -> "EMPATE" }
                 val j = repo.dao.plan(slot, "mr_R${m.round}")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
                 val mineHome = j?.takeIf { it.has("mineHome") }?.optBoolean("mineHome") ?: m.home
@@ -166,7 +168,7 @@ object ArtsGpt {
             "GOLEADA" -> {
                 val m = last ?: return null
                 head("GOLEADA")
-                sb.append("$team ${m.scoreMine} × ${m.scoreOpp} ${m.opponent}, rodada ${m.round}. Clube: $club. Cena de comemoração com torcida e sinalizadores.\n")
+                sb.append("$team ${m.scoreMine} × ${m.scoreOpp} ${repo.realClub(m.opponent)}, rodada ${m.round}. Clube: $club. Cena de comemoração com torcida e sinalizadores.\n")
             }
             "STREAK" -> {
                 val n = ms.reversed().takeWhile { it.result == "V" }.size
@@ -198,7 +200,7 @@ object ArtsGpt {
             else -> return null
         }
         if (c.kind !in listOf("POST", "NEWS")) sb.append("\nEstilo desta vez: ${pick(GENERIC_STYLES)} (varie a cena, o enquadramento e a luz em relação às artes anteriores).")
-        sb.append("\nUse os nomes dos clubes na forma curta e oficial, sem acrescentar cidade, \"Belo Horizonte\", \"FC\" ou qualquer palavra que eu não escrevi. Não invente números nem nomes além dos informados. Texto em português, letras grandes e nítidas.")
+        sb.append("\nEscreva nos textos os nomes reais dos clubes exatamente como informei acima (o nome que aparece como \"no OSM\" é só do jogo, não use na imagem), sem acrescentar nem trocar palavras. Não invente números nem nomes além dos informados. Texto em português, letras grandes e nítidas.")
         return sb.toString()
     }
 

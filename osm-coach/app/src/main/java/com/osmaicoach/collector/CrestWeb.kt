@@ -23,7 +23,7 @@ object CrestWeb {
     @Volatile private var worker = false
     private val lock = Any()
 
-    private const val VER = "2"   // 2: SVG com largura/altura diferentes do viewBox saía cortado (Cruzeiro, Atlético-PR): refaz os escudos já baixados
+    private const val VER = "3"   // 2: SVG com largura/altura diferentes do viewBox saía cortado (Cruzeiro, Atlético-PR): refaz os escudos já baixados
     @Volatile private var verChecked = false
 
     fun dir(filesDir: File): File = File(filesDir, "crests/web").apply {
@@ -164,6 +164,7 @@ object CrestWeb {
                 bmp.recycle()
                 val f = File(dir(fd), Txt.key(team) + ".png")
                 f.writeBytes(bytes)
+                ClubNames.put(fd, team, name)
                 Diag.log("Escudo real de $team ← $name")
                 UiBus.bump()
                 return true
@@ -227,6 +228,7 @@ object CrestWeb {
         val f = File(dir(fd), Txt.key(team) + ".png")
         java.io.FileOutputStream(f).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         bmp.recycle()
+        ClubNames.put(fd, team, nameOfPath(path))
         Diag.log("Escudo real de $team ← ${nameOfPath(path)} (football-logos)")
         UiBus.bump()
         return true

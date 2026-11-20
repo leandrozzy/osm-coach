@@ -151,7 +151,7 @@ object Arts {
             }
             val recent = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
             if (recent.isNotEmpty()) out.add(Cand("news|$slot|${recent.first().at}", slot, "NEWS", "Capa de jornal: " + recent.joinToString(", ") { it.name }, recent.first().at, auto = false))
-            if (last != null && last.round != null) out.add(Cand("post|$slot|${last.round}", slot, "POST", "Jornal do jogo: J${last.round} ${last.scoreMine ?: "?"}×${last.scoreOpp ?: "?"} vs ${last.opponent.orEmpty()}", last.updatedAt))
+            if (last != null && last.round != null) out.add(Cand("post|$slot|${last.round}", slot, "POST", "Jornal do jogo: J${last.round} ${last.scoreMine ?: "?"}×${last.scoreOpp ?: "?"} vs ${repo.realClub(last.opponent).orEmpty()}", last.updatedAt))
             if (last != null && last.result == "V") {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
@@ -172,10 +172,10 @@ object Arts {
             val rival = f[K.RIVAL_TEAM]?.value
             if (round != null && rival != null && f[K.RIVAL_STRENGTH]?.value?.toIntOrNull() != null && f[K.MY_STRENGTH]?.value?.toIntOrNull() != null) {
                 val soon = matchAt != null && matchAt > now && matchAt - now <= 24 * 3600_000L
-                out.add(Cand("match|$slot|$round", slot, "MATCHDAY", "Dia de jogo: J$round vs $rival", now, auto = soon))
+                out.add(Cand("match|$slot|$round", slot, "MATCHDAY", "Dia de jogo: J$round vs ${repo.realClub(rival)}", now, auto = soon))
                 val sectors = listOf(K.MY_ATK to K.RIVAL_ATK, K.MY_MID to K.RIVAL_MID, K.MY_DEF to K.RIVAL_DEF, K.MY_GOL to K.RIVAL_GOL)
                 if (sectors.count { (a, b) -> f[a]?.value?.toIntOrNull() != null && f[b]?.value?.toIntOrNull() != null } >= 2)
-                    out.add(Cand("cmp|$slot|$round", slot, "COMPARE", "Lado a lado: J$round vs $rival", now, auto = soon))
+                    out.add(Cand("cmp|$slot|$round", slot, "COMPARE", "Lado a lado: J$round vs ${repo.realClub(rival)}", now, auto = soon))
             }
         } else if (ms.isNotEmpty()) {
             val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
@@ -366,10 +366,11 @@ object Arts {
         val slot = c.slot
         val round = c.id.split("|").getOrNull(2)?.toIntOrNull()
         val m = ms.firstOrNull { it.round == round } ?: return null
-        val opp = m.opponent?.takeIf { it.isNotBlank() } ?: return null
+        val oppRaw = m.opponent?.takeIf { it.isNotBlank() } ?: return null
+        val opp = repo.realClub(oppRaw) ?: oppRaw
         val mine = m.scoreMine ?: return null; val theirs = m.scoreOpp ?: return null
         val res = m.result ?: return null
-        val oppCrest = bmp(CrestWeb.find(ctx.filesDir, opp) ?: CrestCut.find(ctx.filesDir, opp))
+        val oppCrest = bmp(CrestWeb.find(ctx.filesDir, oppRaw) ?: CrestCut.find(ctx.filesDir, oppRaw))
         val j = repo.dao.plan(slot, "mr_R$round")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val mineHome = j?.takeIf { it.has("mineHome") }?.optBoolean("mineHome") ?: m.home
         // gols lidos do relatório: "23' (casa) gol de X (assistência: Y)"
@@ -452,9 +453,10 @@ object Arts {
     private suspend fun draw(ctx: Context, repo: Repo, c: Cand, reroll: Int): Bitmap? {
         val slot = c.slot
         val f = repo.fieldMap(slot)
-        val team = f[K.TEAM]?.value ?: return null
+        val teamRaw = f[K.TEAM]?.value ?: return null
+        val team = repo.realClub(teamRaw) ?: teamRaw
         val comp = f[K.COMPETITION]?.value
-        val crest = bmp(CrestWeb.find(ctx.filesDir, team) ?: CrestCut.find(ctx.filesDir, team))
+        val crest = bmp(CrestWeb.find(ctx.filesDir, teamRaw) ?: CrestCut.find(ctx.filesDir, teamRaw))
         val th = theme(crest, slot)
         val colors = ArtsAi.colorWords(crest, slot)
         val ms = played(repo.dao.matchesOf(slot))
@@ -494,7 +496,7 @@ object Arts {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 // quem joga em casa fica à ESQUERDA (placar e escudos)
                 banner = "GOLEADA!"; big = if (m.home == false) "${m.scoreOpp ?: 0} × ${m.scoreMine ?: 0}" else "${m.scoreMine ?: 0} × ${m.scoreOpp ?: 0}"
-                info = "J${m.round} • ${m.opponent.orEmpty()}"
+                info = "J${m.round} • ${repo.realClub(m.opponent).orEmpty()}"
                 plate = if (streak >= 2) "SEQUÊNCIA" to "$streak vitórias" else "JOGO" to (if (m.home == true) "em casa" else if (m.home == false) "fora" else "—")
                 foot = "Vamos pra cima, $team!"
             }
@@ -531,8 +533,9 @@ object Arts {
                 scene.recycle(); return outM
             }
             "MATCHDAY", "COMPARE" -> {
-                val rival = f[K.RIVAL_TEAM]?.value ?: return null
-                oppCrest = bmp(CrestWeb.find(ctx.filesDir, rival) ?: CrestCut.find(ctx.filesDir, rival))
+                val rivalRaw = f[K.RIVAL_TEAM]?.value ?: return null
+                val rival = repo.realClub(rivalRaw) ?: rivalRaw
+                oppCrest = bmp(CrestWeb.find(ctx.filesDir, rivalRaw) ?: CrestCut.find(ctx.filesDir, rivalRaw))
                 val my = f[K.MY_STRENGTH]?.value?.toIntOrNull(); val rv = f[K.RIVAL_STRENGTH]?.value?.toIntOrNull()
                 val round = num(f[K.ROUND]?.value)
                 if (c.kind == "COMPARE") {

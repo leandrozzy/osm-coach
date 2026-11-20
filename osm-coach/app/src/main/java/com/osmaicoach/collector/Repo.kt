@@ -15,6 +15,9 @@ object ResultCtx {
 private val LEARN_SEEN = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
 class Repo(private val ctx: Context) {
+    /** Nome real do clube na web (ver ClubNames); sem acerto, o nome do jogo. */
+    fun realClub(game: String?): String? = ClubNames.real(ctx.filesDir, game)
+
     val dao: CoachDao = CoachDb.get(ctx).dao()
 
     init {
