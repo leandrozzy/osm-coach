@@ -38,4 +38,16 @@ class PhotoFitTest {
         assertTrue(!f.removedBg)
         assertEquals(64 * 64, f.px.size)
     }
+
+    @Test fun givenMaskRemovesBusyBackgroundAndUsesDetectedFace() {
+        val w = 300; val h = 300
+        val rnd = java.util.Random(7)
+        val px = IntArray(w * h) { val v = 60 + rnd.nextInt(160); (0xFF shl 24) or (v shl 16) or (rnd.nextInt(255) shl 8) or rnd.nextInt(255) }   // fundo cheio de ruído (torcida)
+        val alpha = FloatArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) if (x in 100..200 && y in 60..300) { alpha[y * w + x] = 1f; px[y * w + x] = if (y < 160) 0xFFC68B6B.toInt() else 0xFF1E8A3C.toInt() }
+        val f = PhotoFit.fit(px, w, h, 96, alpha, floatArrayOf(150f, 110f, 90f), faceFromDetector = true)
+        assertTrue(f.removedBg)
+        assertEquals(PhotoFit.BG, f.px[0])          // canto = fundo claro, não o ruído
+        assertEquals(PhotoFit.BG, f.px[95 * 96])
+    }
 }

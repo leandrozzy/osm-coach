@@ -593,9 +593,14 @@ internal fun SettingsTab() {
             val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
                 val k = pickFor; pickFor = null
                 if (uri != null && k != null) {
-                    val bmp = PhotoWeb.decodeUri(ctx, uri)
-                    val ok = bmp != null && PhotoWeb.saveManual(ctx, k, bmp)
-                    android.widget.Toast.makeText(ctx, if (ok) "Foto salva." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(ctx, "Processando a foto…", android.widget.Toast.LENGTH_SHORT).show()
+                    AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val bmp = PhotoWeb.decodeUri(ctx, uri)
+                        val ok = bmp != null && PhotoWeb.saveManual(ctx, k, bmp)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            android.widget.Toast.makeText(ctx, if (ok) "Foto salva." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             }
             Text("🌐 Wikipedia/Commons: ${wr.first} foto(s) pegas • ${wr.second.size} jogador(es) sem foto", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))

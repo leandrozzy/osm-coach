@@ -386,7 +386,7 @@ object PhotoWeb {
     }.getOrNull()
 
     /** Foto escolhida à mão: recorta o quadrado (retrato: do alto), grava como as outras (`photos/<nameKey>.png`) e marca como manual. */
-    fun saveManual(ctx: Context, key: String, bmp: Bitmap): Boolean {
+    suspend fun saveManual(ctx: Context, key: String, bmp: Bitmap): Boolean {
         val out = PhotoFit.fitBitmap(bmp)
         val ok = runCatching { File(dir(ctx.filesDir), "$key.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) } }.isSuccess
         out.recycle()

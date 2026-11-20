@@ -21,6 +21,8 @@ android {
         val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionCode = (System.currentTimeMillis() / 60000L).toInt()
         versionName = "5.0.$runNumber"
+        // só aparelhos 64-bit ARM (celulares atuais): as bibliotecas nativas do ML Kit (rosto/segmentação/OCR) de x86 e 32-bit dobravam o APK
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     buildFeatures { compose = true }
@@ -61,6 +63,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:face-detection:16.1.7")   // acha o rosto para enquadrar a foto do jogador
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")   // separa a pessoa do fundo (qualquer fundo)
     implementation("com.caverock:androidsvg-aar:1.4")   // desenha os escudos SVG do repositório football-logos
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
