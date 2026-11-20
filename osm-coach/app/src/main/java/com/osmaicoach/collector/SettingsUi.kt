@@ -587,6 +587,28 @@ internal fun SettingsTab() {
                 android.widget.Toast.makeText(ctx, "Chave salva. As fotos chegam aos poucos.", android.widget.Toast.LENGTH_LONG).show()
             }
             Text(PhotoWeb.statusText(pst), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp))
+            // Wikipedia/Commons: quantos vieram e quem falta (escolha à mão, salva como as outras)
+            val wr = rememberLoaded(0 to emptyList<PhotoWeb.Missing>(), pTick, UiBus.version) { PhotoWeb.wikiReport(ctx) }
+            var pickFor by remember { mutableStateOf<String?>(null) }
+            val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                val k = pickFor; pickFor = null
+                if (uri != null && k != null) {
+                    val bmp = runCatching { ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull()
+                    val ok = bmp != null && PhotoWeb.saveManual(ctx, k, bmp)
+                    android.widget.Toast.makeText(ctx, if (ok) "Foto salva." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            Text("🌐 Wikipedia/Commons: ${wr.first} foto(s) pegas • ${wr.second.size} jogador(es) sem foto", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+            if (wr.second.isEmpty()) Text("✅ Todos os jogadores dos slots têm foto.", fontSize = 13.sp, color = C.MUTED)
+            else Text("Toque em \"Escolher foto\" para pôr à mão (da galeria). Ela é salva como as outras e vale para os 4 slots.", fontSize = 13.sp, color = C.MUTED)
+            for (m in wr.second.take(40)) {
+                Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text("${m.name} (S${m.slot})", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(m.reason, fontSize = 12.sp, color = C.MUTED)
+                    GhostButton("📷 Escolher foto") { pickFor = m.key; pickPhoto.launch("image/*") }
+                }
+            }
+            if (wr.second.size > 40) Text("+ ${wr.second.size - 40} outros: a lista mostra 40 por vez.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
             Text("Só o NOME do jogador é enviado, e só dos jogadores que já estão nos seus 4 slots. A foto só vale se nome, idade e país conferem; na dúvida fica sem foto. A chave fica só neste aparelho. Plano grátis: 100 consultas por dia; o app usa até ${PhotoWeb.BUDGET} e retoma no dia seguinte.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
         }
         var webCrests by remember { mutableStateOf(Settings.get(ctx, "web_crests", "1") == "1") }

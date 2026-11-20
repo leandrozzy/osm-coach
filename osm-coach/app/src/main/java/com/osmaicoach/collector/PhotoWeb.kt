@@ -353,6 +353,47 @@ object PhotoWeb {
         if (c.responseCode in 200..299) c.inputStream.use { it.readBytes() } else null
     } catch (e: Exception) { null }
 
+    class Missing(val key: String, val name: String, val slot: Int, val reason: String)
+
+    /** Quantos vieram do Wikidata/Commons e quem ainda está sem foto (com o motivo), para o usuário escolher à mão em Ajustes. */
+    suspend fun wikiReport(ctx: Context): Pair<Int, List<Missing>> {
+        val wx = wikiIdx(ctx.filesDir)
+        val ix = idx(ctx.filesDir)
+        val all = candidatesAll(Repo(ctx))
+        val ok = all.count { file(ctx.filesDir, it.nameKey) != null && wx.optJSONObject(it.nameKey)?.optString("s") == "ok" }
+        val miss = all.filter { file(ctx.filesDir, it.nameKey) == null }.map { p ->
+            val w = wx.optJSONObject(p.nameKey)?.optString("s")
+            val a = ix.optJSONObject(p.nameKey)?.optString("s")
+            val why = when {
+                w == "miss" -> "não achei no Wikidata (nenhum jogador nascido em ${p.age?.let { java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) - it } ?: "?"} com esse nome e foto)"
+                w == "amb" -> "mais de um jogador possível, não escolhi"
+                w == "err" -> "erro ao salvar a foto"
+                a == "miss" || a == "amb" -> "a API não achou; Wikidata ainda não tentou"
+                else -> "ainda não tentei (a fila anda sozinha)"
+            }
+            Missing(p.nameKey, p.name, p.slotId, why)
+        }
+        return ok to miss
+    }
+
+    /** Foto escolhida à mão: recorta o quadrado (retrato: do alto), grava como as outras (`photos/<nameKey>.png`) e marca como manual. */
+    fun saveManual(ctx: Context, key: String, bmp: Bitmap): Boolean {
+        val side = minOf(bmp.width, bmp.height)
+        val x0 = (bmp.width - side) / 2
+        val y0 = if (bmp.height > bmp.width) (bmp.height * 0.02f).toInt().coerceAtMost(bmp.height - side) else (bmp.height - side) / 2
+        val sq = Bitmap.createBitmap(bmp, x0, y0, side, side)
+        val out = Bitmap.createScaledBitmap(sq, 192, 192, true)
+        val ok = runCatching { File(dir(ctx.filesDir), "$key.png").outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) } }.isSuccess
+        if (sq !== bmp) sq.recycle(); out.recycle()
+        if (ok) {
+            val wx = wikiIdx(ctx.filesDir)
+            wx.put(key, JSONObject().put("s", "manual").put("at", System.currentTimeMillis()))
+            runCatching { wikiFile(ctx.filesDir).writeText(wx.toString()) }
+            UiBus.bump()
+        }
+        return ok
+    }
+
     private fun wikiFile(filesDir: File) = File(dir(filesDir), "_wiki.json")
     private fun wikiIdx(filesDir: File): JSONObject = runCatching { JSONObject(wikiFile(filesDir).readText()) }.getOrNull() ?: JSONObject()
 
