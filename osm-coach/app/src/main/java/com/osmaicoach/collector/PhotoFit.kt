@@ -4,15 +4,14 @@ import android.graphics.Bitmap
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
-import com.google.mlkit.vision.segmentation.Segmentation
-import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import kotlinx.coroutines.tasks.await
 
 /**
  * Enquadra uma foto (a do Wikipedia ou a que o usuário escolhe) no mesmo estilo das da API: tira o fundo, acha o rosto, enquadra cabeça e ombros
- * num quadrado e põe sobre o MESMO fundo claro (a tela corta em círculo). O fundo sai, em ordem: (1) pela transparência da própria imagem (PNG/WebP
- * recortado), (2) pela segmentação de pessoa do ML Kit (qualquer fundo: estádio, torcida), (3) por cor, se o fundo é liso. O rosto vem do detector de
- * rostos do ML Kit; sem ele, da cor da pele. Sem nada disso cai no quadrado do alto. O miolo (`fit`) é puro (IntArray) e testado na JVM.
+ * num quadrado e, quando dá, põe sobre o MESMO fundo claro (a tela corta em círculo). O fundo só sai quando é ÚNICO: (1) pela transparência da própria
+ * imagem (PNG/WebP recortado) ou (2) por cor, se o fundo é liso (estúdio). Fundo com coisas atrás (estádio, torcida) NÃO é removido (a segmentação
+ * de pessoa não funcionou bem): a foto só é enquadrada no rosto, com o fundo original. O rosto vem do detector do ML Kit; sem ele, da cor da pele.
+ * Sem rosto cai no quadrado do alto. O miolo (`fit`) é puro (IntArray) e testado na JVM.
  */
 object PhotoFit {
     const val BG = 0xFFF3F5F9.toInt()
@@ -75,7 +74,10 @@ object PhotoFit {
         val rr = IntArray(w * h) { (px[it] shr 16) and 255 }
         val gg = IntArray(w * h) { (px[it] shr 8) and 255 }
         val bb = IntArray(w * h) { px[it] and 255 }
-        val alpha = alphaIn ?: colorMask(rr, gg, bb, w, h)
+        val maskAlpha = alphaIn ?: colorMask(rr, gg, bb, w, h)
+        // fundo com coisas atrás: não remove (alfa 1 em tudo), só enquadra no rosto achado pelo detector
+        val removeBg = maskAlpha != null
+        val alpha = maskAlpha ?: if (face != null) FloatArray(w * h) { 1f } else null
         val f = if (alpha == null) null else (face ?: skinFace(rr, gg, bb, w, h, alpha))
         val fromDet = face != null && faceFromDetector
         val out = IntArray(s * s)
@@ -112,7 +114,7 @@ object PhotoFit {
                 val R = (r * a + br * (1 - a)).toInt().coerceIn(0, 255); val G = (g * a + bg * (1 - a)).toInt().coerceIn(0, 255); val B = (b * a + bbl * (1 - a)).toInt().coerceIn(0, 255)
                 out[oy * s + ox] = (0xFF shl 24) or (R shl 16) or (G shl 8) or B
             }
-            return Fit(out, true)
+            return Fit(out, removeBg)
         }
         // plano B: quadrado (retrato: do alto), sem tirar o fundo
         val side = minOf(w, h).toFloat()
@@ -135,23 +137,7 @@ object PhotoFit {
         var transparent = 0
         for (p in px) if ((p ushr 24) < 40) transparent++
         if (transparent > 0.08f * px.size) alpha = FloatArray(px.size) { (px[it] ushr 24) / 255f }
-        // 2) segmentação de pessoa do ML Kit
-        if (alpha == null) {
-            alpha = runCatching {
-                val seg = Segmentation.getClient(SelfieSegmenterOptions.Builder().setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE).enableRawSizeMask().build())
-                try {
-                    val m = seg.process(InputImage.fromBitmap(b, 0)).await()
-                    val mw = m.width; val mh = m.height
-                    if (mw != w || mh != h) null else {
-                        val buf = m.buffer; buf.rewind()
-                        val a = FloatArray(w * h) { val c = buf.float; ((c - 0.35f) / 0.4f).coerceIn(0f, 1f) }
-                        var fg = 0; for (v in a) if (v > 0.5f) fg++
-                        if (fg.toFloat() / a.size in 0.04f..0.97f) a else null
-                    }
-                } finally { seg.close() }
-            }.getOrNull()
-        }
-        // 3) (dentro de fit) por cor, se o fundo é liso
+        // 2) (dentro de fit) por cor, se o fundo é liso; senão só enquadra
         // rosto pelo detector do ML Kit
         val face = runCatching {
             val det = FaceDetection.getClient(FaceDetectorOptions.Builder().setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST).build())

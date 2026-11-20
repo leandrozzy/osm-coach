@@ -39,15 +39,23 @@ class PhotoFitTest {
         assertEquals(64 * 64, f.px.size)
     }
 
-    @Test fun givenMaskRemovesBusyBackgroundAndUsesDetectedFace() {
+    @Test fun busyBackgroundIsKeptAndOnlyFramedOnTheFace() {
         val w = 300; val h = 300
         val rnd = java.util.Random(7)
         val px = IntArray(w * h) { val v = 60 + rnd.nextInt(160); (0xFF shl 24) or (v shl 16) or (rnd.nextInt(255) shl 8) or rnd.nextInt(255) }   // fundo cheio de ruído (torcida)
+        val f = PhotoFit.fit(px, w, h, 96, null, floatArrayOf(150f, 110f, 90f), faceFromDetector = true)
+        assertTrue(!f.removedBg)                     // não remove o fundo
+        assertNotEquals(PhotoFit.BG, f.px[0])        // o canto continua sendo a foto original, não o fundo claro
+        assertEquals(96 * 96, f.px.size)
+    }
+
+    @Test fun transparentImageUsesItsOwnAlpha() {
+        val w = 200; val h = 200
+        val px = IntArray(w * h) { 0x00000000 }
         val alpha = FloatArray(w * h)
-        for (y in 0 until h) for (x in 0 until w) if (x in 100..200 && y in 60..300) { alpha[y * w + x] = 1f; px[y * w + x] = if (y < 160) 0xFFC68B6B.toInt() else 0xFF1E8A3C.toInt() }
-        val f = PhotoFit.fit(px, w, h, 96, alpha, floatArrayOf(150f, 110f, 90f), faceFromDetector = true)
+        for (y in 40 until h) for (x in 60 until 140) { alpha[y * w + x] = 1f; px[y * w + x] = if (y < 110) 0xFFC68B6B.toInt() else 0xFF1E3CAA.toInt() }
+        val f = PhotoFit.fit(px, w, h, 64, alpha, floatArrayOf(100f, 75f, 60f), faceFromDetector = true)
         assertTrue(f.removedBg)
-        assertEquals(PhotoFit.BG, f.px[0])          // canto = fundo claro, não o ruído
-        assertEquals(PhotoFit.BG, f.px[95 * 96])
+        assertEquals(PhotoFit.BG, f.px[0])
     }
 }

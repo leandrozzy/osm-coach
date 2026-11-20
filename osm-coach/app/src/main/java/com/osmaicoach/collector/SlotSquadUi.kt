@@ -254,7 +254,11 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
         }
     }
     val te = trainEdit
-    if (te != null) TrainingDialog(slot, te, te.nameKey in d.unavailable, onFlag = { flagEdit = te }) { trainEdit = null }
+    if (te != null) {
+        val seat = seats.firstOrNull { it.key == te.nameKey && it.state != "unknown" }
+        val trainText = if (seat != null && seat.state == "active" && seat.fresh) "Treinando (${if (seat.role == "UNI") "universal" else seat.role})" else if (seat != null && seat.state == "done") "Treino concluído: pegar" else if (d.trainScreen == null && te.training == true) "Treinando" else null
+        PlayerDetailDialog(slot, te, d, trainText, onFlag = { flagEdit = te }) { trainEdit = null }
+    }
     flagEdit?.let { fe -> PlayerFlagDialog(fe) { flagEdit = null } }
 }
 

@@ -196,7 +196,8 @@ object PhotoWeb {
         val ix = idx(ctx.filesDir)
         val api = keys.count { file(ctx.filesDir, it) != null }
         val osm = keys.count { file(ctx.filesDir, it) == null && File(osmDir(ctx.filesDir), "$it.png").exists() }
-        val untried = keys.count { needsTry(ctx.filesDir, ix, it) }
+        val blockedKeys = noAuto(ctx.filesDir)
+        val untried = keys.count { it !in blockedKeys && needsTry(ctx.filesDir, ix, it) }
         val miss = keys.count { file(ctx.filesDir, it) == null && !needsTry(ctx.filesDir, ix, it) }
         return Status(api, osm, keys.size, untried, miss, hasKey(ctx), usedToday(ctx), blockedToday(ctx))
     }
@@ -216,6 +217,14 @@ object PhotoWeb {
     }
 
     // ------------------------------------------------------------------ fila
+
+    private fun noAutoFile(filesDir: File) = File(dir(filesDir), "_noauto.json")
+    fun noAuto(filesDir: File): Set<String> = runCatching { org.json.JSONArray(noAutoFile(filesDir).readText()).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } }.getOrNull() ?: emptySet()
+    private fun setNoAuto(filesDir: File, key: String, on: Boolean) {
+        val cur = noAuto(filesDir).toMutableSet()
+        if (on) cur.add(key) else cur.remove(key)
+        runCatching { noAutoFile(filesDir).writeText(org.json.JSONArray(cur.toList()).toString()) }
+    }
 
     private suspend fun candidatesAll(repo: Repo): List<PlayerEntity> {
         val out = ArrayList<PlayerEntity>()
@@ -258,7 +267,8 @@ object PhotoWeb {
                 ix.put("_algo", ALGO); saveIdx(ctx.filesDir, ix)
             }
             val now = System.currentTimeMillis()
-            val all = candidatesAll(repo).filter { file(ctx.filesDir, it.nameKey) == null }
+            val blocked = noAuto(ctx.filesDir)
+            val all = candidatesAll(repo).filter { file(ctx.filesDir, it.nameKey) == null && it.nameKey !in blocked }
             // 1º quem NUNCA foi tentado (jogador comprado agora vem primeiro); só quando todos foram tentados volta aos sem acerto (um por vez, 7 dias de intervalo)
             val bought = HashSet<String>()
             for (sl in 1..4) Ledger.parse(repo.dao.plan(sl, "ledger")?.json).filter { it.type == "buy" && now - it.at < 3L * 86400000L }.forEach { bought.add(it.key) }
@@ -399,6 +409,88 @@ object PhotoWeb {
         return ok
     }
 
+    // ------------------------------------------------------------------ gestão de imagens (Ajustes → Imagens e diálogo do jogador)
+
+    /** source: manual | wiki | api | osm (recorte do cartão do OSM) | none. */
+    class Item(val key: String, val name: String, val slot: Int, val age: Int?, val source: String, val at: Long, val bytes: Long, val blocked: Boolean)
+
+    fun sourceOf(filesDir: File, key: String): String {
+        val f = file(filesDir, key)
+        if (f != null) {
+            return when (wikiIdx(filesDir).optJSONObject(key)?.optString("s")) { "manual" -> "manual"; "ok" -> "wiki"; else -> "api" }
+        }
+        return if (File(osmDir(filesDir), "$key.png").exists()) "osm" else "none"
+    }
+
+    fun sourceLabel(source: String) = when (source) { "manual" -> "✋ Manual"; "wiki" -> "🌐 Wikipedia"; "api" -> "⚽ API-Football"; "osm" -> "✂ Recorte do OSM"; else -> "▫ Sem foto" }
+
+    fun itemOf(ctx: Context, p: PlayerEntity): Item {
+        val src = sourceOf(ctx.filesDir, p.nameKey)
+        val f = file(ctx.filesDir, p.nameKey) ?: File(osmDir(ctx.filesDir), "${p.nameKey}.png").takeIf { it.exists() }
+        return Item(p.nameKey, p.name, p.slotId, p.age, src, f?.lastModified() ?: 0L, f?.length() ?: 0L, p.nameKey in noAuto(ctx.filesDir))
+    }
+
+    /** Todos os jogadores meus dos slots ativos, com a origem da foto de cada um. */
+    suspend fun items(ctx: Context): List<Item> = candidatesAll(Repo(ctx)).map { itemOf(ctx, it) }
+
+    /** Apaga a foto e NÃO busca de novo sozinho (o jogador fica com recorte/silhueta até você escolher outra). */
+    fun removePhoto(ctx: Context, key: String) {
+        File(dir(ctx.filesDir), "$key.png").delete()
+        setNoAuto(ctx.filesDir, key, true)
+        val wx = wikiIdx(ctx.filesDir); wx.remove(key); runCatching { wikiFile(ctx.filesDir).writeText(wx.toString()) }
+        UiBus.bump()
+    }
+
+    /** Apaga a foto e libera o jogador para a busca automática (API e Wikipedia) tentar de novo. */
+    fun retryPhoto(ctx: Context, key: String) {
+        File(dir(ctx.filesDir), "$key.png").delete()
+        setNoAuto(ctx.filesDir, key, false)
+        val wx = wikiIdx(ctx.filesDir); wx.remove(key); runCatching { wikiFile(ctx.filesDir).writeText(wx.toString()) }
+        val ix = idx(ctx.filesDir); ix.remove(key); saveIdx(ctx.filesDir, ix)
+        UiBus.bump()
+    }
+
+    /** Apaga as fotos de uma origem (wiki/api/manual) e libera a busca (exceto manual, que só apaga). Devolve quantas. */
+    suspend fun clearSource(ctx: Context, source: String): Int {
+        var n = 0
+        for (it in items(ctx)) if (it.source == source) { if (source == "manual") removePhoto(ctx, it.key) else retryPhoto(ctx, it.key); n++ }
+        return n
+    }
+
+    /** Libera para nova busca todos que ficaram sem foto (sem acerto/ambíguos) e os bloqueados. */
+    suspend fun retryMissing(ctx: Context): Int {
+        var n = 0
+        for (it in items(ctx)) if (it.source == "none" || it.source == "osm") { retryPhoto(ctx, it.key); n++ }
+        return n
+    }
+
+    fun totalBytes(filesDir: File): Long = dir(filesDir).listFiles()?.filter { it.isFile && it.name.endsWith(".png") }?.sumOf { it.length() } ?: 0L
+
+    /** Salva uma cópia de todas as fotos em Downloads/OSM Coach (um .zip). Devolve o nome do arquivo ou null. */
+    suspend fun exportZip(ctx: Context): String? {
+        val its = items(ctx).filter { it.source in listOf("manual", "wiki", "api") }
+        if (its.isEmpty()) return null
+        val name = "osm-coach-fotos-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date()) + ".zip"
+        return runCatching {
+            val cv = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/zip")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/OSM Coach")
+            }
+            val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv) ?: return@runCatching null
+            ctx.contentResolver.openOutputStream(uri)?.use { os ->
+                java.util.zip.ZipOutputStream(os).use { z ->
+                    for (it in its) {
+                        val f = file(ctx.filesDir, it.key) ?: continue
+                        z.putNextEntry(java.util.zip.ZipEntry(Txt.key(it.name) + "_" + it.source + ".png"))
+                        z.write(f.readBytes()); z.closeEntry()
+                    }
+                }
+            }
+            name
+        }.getOrNull()
+    }
+
     private fun wikiFile(filesDir: File) = File(dir(filesDir), "_wiki.json")
     private fun wikiIdx(filesDir: File): JSONObject = runCatching { JSONObject(wikiFile(filesDir).readText()) }.getOrNull() ?: JSONObject()
 
@@ -414,8 +506,9 @@ object PhotoWeb {
             val wx = wikiIdx(ctx.filesDir)
             val now = System.currentTimeMillis()
             val apiOn = hasKey(ctx) && !blockedToday(ctx) && usedToday(ctx) < BUDGET
+            val blocked = noAuto(ctx.filesDir)
             val queue = candidatesAll(repo).filter { p ->
-                file(ctx.filesDir, p.nameKey) == null && now - (wx.optJSONObject(p.nameKey)?.optLong("at", 0L) ?: 0L) > WIKI_RETRY_MS &&
+                p.nameKey !in blocked && file(ctx.filesDir, p.nameKey) == null && now - (wx.optJSONObject(p.nameKey)?.optLong("at", 0L) ?: 0L) > WIKI_RETRY_MS &&
                     !(apiOn && needsTry(ctx.filesDir, ix, p.nameKey))   // a API vai primeiro enquanto ainda não tentou este jogador
             }.take(40)
             if (queue.isEmpty()) return

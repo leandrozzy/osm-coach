@@ -570,6 +570,8 @@ internal fun SettingsTab() {
             }
             Text("O app abre sozinho e processa o que leu. O OSM fica aberto em segundo plano: feche-o à mão se quiser (o app não consegue fechar outro app neste aparelho).", fontSize = 13.sp, color = C.MUTED)
         }
+        SectionLabel("Imagens", "Fotos dos jogadores, escudos dos clubes e bandeiras")
+        ImageManagerFold()
         var photoOn by remember { mutableStateOf(Settings.get(ctx, "web_photos", "1") == "1") }
         var pKey by remember { mutableStateOf(Settings.get(ctx, PhotoWeb.KEY, "")) }
         val pTick = rememberTick(3000L)
@@ -589,6 +591,7 @@ internal fun SettingsTab() {
             Text(PhotoWeb.statusText(pst), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 8.dp))
             // Wikipedia/Commons: quantos vieram e quem falta (escolha à mão, salva como as outras)
             val wr = rememberLoaded(0 to emptyList<PhotoWeb.Missing>(), pTick, UiBus.version) { PhotoWeb.wikiReport(ctx) }
+            val wrManual = rememberLoaded(0, pTick, UiBus.version) { PhotoWeb.items(ctx).count { it.source == "manual" } }
             var pickFor by remember { mutableStateOf<String?>(null) }
             val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
                 val k = pickFor; pickFor = null
@@ -603,7 +606,7 @@ internal fun SettingsTab() {
                     }
                 }
             }
-            Text("🌐 Wikipedia/Commons: ${wr.first} foto(s) pegas • ${wr.second.size} jogador(es) sem foto", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+            Text("🌐 Wikipedia/Commons: ${wr.first} foto(s) pegas • ✋ ${wrManual} inseridas à mão • ${wr.second.size} jogador(es) sem foto", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
             if (wr.second.isEmpty()) Text("✅ Todos os jogadores dos slots têm foto.", fontSize = 13.sp, color = C.MUTED)
             else Text("Toque em \"Escolher foto\" para pôr à mão (da galeria). Ela é salva como as outras e vale para os 4 slots.", fontSize = 13.sp, color = C.MUTED)
             for (m in wr.second.take(40)) {
@@ -681,6 +684,7 @@ internal fun SettingsTab() {
             Text(if (atlasCounts.first >= 150) "✅ Nacionalidades completas: o Elenco mostra o país de cada jogador." else if (atlasCounts.first > 0) "⚠ Faltam nacionalidades: role o filtro até o fim." else "Ainda não li o filtro de Nacionalidade.", fontSize = 13.sp, color = if (atlasCounts.first >= 150) C.OK else C.GOLD, modifier = Modifier.padding(top = 4.dp))
             Text(if (atlasCounts.second >= 80) "✅ Ligas lidas: o emblema aparece no cabeçalho do slot." else if (atlasCounts.second > 0) "⚠ Faltam ligas: role o filtro Liga até o fim." else "Ainda não li o filtro de Liga.", fontSize = 13.sp, color = if (atlasCounts.second >= 80) C.OK else C.GOLD, modifier = Modifier.padding(top = 2.dp))
         }
+        SectionLabel("Conhecimento e dados", "Base da web, diagnóstico e leitura")
         val exportScope = rememberCoroutineScope()
         var exportMsg by remember { mutableStateOf("") }
         var metaMsg by remember { mutableStateOf("") }
