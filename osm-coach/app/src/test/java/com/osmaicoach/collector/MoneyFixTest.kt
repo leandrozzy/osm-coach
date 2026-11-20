@@ -38,3 +38,11 @@ class MoneyFixTest {
         assertEquals(null, Parsers.timerSecs("18h"))
     }
 }
+
+class PlayerValueSanityTest {
+    @Test fun coinIconReadAsDigitKeepsOldValue() {
+        assertEquals("13,7M", Money.sanePlayerValue("13,7M", "913,7M"))
+        assertEquals("13,7M", Money.sanePlayerValue(null, "913,7M"))
+        assertEquals("14,1M", Money.sanePlayerValue("13,7M", "14,1M"))
+    }
+}

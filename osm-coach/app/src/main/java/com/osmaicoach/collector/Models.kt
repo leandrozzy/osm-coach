@@ -317,6 +317,22 @@ object Money {
 
     fun valid(s: String?): Boolean = parse(s) != null
 
+    fun sanePlayerValue(old: String?, new: String?): String? {
+        if (new == null) return old
+        val o = Money.parse(old); val n = Money.parse(new)
+        if (o != null && n != null && o > 0 && n > 0) {
+            val r = n / o
+            // salto de 8× ou mais (vírgula perdida OU ícone da moeda lido como dígito: "13,7M" → "913,7M", 20/11 Hudson-Odoi no S2): jogador não muda de valor assim
+            if (r >= 8.0 || r <= 0.125) return old
+        }
+        // 1ª leitura com valor absurdo para um jogador (≥250M com vírgula, ex.: "913,7M"): o 1º dígito é o ícone da moeda lido como número
+        if (o == null && n != null && n >= 250.0) {
+            Regex("^\\d(\\d{2}[,.]\\d{1,2}M)$", RegexOption.IGNORE_CASE).find(new.trim())?.let { return it.groupValues[1] }
+        }
+        return new
+    }
+
+
     private val reFind = Regex("(\\d{1,3}(?:[.,]\\d{1,2})?)\\s*([MKmk])(?![A-Za-z])")
 
     /** Acha dinheiro dentro de um token sujo pelo ícone da moeda (ex.: "©7,6M" -> "7,6M"). */

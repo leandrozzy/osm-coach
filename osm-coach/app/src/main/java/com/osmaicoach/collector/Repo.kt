@@ -2117,15 +2117,7 @@ class Repo(private val ctx: Context) {
     }
 
     /** Valor de jogador que muda ~10× de uma leitura para outra é vírgula perdida/ganha pelo OCR ("7,6M" ↔ "76M"): mantém o anterior. */
-    private fun sanePlayerValue(old: String?, new: String?): String? {
-        if (new == null) return old
-        val o = Money.parse(old); val n = Money.parse(new)
-        if (o != null && n != null && o > 0 && n > 0) {
-            val r = n / o
-            if (r in 8.0..12.5 || r in 0.08..0.125) return old
-        }
-        return new
-    }
+    private fun sanePlayerValue(old: String?, new: String?): String? = Money.sanePlayerValue(old, new)
 
     private suspend fun trackProgress(slot: Int, seen: List<String>, arrived: List<String>, now: Long) {
         guardEvoTeam(slot, now)
