@@ -130,6 +130,59 @@ class FramePipeline private constructor(private val ctx: Context) {
         dao.putPlan(PlanEntity(slot, "lineup", JSONObject().put("n", org.json.JSONArray(set.toList())).put("at", now).put("full", set.size >= 11).toString(), now))
     }
 
+    /**
+     * Rosto dos cartões do campo (Equipa inicial/Tática): o cartão traz a foto do jogador (ou uma silhueta azul quando o jogo não tem foto) acima do nome.
+     * Cada nome "9 LEÃO" é casado com UM jogador do meu elenco; o recorte (centro 0,069 acima do nome, 0,031×0,070) só vale se tiver tons de pele (a silhueta
+     * é só azul-ciano: warm 0,00 contra ≥0,25 nos rostos, medido num print) e for nítido (gradiente ≥4,2; quadro borrado dá ~3). Guarda o mais nítido em
+     * `photos/osm/<nameKey>.png`; é o plano B quando a API-Football não achou o jogador.
+     */
+    private suspend fun saveCardFaces(slot: Int, ocr: OcrResult, bmp: Bitmap) {
+        val rx = Regex("^(\\d{1,2})\\s+([\\p{L}][\\p{L}.' -]{2,})$")
+        val cards = ocr.lines.filter { it.yc in 0.15f..0.95f && it.xc in 0.08f..0.92f }.mapNotNull { l -> rx.find(l.text.trim())?.let { l to it.groupValues[2] } }
+        if (cards.size < 3) return
+        val mine = dao.playersOf(slot).filter { it.owner == "MY" }
+        if (mine.isEmpty()) return
+        val dir = PhotoWeb.osmDir(ctx.filesDir)
+        val qf = java.io.File(dir, "_q.json")
+        val q = runCatching { JSONObject(qf.readText()) }.getOrNull() ?: JSONObject()
+        var changed = false
+        for ((line, nm) in cards) {
+            val k = Txt.key(nm)
+            if (k.length < 3) continue
+            val p = mine.filter { it.nameKey == k || (k.length >= 4 && it.nameKey.length >= 4 && (it.nameKey.endsWith(k) || k.endsWith(it.nameKey))) || Txt.sim(it.nameKey, k) >= 0.85 }
+                .distinctBy { it.nameKey }.singleOrNull() ?: continue
+            val w = (0.031f * bmp.width).toInt(); val h = (0.070f * bmp.height).toInt()
+            if (w < 56 || h < 56) continue
+            val x = (line.xc * bmp.width - w / 2f).toInt(); val y = ((line.yc - 0.0693f) * bmp.height - h / 2f).toInt()
+            if (x < 0 || y < 0 || x + w > bmp.width || y + h > bmp.height) continue
+            val crop = Bitmap.createBitmap(bmp, x, y, w, h)
+            val px = IntArray(w * h); crop.getPixels(px, 0, w, 0, 0, w, h)
+            var warm = 0
+            val lum = FloatArray(w * h)
+            for (i in px.indices) {
+                val r = (px[i] shr 16) and 255; val g = (px[i] shr 8) and 255; val b = px[i] and 255
+                lum[i] = 0.299f * r + 0.587f * g + 0.114f * b
+                val yellow = g > 200 && b < 90   // cartão amarelo na ponta do cartão
+                if (r > b + 10 && r + g + b > 150 && !yellow) warm++
+            }
+            var gsum = 0f; var gn = 0
+            for (yy in 0 until h - 1) for (xx in 0 until w - 1) { val i = yy * w + xx; gsum += Math.abs(lum[i + 1] - lum[i]) + Math.abs(lum[i + w] - lum[i]); gn += 2 }
+            val grad = gsum / gn
+            if (warm.toFloat() / px.size < 0.15f || grad < 4.2f || grad <= q.optDouble(p.nameKey, 0.0)) { crop.recycle(); continue }
+            // sem fundo, sobre o mesmo fundo claro das fotos da API (120×120; a tela corta em círculo)
+            val sc = Bitmap.createScaledBitmap(crop, 120, 120, true)
+            val spx = IntArray(120 * 120); sc.getPixels(spx, 0, 120, 0, 0, 120, 120)
+            val cut = Bitmap.createBitmap(FaceCut.cutout(spx, 120), 120, 120, Bitmap.Config.ARGB_8888)
+            sc.recycle()
+            runCatching { java.io.File(dir, "${p.nameKey}.png").outputStream().use { cut.compress(Bitmap.CompressFormat.PNG, 100, it) } }.onSuccess {
+                q.put(p.nameKey, grad.toDouble()); changed = true
+                Diag.log("Rosto de ${p.name} recortado do cartão do OSM (nitidez ${"%.1f".format(java.util.Locale.US, grad)})")
+            }
+            cut.recycle(); crop.recycle()
+        }
+        if (changed) { runCatching { qf.writeText(q.toString()) }; UiBus.bump() }
+    }
+
     private suspend fun checkTactic(slot: Int, ocr: OcrResult, now: Long) {
         val f = repo.fieldMap(slot)
         runCatching {
@@ -1012,6 +1065,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             lastProcessed = h
             // campo com os 11 (Equipa inicial) pode cair em NOISE/OTHER: conta os cartões antes de descartar
             if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { scanLineup(sl, ocr, now) } }
+            if (type != ScreenType.NON_OSM) machine.current?.let { sl -> runCatching { saveCardFaces(sl, ocr, bmp) } }
             if (type == ScreenType.NOISE || type == ScreenType.NON_OSM) {
                 Diag.discarded.incrementAndGet()
                 Diag.log(if (type == ScreenType.NOISE) "Descartada: transição/tela vazia" else "Descartada: sem barra do OSM")

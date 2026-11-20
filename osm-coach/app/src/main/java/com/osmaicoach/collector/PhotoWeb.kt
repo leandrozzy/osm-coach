@@ -35,6 +35,12 @@ object PhotoWeb {
     fun dir(filesDir: File): File = File(filesDir, "photos").apply { mkdirs() }
     fun file(filesDir: File, nameKey: String): File? = File(dir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }
     fun bitmap(filesDir: File, nameKey: String): Bitmap? = file(filesDir, nameKey)?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+    /** Recortes do rosto tirados dos cartões do campo do OSM (plano B quando a API não achou o jogador). */
+    fun osmDir(filesDir: File): File = File(filesDir, "photos/osm").apply { mkdirs() }
+    fun osmBitmap(filesDir: File, nameKey: String): Bitmap? =
+        File(osmDir(filesDir), "$nameKey.png").takeIf { it.exists() && it.length() > 200 }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+    /** Foto para o Elenco: a da API; senão o recorte do cartão do OSM; senão null (a tela desenha a silhueta no mesmo estilo). */
+    fun bitmapAny(filesDir: File, nameKey: String): Bitmap? = bitmap(filesDir, nameKey) ?: osmBitmap(filesDir, nameKey)
     fun hasKey(ctx: Context) = Settings.get(ctx, KEY, "").trim().length >= 16
 
     // ------------------------------------------------------------------ escolha do jogador (pura, testada)
@@ -205,5 +211,72 @@ object PhotoWeb {
         for (k in ix.keys().asSequence().toList()) if (ix.optJSONObject(k)?.optString("s") != "ok") ix.remove(k)
         saveIdx(ctx.filesDir, ix)
         prefs(ctx).edit().remove("blocked").apply()
+    }
+}
+
+/**
+ * Recorte do rosto do cartão do OSM: tira o fundo azul-marinho (e a moldura/barras), mantém só a maior região do rosto e põe sobre o MESMO fundo claro das
+ * fotos da API-Football, para o Elenco ficar padronizado (a tela corta em círculo). Prototipado nos rostos de um print real (Sarr, Musiala, Van Dijk…).
+ */
+object FaceCut {
+    const val BG = 0xFFF3F5F9.toInt()
+
+    /** [px] = recorte já redimensionado [s]×[s]; devolve os pixels finais (opacos, rosto sobre [BG]). */
+    fun cutout(px: IntArray, s: Int): IntArray {
+        val bg = BooleanArray(s * s)
+        for (y in 0 until s) for (x in 0 until s) {
+            val c = px[y * s + x]
+            val r = (c shr 16) and 255; val g = (c shr 8) and 255; val b = c and 255
+            val lum = 0.299f * r + 0.587f * g + 0.114f * b
+            val navy = (b - r) > 20 && lum < 150f                     // fundo do cartão
+            val line = (g > r + 25 && g > b + 25) || (r > 180 && g > 150 && b < 110)   // moldura verde/amarela e barras
+            val dx = (x - s * 0.5f) / (s * 0.47f); val dy = (y - s * 0.5f) / (s * 0.54f)
+            bg[y * s + x] = navy || line || dx * dx + dy * dy > 1f
+        }
+        val keep = BooleanArray(s * s) { !bg[it] }
+        // maior região conectada
+        val used = BooleanArray(s * s)
+        var best: IntArray = IntArray(0)
+        val stack = IntArray(s * s)
+        for (start in 0 until s * s) {
+            if (!keep[start] || used[start]) continue
+            var sp = 0; val comp = ArrayList<Int>()
+            stack[sp++] = start; used[start] = true
+            while (sp > 0) {
+                val p = stack[--sp]; comp.add(p)
+                val y = p / s; val x = p % s
+                if (y > 0 && keep[p - s] && !used[p - s]) { used[p - s] = true; stack[sp++] = p - s }
+                if (y < s - 1 && keep[p + s] && !used[p + s]) { used[p + s] = true; stack[sp++] = p + s }
+                if (x > 0 && keep[p - 1] && !used[p - 1]) { used[p - 1] = true; stack[sp++] = p - 1 }
+                if (x < s - 1 && keep[p + 1] && !used[p + 1]) { used[p + 1] = true; stack[sp++] = p + 1 }
+            }
+            if (comp.size > best.size) best = comp.toIntArray()
+        }
+        val face = BooleanArray(s * s); for (p in best) face[p] = true
+        // buracos: tudo que não é alcançado pela borda sem cruzar o rosto vira rosto
+        val out = BooleanArray(s * s); var sp = 0
+        fun seed(p: Int) { if (!face[p] && !out[p]) { out[p] = true; stack[sp++] = p } }
+        for (i in 0 until s) { seed(i); seed((s - 1) * s + i); seed(i * s); seed(i * s + s - 1) }
+        while (sp > 0) {
+            val p = stack[--sp]; val y = p / s; val x = p % s
+            if (y > 0) seed(p - s); if (y < s - 1) seed(p + s); if (x > 0) seed(p - 1); if (x < s - 1) seed(p + 1)
+        }
+        var a = FloatArray(s * s) { if (!out[it]) 1f else 0f }
+        repeat(2) {   // borda suave (caixa 3×3)
+            val n = FloatArray(s * s)
+            for (y in 0 until s) for (x in 0 until s) {
+                var sum = 0f
+                for (dy in -1..1) for (dx in -1..1) sum += a[(y + dy).coerceIn(0, s - 1) * s + (x + dx).coerceIn(0, s - 1)]
+                n[y * s + x] = sum / 9f
+            }
+            a = n
+        }
+        val res = IntArray(s * s)
+        for (i in 0 until s * s) {
+            val c = px[i]; val k = a[i]
+            fun mix(sh: Int) = (((c shr sh) and 255) * k + ((BG shr sh) and 255) * (1f - k)).toInt().coerceIn(0, 255)
+            res[i] = (255 shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
+        }
+        return res
     }
 }

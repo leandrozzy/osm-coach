@@ -478,13 +478,22 @@ internal fun SlotCalendar(slot: Int, d: SlotData) {
 }
 
 
-/** Foto REAL do jogador (API-Football, guardada em `photos/`) em círculo; some quando ainda não há foto (a linha continua igual). */
+/**
+ * Foto do jogador em círculo, igual para todos: a REAL da API-Football; senão o rosto recortado do cartão do OSM (campo da Tática, só se nítido);
+ * senão a silhueta (como o OSM mostra quem não tem foto), no mesmo estilo claro das fotos da API.
+ */
 @Composable
 internal fun PlayerPhoto(nameKey: String, size: Dp) {
     val ctx = LocalContext.current
     val ver = UiBus.version
-    val img = remember(nameKey, ver) { PhotoWeb.bitmap(ctx.filesDir, nameKey)?.asImageBitmap() }
-    if (img != null) {
-        Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.padding(end = 10.dp).size(size).clip(androidx.compose.foundation.shape.CircleShape))
+    val img = remember(nameKey, ver) { PhotoWeb.bitmapAny(ctx.filesDir, nameKey)?.asImageBitmap() }
+    val m = Modifier.padding(end = 10.dp).size(size).clip(androidx.compose.foundation.shape.CircleShape)
+    if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = m)
+    else androidx.compose.foundation.Canvas(m) {
+        val w = this.size.width; val h = this.size.height
+        drawRect(androidx.compose.ui.graphics.Color(0xFFF3F5F9))
+        val ink = androidx.compose.ui.graphics.Color(0xFFB4BDD0)
+        drawCircle(ink, radius = w * 0.20f, center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.40f))
+        drawOval(ink, topLeft = androidx.compose.ui.geometry.Offset(w * 0.16f, h * 0.66f), size = androidx.compose.ui.geometry.Size(w * 0.68f, h * 0.70f))
     }
 }
