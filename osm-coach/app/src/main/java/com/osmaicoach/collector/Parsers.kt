@@ -403,6 +403,7 @@ object Parsers {
             (if (name == null) nameless else players).add(
                 PlayerRead(
                     name = name ?: "",
+                    rawName = if (name == null) rawName else null,
                     age = intTok(a),
                     posCode = posTok?.text?.trim()?.uppercase(),
                     cat = cat,

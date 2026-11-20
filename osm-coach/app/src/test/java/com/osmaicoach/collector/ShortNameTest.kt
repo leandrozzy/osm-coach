@@ -20,4 +20,9 @@ class ShortNameTest {
         val ex = Parsers.squad(Fx.ocr(*rows.toTypedArray()), null)
         assertEquals(listOf("Ibañez", "Ba"), ex.players.map { it.name })
     }
+
+    @Test fun digitForLetterInShortName() {
+        assertEquals("Ba", PlayerName.clean("8a", 2))
+        assertNull(PlayerName.clean("8a"))
+    }
 }

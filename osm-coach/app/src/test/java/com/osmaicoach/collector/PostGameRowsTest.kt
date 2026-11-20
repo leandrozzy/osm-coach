@@ -16,7 +16,9 @@ class PostGameRowsTest {
         assertEquals(true, rows[2].hit)
         assertEquals(false, rows[1].hit)
         assertNull(rows[0].hit)
-        assertTrue(rows[1].verdict.contains("ABAIXO"))
-        assertTrue(rows[0].verdict.contains("aguardando"))
+        assertTrue(rows[1].verdict.contains("PIOR"))
+        assertTrue(rows[2].hitText.contains("ACERTOU"))
+        assertTrue(rows[1].hitText.contains("ERROU"))
+        assertTrue(rows[0].verdict.contains("Aguardando"))
     }
 }

@@ -30,12 +30,27 @@ internal data class PostRow(
         val pts = when (r) { "V" -> 3.0; "E" -> 1.0; else -> 0.0 }
         return pts - exp
     }
-    val verdict: String get() = when {
-        result == null -> "⏳ aguardando o resultado"
-        vsExpected == null -> if (result == "V") "✅ venceu" else if (result == "E") "➖ empatou" else "❌ perdeu"
-        vsExpected!! >= 0.6 -> "✅ a tática rendeu ACIMA do previsto"
-        vsExpected!! <= -0.9 -> "❌ a tática rendeu ABAIXO do previsto"
-        else -> "➖ como previsto"
+    val resultWord: String get() = when (result) { "V" -> "vitória"; "E" -> "empate"; "D" -> "derrota"; else -> "" }
+    private fun word(r: String?) = when (r) { "V" -> "vitória"; "E" -> "empate"; else -> "derrota" }
+    private fun pOf(r: String?): Int? = when (r) { "V" -> predW; "E" -> predE; "D" -> predD; else -> null }
+    /** Frase simples: o app acertou o resultado mais provável? */
+    val hitText: String get() {
+        val f = fav; val r = result
+        if (f == null) return "O app não guardou a previsão deste jogo."
+        if (r == null) return "O app previa ${word(f)} como mais provável (${pOf(f)}%). Falta ler o Resultado."
+        return if (f == r) "✅ ACERTOU: previu ${word(f)} (${pOf(f)}%) e foi ${word(r)}."
+        else "❌ ERROU: previu ${word(f)} (${pOf(f)}%), mas foi ${word(r)} (o app dava só ${pOf(r)}% para isso)."
+    }
+    /** Frase simples: a tática funcionou? Compara com o que era esperado. */
+    val verdict: String get() {
+        val r = result ?: return "⏳ Aguardando você ler o Resultado do jogo."
+        val v = vsExpected ?: return if (r == "V") "👍 Ganhou." else if (r == "E") "➖ Empatou." else "👎 Perdeu."
+        return when {
+            v >= 0.6 -> "👍 Foi MELHOR que o esperado: ${word(r)} num jogo em que o app dava só ${pOf(r)}% para isso."
+            v <= -0.9 -> "👎 Foi PIOR que o esperado: o app dava ${predW}% de vitória e deu ${word(r)}. Vale rever essa tática."
+            r == "D" -> "➖ Perdeu, mas já era esperado (o app dava ${predD}% de derrota): não dá para culpar a tática."
+            else -> "➖ Dentro do esperado."
+        }
     }
 }
 
@@ -54,48 +69,44 @@ internal fun postRows(logs: List<JSONObject>): List<PostRow> = logs.mapNotNull {
     )
 }.sortedByDescending { it.round }
 
-/** Aba "Histórico" do slot: resumo no topo + um cartão por jogo (resultado lido, previsão do app, tática usada, veredito). Vale para cada slot. */
+/** Aba "Histórico" do slot: resumo em frases simples no topo + um cartão por jogo. Vale para cada slot. */
 @Composable
 internal fun SlotHistory(slot: Int, d: SlotData) {
     val rows = postRows(d.logsAll.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() })
     val done = rows.filter { it.result != null }
     val graded = done.filter { it.hit != null }
     if (rows.isEmpty()) {
-        EmptyState("📒", "Ainda sem jogos", "Gere a tática antes do jogo e leia o Resultado depois: cada jogo aparece aqui com a previsão do app, a tática usada e o veredito.")
+        EmptyState("📒", "Ainda sem jogos", "Gere a tática antes do jogo e leia o Resultado depois: cada jogo aparece aqui com o que o app previa, o que aconteceu e se a tática funcionou.")
         return
     }
     val v = done.count { it.result == "V" }; val e = done.count { it.result == "E" }; val l = done.count { it.result == "D" }
     val pts = v * 3 + e
     val pct = if (done.isEmpty()) 0 else pts * 100 / (done.size * 3)
     val hits = graded.count { it.hit == true }
-    val hitPct = if (graded.isEmpty()) null else hits * 100 / graded.size
-    val above = done.count { (it.vsExpected ?: 0.0) >= 0.6 }
-    val below = done.count { (it.vsExpected ?: 0.0) <= -0.9 }
+    val better = done.count { (it.vsExpected ?: 0.0) >= 0.6 }
+    val worse = done.count { (it.vsExpected ?: 0.0) <= -0.9 }
+    val same = graded.size - better - worse
     val deviated = done.count { it.deviated }
     val pending = rows.count { it.result == null }
 
-    // ---- resumo
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(16.dp)) {
         Text("📒 Resumo do S$slot", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("🏆", "${v}V ${e}E ${l}D", "${done.size} jogo(s)", C.PRIMARY, Modifier.weight(1f))
-            StatTile("⭐", "$pct%", "aproveitamento", if (pct >= 60) C.OK else if (pct >= 40) C.GOLD else C.BAD, Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("🔮", hitPct?.let { "$it%" } ?: "—", if (graded.isEmpty()) "previsão (sem dados)" else "previsão certa ($hits/${graded.size})", if ((hitPct ?: 0) >= 50) C.OK else C.GOLD, Modifier.weight(1f))
-            StatTile("🎯", "$above↑ $below↓", "tática acima/abaixo do previsto", C.PRIMARY, Modifier.weight(1f))
-        }
+        Text("O que aconteceu", fontSize = 13.sp, color = C.GOLD, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+        Text("Em ${done.size} jogo(s): $v vitória(s), $e empate(s), $l derrota(s). Você fez $pts de ${done.size * 3} pontos possíveis ($pct%).", fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
+        Text("O app acertou?", fontSize = 13.sp, color = C.GOLD, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
         Text(
-            buildString {
-                if (pending > 0) append("⏳ $pending jogo(s) esperando o Resultado. ")
-                if (deviated > 0) append("🛠 Em $deviated jogo(s) você jogou diferente do app. ")
-                append("Veredito = pontos reais contra os esperados pela previsão; com poucos jogos é sinal fraco (sorte conta).")
-            },
-            fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp)
+            if (graded.isEmpty()) "Ainda não dá para dizer: nenhum jogo tem previsão guardada."
+            else "Acertou o resultado em $hits de ${graded.size} jogo(s) (${hits * 100 / graded.size}%). Chute puro acertaria ~33%.",
+            fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp)
         )
+        if (graded.isNotEmpty()) {
+            Text("A tática funcionou?", fontSize = 13.sp, color = C.GOLD, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+            Text("Melhor que o esperado em $better jogo(s), pior em $worse, dentro do esperado em $same. Poucos jogos = sinal fraco (sorte conta).", fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        if (pending > 0) Text("⏳ $pending jogo(s) esperando você ler o Resultado.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+        if (deviated > 0) Text("🛠 Em $deviated jogo(s) você jogou diferente do que o app indicou.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }
 
-    // ---- jogo a jogo
     Title("Jogo a jogo")
     for (r in rows.take(30)) {
         val col = when (r.result) { "V" -> C.WIN; "D" -> C.LOSS; "E" -> C.DRAW; else -> C.MUTED }
@@ -106,28 +117,22 @@ internal fun SlotHistory(slot: Int, d: SlotData) {
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("J${r.round} • ${r.rival}", fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("Rodada ${r.round} • ${r.rival}", fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(
-                        (if (r.home == true) "casa" else if (r.home == false) "fora" else "") + (if (r.human == true) " • humano" else if (r.human == false) " • CPU" else ""),
-                        fontSize = 12.sp, color = C.MUTED
+                        (if (r.result != null) r.resultWord.replaceFirstChar { it.uppercase() } + (if (r.score.isNotBlank()) " ${r.score}" else "") else "Ainda não jogado/lido") +
+                            (if (r.home == true) " • em casa" else if (r.home == false) " • fora" else "") + (if (r.human == true) " • humano" else if (r.human == false) " • CPU" else ""),
+                        fontSize = 12.5.sp, color = col, fontWeight = FontWeight.SemiBold
                     )
                 }
-                Text(if (r.result != null) (r.score.ifBlank { "—" }) else "⏳", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = col)
             }
-            Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                HistLine("🔮 Previsão", if (r.predW != null) "V ${r.predW}% • E ${r.predE}% • D ${r.predD}%" + (if (r.hit == true) "  ✓ acertou" else if (r.hit == false) "  ✗ errou (esperava ${r.fav})" else "") else "não guardada neste jogo")
-                HistLine("🧩 Tática", "${r.formation} • ${r.style}" + (if (r.deviated) "  🛠 você jogou diferente" + (r.genFormation?.let { " (app: $it)" } ?: "") else ""))
-                HistLine("📝 Veredito", r.verdict)
-            }
+            if (r.predW != null) Text("Previsão do app: vitória ${r.predW}% • empate ${r.predE}% • derrota ${r.predD}%", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+            Text(r.hitText, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+            Text(r.verdict, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
+            Text(
+                "Tática usada: ${r.formation} • ${r.style}" + (if (r.deviated) " (você trocou" + (r.genFormation?.let { "; o app indicou $it" } ?: "") + ")" else ""),
+                fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
+            )
         }
     }
     if (rows.size > 30) Text("Mostrando os 30 jogos mais recentes.", fontSize = 12.sp, color = C.MUTED)
-}
-
-@Composable
-private fun HistLine(label: String, text: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text(label, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.width(96.dp))
-        Text(text, fontSize = 13.sp, modifier = Modifier.weight(1f))
-    }
 }

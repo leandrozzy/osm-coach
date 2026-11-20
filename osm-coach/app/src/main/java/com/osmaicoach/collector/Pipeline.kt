@@ -771,6 +771,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             crop.recycle(); big.recycle()
             val nm = PlayerName.clean(r.tokens.filter { Txt.letters(it.text) >= 1 && it.text.trim().toIntOrNull() == null }.sortedBy { it.l }.joinToString(" ") { it.text.trim() }, 2)
             if (nm != null && Txt.key(nm) !in have) add.add(p.copy(name = nm))
+            else Diag.log("Plantel: linha sem nome legível (lido '${p.rawName ?: ""}', recorte '${nm ?: ""}', idade ${p.age}, força ${p.strength})")
         }
         if (add.isEmpty()) return ex
         Diag.log("Plantel: ${add.size} nome(s) refeito(s) por recorte: " + add.joinToString { it.name })

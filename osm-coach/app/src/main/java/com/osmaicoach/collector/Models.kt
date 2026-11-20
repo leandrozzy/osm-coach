@@ -63,6 +63,8 @@ data class PlayerRead(
     /** Assinatura rica da bandeira (`PixelProbe.flagRich`): reconhece o país pelo Atlas. */
     val natRich: String? = null,
     /** Centro da bandeira na captura (0..1): o recorte NÍTIDO sai da imagem inteira, não da miniatura de análise. */
+    /** Texto cru do nome quando foi recusado (para o log achar a causa). */
+    val rawName: String? = null,
     val natX: Float? = null,
     val natY: Float? = null
 )
@@ -675,7 +677,9 @@ object PlayerName {
         var t = raw.trim()
         for (p in PHRASES) t = p.replace(t, " ")
         val out = ArrayList<String>()
-        for (w0 in t.split(Regex("\\s+")).filter { it.isNotBlank() }) {
+        for (w00 in t.split(Regex("\\s+")).filter { it.isNotBlank() }) {
+            // nome curto do Plantel com 1ª letra lida como número ("8a" no lugar de "Ba", "0z" no lugar de "Oz"): só com minLetters<3 (linha com força e valor)
+            val w0 = if (minLetters < 3 && Regex("^[80][a-z]{1,4}$").matches(w00)) (if (w00[0] == '8') "B" else "O") + w00.substring(1) else w00
             // "189GOLAubameyang": número e rótulo em maiúsculas colados na frente do nome
             val w = Regex("^\\d+[A-Z]{2,}(?=[A-Z][a-z])").replace(w0, "")
             if (w.any { it.isDigit() }) continue
