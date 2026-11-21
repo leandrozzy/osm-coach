@@ -149,11 +149,9 @@ object ArtsGpt {
                 sb.append("Jornal do $team. Resultado: $res de $team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}" + (if (mineHome == true) " (em casa)" else if (mineHome == false) " (fora)" else "") + ". Clube: $club. Campanha: ${v}V ${e}E ${d}D.\n")
                 val ourGoals = shown.filter { it.third == true }; val theirGoals = shown.filter { it.third == false }
                 fun fmt(l: List<Triple<String?, String, Boolean?>>) = l.joinToString("; ") { (it.first?.let { mm -> "$mm' " } ?: "") + it.second }
-                val missMine = (m.scoreMine ?: 0) - ourGoals.size; val missOpp = (m.scoreOpp ?: 0) - theirGoals.size
-                if ((m.scoreMine ?: 0) > 0) sb.append("Gols do $team (${m.scoreMine}): " + (if (ourGoals.isEmpty()) "autores não lidos" else fmt(ourGoals)) + (if (missMine > 0) "; mais $missMine gol(s) com autor NÃO informado" else "") + ".\n")
-                if ((m.scoreOpp ?: 0) > 0) sb.append("Gols do $opp (${m.scoreOpp}): " + (if (theirGoals.isEmpty()) "autores não lidos" else fmt(theirGoals)) + (if (missOpp > 0) "; mais $missOpp gol(s) com autor NÃO informado" else "") + ".\n")
-                if (missMine > 0 || missOpp > 0) sb.append("Cite TODOS os autores informados e escreva que os demais gols não tiveram autor informado, ou chame os citados de destaques do jogo; nunca invente nomes.\n")
-                else if (shown.size > 1) sb.append("Cite TODOS os autores de gol acima (nenhum pode ficar de fora).\n")
+                if (ourGoals.isNotEmpty()) sb.append("Autores dos gols do $team: " + fmt(ourGoals) + ".\n")
+                if (theirGoals.isNotEmpty()) sb.append("Autores dos gols do $opp: " + fmt(theirGoals) + ".\n")
+                if (shown.isNotEmpty()) sb.append("Cite TODOS os autores informados acima como destaques do jogo. Não escreva nada sobre gols sem autor informado: o placar já mostra o total.\n")
                 sb.append(when (m.result) {
                     "V" -> "Tom: festa e orgulho; torcida e jogadores comemorando.\n"
                     "D" -> "Tom: recuperação, \"vamos melhorar\", jogadores unidos, sem humilhação.\n"
