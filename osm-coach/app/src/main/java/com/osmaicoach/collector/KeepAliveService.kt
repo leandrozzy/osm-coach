@@ -55,6 +55,7 @@ class KeepAliveService : Service() {
                 runCatching { Coins.refreshIfStale(applicationContext) }
                 runCatching { WebKnow.refreshIfStale(applicationContext) }
                 runCatching { PhotoWeb.run(applicationContext) }
+                runCatching { GptGuide.refreshIfStale(applicationContext) }
                 delay(60_000L)
             }
         }

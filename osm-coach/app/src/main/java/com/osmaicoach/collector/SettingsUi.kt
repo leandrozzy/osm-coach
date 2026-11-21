@@ -570,6 +570,8 @@ internal fun SettingsTab() {
             }
             Text("O app abre sozinho e processa o que leu. O OSM fica aberto em segundo plano: feche-o à mão se quiser (o app não consegue fechar outro app neste aparelho).", fontSize = 13.sp, color = C.MUTED)
         }
+        SectionLabel("Artes e ChatGPT", "Guia semanal para o Projeto e link da conversa")
+        GptGuideFold()
         SectionLabel("Imagens", "Fotos dos jogadores, escudos dos clubes e bandeiras")
         ImageManagerFold()
         var photoOn by remember { mutableStateOf(Settings.get(ctx, "web_photos", "1") == "1") }
@@ -1018,3 +1020,32 @@ internal fun LearnedCard(m: Learned.Model?) {
     }
 }
 
+
+
+@Composable
+internal fun GptGuideFold() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val tick = rememberTick(5000L)
+    val st = rememberLoaded(GptGuide.Status(0, 0, false), tick, UiBus.version) { GptGuide.status(ctx) }
+    var link by remember { mutableStateOf(ArtsGpt.link(ctx)) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val age = if (st.at == 0L) "ainda não gerado" else {
+        val d = (System.currentTimeMillis() - st.at) / 86400000L
+        if (d <= 0) "atualizado hoje" else "atualizado há $d dia(s)"
+    }
+    Fold("🤖", "Guia para o ChatGPT", if (st.at == 0L) "novo" else if (st.changedSinceSent) "reenviar" else "em dia", startOpen = true) {
+        Text("O guia é um arquivo de texto com tudo que o app leu e serve para as imagens: clubes (nome do jogo → nome real), ligas, seu elenco, melhores do rival e jogos recentes. " +
+            "O app o atualiza sozinho 1 vez por semana. Suba no Projeto do ChatGPT (Arquivos do projeto) e reenvie quando aparecer \"reenviar\".", fontSize = 13.sp, color = C.MUTED)
+        Text(age + (if (st.clubs > 0) " • ${st.clubs} clubes" else "") + (if (st.at > 0L) (if (st.changedSinceSent) " • 🆕 mudou desde o último envio" else " • ✅ já enviado") else ""), fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp))
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.OutlinedButton(onClick = { busy = true; scope.launch { val ok = withContext(kotlinx.coroutines.Dispatchers.IO) { GptGuide.refresh(ctx) }; msg = if (ok) "Guia atualizado." else "Ainda não há dados lidos dos slots."; busy = false } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("🔄 Atualizar", fontSize = 12.5.sp) }
+            androidx.compose.material3.OutlinedButton(onClick = { busy = true; scope.launch { msg = withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { GptGuide.share(ctx) }.getOrElse { "Não consegui enviar." } }; busy = false } }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("📤 Enviar ao ChatGPT", fontSize = 12.5.sp) }
+        }
+        androidx.compose.material3.OutlinedButton(onClick = { GptGuide.copyInstructions(ctx); msg = "Instruções copiadas: cole em \"Instruções\" do Projeto." }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("📋 Copiar instruções do Projeto", fontSize = 12.5.sp) }
+        Text("Link do Projeto ou da conversa (o botão \"ChatGPT\" da aba Artes abre este link):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
+        androidx.compose.material3.OutlinedTextField(value = link, onValueChange = { link = it; ArtsGpt.setLink(ctx, it) }, singleLine = true, placeholder = { Text("https://chatgpt.com/g/…") }, modifier = Modifier.fillMaxWidth())
+        msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
+    }
+}

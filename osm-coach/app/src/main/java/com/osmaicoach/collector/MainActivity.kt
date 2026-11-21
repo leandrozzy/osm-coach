@@ -164,6 +164,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         runCatching { WebKnow.refreshIfStale(applicationContext) }
+        runCatching { GptGuide.refreshIfStale(applicationContext) }
         AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { PhotoWeb.run(applicationContext) } }
         super.onResume()
         AppVisible.resumed = true
