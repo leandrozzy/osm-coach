@@ -258,4 +258,19 @@ class LigaBatalhaTest {
         assertEquals(3, SlotWidget.hero(listOf(rows[3], rows[2]))!!.slot)       // sem horário confirmado: primeiro slot com clube
         assertNull(SlotWidget.hero(listOf(rows[3])))
     }
+
+    private fun sum(ready: Boolean = false, stale: Boolean = false, gaps: Boolean = false, mounted: Boolean = false) =
+        SlotSummary(slot = 3, title = "S3", known = true, competition = null, compType = null, roundDone = null, roundTotal = null, rival = null, human = null, pct = 100, updated = 0L,
+            tacticReady = ready, tacticStale = stale, rivalGaps = gaps, mounted = mounted)
+
+    @Test fun widgetStatusFollowsSameRuleAsTodayCard() {
+        val now = 100L * 3600_000L; val kick = now + 3_600_000L
+        val f = mapOf(K.TEAM to sf("Red Bull Bragantino", now), K.RIVAL_TEAM to sf("Atlético Paranaense", now), K.MATCH_AT to sf(kick.toString(), now))
+        // rival lido e tática ainda não gerada: NÃO diz "aguardando leitura do rival"
+        assertTrue(SlotWidget.buildRow(3, f, false, null, null, now, sum()).short.contains("gerando a tática"))
+        assertTrue(SlotWidget.buildRow(3, f, false, null, null, now, sum(gaps = true)).short.contains("reler Pré-jogo"))
+        val ok = SlotWidget.buildRow(3, f, true, null, null, now, sum(ready = true, mounted = true))
+        assertTrue(ok.short.contains("pronta e montada")); assertEquals(SlotWidget.STATE_OK, ok.state); assertEquals(4, ok.tab)
+        assertEquals(SlotWidget.STATE_WAIT, SlotWidget.buildRow(3, f, true, null, null, now, sum(ready = true, stale = true)).state)   // tática velha não é "pronta"
+    }
 }

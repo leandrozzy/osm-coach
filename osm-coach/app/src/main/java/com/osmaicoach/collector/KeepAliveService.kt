@@ -56,6 +56,7 @@ class KeepAliveService : Service() {
                 runCatching { WebKnow.refreshIfStale(applicationContext) }
                 runCatching { PhotoWeb.run(applicationContext) }
                 runCatching { GptGuide.refreshIfStale(applicationContext) }
+                runCatching { SlotWidget.attach(applicationContext); SlotWidget.requestRefresh() }   // contagem regressiva e dado antigo do widget
                 delay(60_000L)
             }
         }

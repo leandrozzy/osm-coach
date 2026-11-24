@@ -42,7 +42,7 @@ object SlotWidget {
     private fun fmt(t: Long) = HOUR.format(Date(t))
 
     fun buildRow(
-        slot: Int, f: Map<String, StoredField>, tacticReady: Boolean, lastResult: String?, battleAgg: String?, now: Long
+        slot: Int, f: Map<String, StoredField>, tacticReady: Boolean, lastResult: String?, battleAgg: String?, now: Long, sum: SlotSummary? = null
     ): Row {
         val team = f[K.TEAM]?.value?.takeIf { FieldMerge.known(it) } ?: f[K.HUB_TITLE]?.value?.takeIf { FieldMerge.known(it) }
         val state = f[K.SLOT_STATE]?.value
@@ -63,9 +63,22 @@ object SlotWidget {
         }
         if (battleAgg != null) status += " • ⚔ $battleAgg"
         status += " • " + (if (stale) "⚠ antigo, $readTxt" else readTxt)
-        val tab = when { battle && at == null -> 0; at != null && tacticReady -> 4; at != null -> 1; else -> 0 }
-        val st = when { stale -> STATE_OLD; at != null && tacticReady -> STATE_OK; else -> STATE_WAIT }
-        val statusShort = when {
+        val tab = when { battle && at == null -> 0; at != null && (sum?.let { it.tacticReady && !it.tacticStale } ?: tacticReady) -> 4; at != null -> 1; else -> 0 }
+        val ready = if (sum != null) sum.tacticReady && !sum.tacticStale else tacticReady
+        val st = when { stale -> STATE_OLD; at != null && ready -> STATE_OK; else -> STATE_WAIT }
+        val inWindow = at != null && at - now <= TACTIC_WINDOW
+        val statusShort = if (sum != null) when {
+            sum.needsResult -> "registrar o resultado do jogo"
+            sum.rivalChanged.isNotEmpty() -> "rival mudou: revisar a tática"
+            at != null && sum.tacticReady && !sum.tacticStale && sum.mountDiff.isNotEmpty() -> "tática pronta • ajustar no OSM"
+            at != null && sum.tacticReady && !sum.tacticStale && sum.mounted -> "tática pronta e montada"
+            at != null && sum.tacticReady && !sum.tacticStale -> "tática pronta • falta montar no OSM"
+            inWindow && (sum.tacticStale || sum.rivalGaps) -> "reler Pré-jogo e Análise do rival"
+            inWindow -> "rival lido • gerando a tática"
+            at != null -> "tática só nas 8 h antes"
+            lastResult != null -> "último: $lastResult"
+            else -> "aguardando leitura"
+        } else when {
             at != null && tacticReady -> "tática pronta"
             at != null && at - now <= TACTIC_WINDOW -> "aguardando leitura do rival"
             at != null -> "tática só nas 8 h antes"
@@ -79,6 +92,7 @@ object SlotWidget {
 
     suspend fun loadRows(ctx: Context, now: Long = System.currentTimeMillis()): List<Row> {
         val repo = Repo(ctx)
+        val today = runCatching { loadToday(ctx) }.getOrNull()
         return (1..4).map { s ->
             runCatching {
                 val f = repo.fieldMap(s)
@@ -90,7 +104,7 @@ object SlotWidget {
                 val agg = if (f[K.COMP_TYPE]?.value == "Batalha") repo.dao.plan(s, "battle")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
                     ?.let { Battle.state(it, null, repo.setting(Battle.SETTING, Battle.DEFAULT_TEAM)) }
                     ?.takeIf { it.aggA != null }?.let { st -> if (st.mine == "B") "${st.aggB}×${st.aggA}" else "${st.aggA}×${st.aggB}" } else null
-                buildRow(s, f, ready, last, agg, now)
+                buildRow(s, f, ready, last, agg, now, today?.slots?.firstOrNull { it.slot == s })
             }.getOrElse { Row(s, "S$s · sem dados", "", "", false, 0, null) }
         }
     }
@@ -209,16 +223,22 @@ object SlotWidget {
     }
 
     @Volatile private var appCtx: Context? = null
-    @Volatile private var lastRefresh = 0L
+    @Volatile private var pending = false
     fun attach(ctx: Context) { appCtx = ctx.applicationContext }
 
-    /** Chamado quando a captura grava algo (via `UiBus.bump`): no máx. 1× a cada 5 s e só se houver widget na tela inicial. */
+    /**
+     * Chamado quando a captura grava algo (via `UiBus.bump`) e a cada minuto pelo monitor: agrupa as mudanças e atualiza 3 s DEPOIS da última
+     * (antes um limite fixo descartava a última leitura e o widget ficava com o status velho).
+     */
     fun requestRefresh() {
         val c = appCtx ?: return
-        val now = System.currentTimeMillis()
-        if (now - lastRefresh < 5000L) return
-        lastRefresh = now
-        AppScope.scope.launch(Dispatchers.IO) { runCatching { update(c) } }
+        if (pending) return
+        pending = true
+        AppScope.scope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(3000L)
+            pending = false
+            runCatching { update(c) }
+        }
     }
 }
 
