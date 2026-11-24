@@ -247,6 +247,7 @@ object Director {
         repo.dao.tacticLogs(slot).mapNotNull { p ->
             runCatching {
                 val j = JSONObject(p.json)
+                if (!PlayedTactic.attributable(j)) return@runCatching null   // tática jogada não confirmada: não atribui o resultado à sugerida
                 HistRow(
                     j.getString("formation"), j.optString("playStyle"), if (j.isNull("result")) null else j.optString("result"),
                     if (j.isNull("human")) null else j.optBoolean("human"), if (j.isNull("home")) null else j.optBoolean("home"),
@@ -311,7 +312,7 @@ object Director {
         (1..4).flatMap { s ->
             repo.dao.tacticLogs(s).mapNotNull { p ->
                 runCatching { JSONObject(p.json).also { it.put("genAt", p.at); if (p.kind.startsWith("tlog_X")) it.put("archived", true) } }.getOrNull()
-            }
+            }.filter { PlayedTactic.attributable(it) }
         }
 
     /** Conhecimento dos seus jogos contra humanos + a lição da IA do último jogo deste slot (vale por poucos jogos). */
@@ -368,7 +369,7 @@ object Director {
     /** Jogos do slot para o treinador: táticas usadas + análises do jogo lidas. */
     suspend fun coachGames(repo: Repo, slot: Int): List<Coach.Game> = Coach.games(
         // só os jogos da competição atual (os arquivados "tlog_X…" continuam no aprendizado da IA pelos 4 slots)
-        repo.dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() },
+        repo.dao.tacticLogs(slot).filter { it.kind.startsWith("tlog_R") }.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }.filter { PlayedTactic.attributable(it) },
         repo.dao.matchReports(slot).mapNotNull { p ->
             runCatching { JSONObject(p.json).also { j -> if (!j.has("round")) p.kind.removePrefix("mr_R").toIntOrNull()?.let { j.put("round", it) } } }.getOrNull()
         }
@@ -1029,6 +1030,7 @@ object Director {
         for (p in repo.dao.tacticLogs(slot)) {
             val j = try { JSONObject(p.json) } catch (e: Exception) { continue }
             if (j.optString("result") != "D") continue
+            if (!PlayedTactic.attributable(j)) continue
             if (Txt.sim(Txt.key(j.optString("rival")), rival) < 0.85) continue
             val k = Formations.base(j.optString("formation")) + "|" + (Osm.style(j.optString("playStyle")) ?: "")
             out[k] = (out[k] ?: 0) + 1

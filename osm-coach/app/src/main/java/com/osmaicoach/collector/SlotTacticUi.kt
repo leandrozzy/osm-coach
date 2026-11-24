@@ -621,6 +621,7 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
             OsmDots(2, if (offside == "Sim") 1 else 0, Modifier.padding(top = 4.dp))
         }
     }
+    PlayedTable(slot, j)
     Spacer(Modifier.height(8.dp))
     GenPanel("tactic_ai", slot, "🤖 Consultar a IA de novo") { startGeneration(ctx, "tactic_ai", slot) }
 

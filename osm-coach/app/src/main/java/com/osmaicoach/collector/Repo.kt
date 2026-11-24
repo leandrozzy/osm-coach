@@ -1817,27 +1817,22 @@ class Repo(private val ctx: Context) {
             val home = mineHome == mineSide
             return if (home) pr.first else pr.second
         }
-        // o que foi JOGADO de verdade: a tática montada no OSM (tela de Tática, mesma rodada) e a formação que o Resultado mostra.
-        // Sem isso, derrota com tática trocada à mão era atribuída à tática do app (e o aprendizado ficava errado).
+        // o que foi JOGADO de verdade (item 1, 24/11): leituras da tela de Tática desta PARTIDA (slot + competição + rodada + rival), a formação do Resultado
+        // e confirmações manuais. Campo não confirmado fica desconhecido (nunca é completado com a sugestão).
         runCatching {
-            if (!t.has("genFormation")) {
-                val gen = t.optString("formation")
-                val m = dao.plan(slot, "tacmounted")?.json?.let { org.json.JSONObject(it) }?.takeIf { it.optInt("round", -2) == round }
+            val legacy = !t.has("usage") && (t.has("deviated") || PlayedTactic.FIELDS.any { t.has("gen" + it.replaceFirstChar { c -> c.uppercase() }) })
+            if (!legacy) {
+                val played = PlayedTactic.forLog(this, slot, round, t.optString("rival").ifBlank { oppName })
                 val resultForm = side("formacao", true)?.let { Formations.canonical(it) }
-                val usedForm = resultForm ?: m?.optString("formation")?.takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }
-                var deviated = usedForm != null && Formations.canonical(gen) != usedForm
-                if (m != null) {
-                    val ps = m.optString("playStyle").takeIf { it.isNotBlank() }
-                    if (ps != null && Osm.style(ps) != Osm.style(t.optString("playStyle"))) { t.put("genPlayStyle", t.optString("playStyle")); t.put("playStyle", ps); deviated = true }
-                    val tk = m.optString("tackle").takeIf { it.isNotBlank() }
-                    if (tk != null && Osm.tackle(tk) != Osm.tackle(t.optString("tackle"))) { t.put("genTackle", t.optString("tackle")); t.put("tackle", tk); deviated = true }
-                    val mk = m.optString("marking").takeIf { it.isNotBlank() }
-                    if (mk != null && Osm.marking(mk) != Osm.marking(t.optString("marking"))) { t.put("genMarking", t.optString("marking")); t.put("marking", mk); deviated = true }
-                }
-                if (usedForm != null && Formations.canonical(gen) != usedForm) { t.put("genFormation", gen); t.put("formation", usedForm) }
-                if (deviated) {
-                    t.put("deviated", true)
-                    learn(slot, "resultado", "Na J$round você jogou ${t.optString("formation")} • ${t.optString("playStyle")} (a do app era $gen): o aprendizado usa o que foi jogado.", now)
+                val extra = HashMap<String, String>()
+                resultForm?.let { extra["formation"] = it }
+                val v = PlayedTactic.applyToLog(t, played, extra)
+                if (v.usage == PlayedTactic.ALTEROU && !t.optBoolean("usageLogged", false)) {
+                    t.put("usageLogged", true)
+                    learn(slot, "resultado", "Na J$round: ${v.text()}. O aprendizado usa o que foi jogado.", now)
+                } else if (v.usage == PlayedTactic.NAO && !t.optBoolean("usageLogged", false)) {
+                    t.put("usageLogged", true)
+                    learn(slot, "resultado", "Na J$round a tática jogada não foi confirmada (${v.unknown.size} campo(s) sem leitura): o resultado não é atribuído à sugerida.", now)
                 }
             }
         }

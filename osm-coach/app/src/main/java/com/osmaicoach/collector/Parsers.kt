@@ -638,6 +638,9 @@ object Parsers {
         only(Osm.STYLES)?.let { j.put("playStyle", it) }
         only(Osm.TACKLES)?.let { j.put("tackle", it) }
         only(Osm.MARKING)?.let { j.put("marking", it) }
+        only(Osm.ATTACK)?.let { j.put("advAttack", it) }
+        only(Osm.MIDFIELD)?.let { j.put("advMid", it) }
+        only(Osm.DEFENSE)?.let { j.put("advDef", it) }
         return j
     }
 

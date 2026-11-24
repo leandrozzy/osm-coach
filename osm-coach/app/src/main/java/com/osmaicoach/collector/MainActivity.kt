@@ -1644,10 +1644,10 @@ internal suspend fun loadToday(ctx: Context): TodayData {
     }
     runCatching { needs.addAll(Fresh.global(repo.timers(0), repo.seenMap(0), now)) }
     val acc = runCatching {
-        Accuracy.of((1..4).flatMap { sl -> Accuracy.parse(sl, repo.dao.tacticLogs(sl).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }) })
+        Accuracy.of((1..4).flatMap { sl -> Accuracy.parse(sl, repo.dao.tacticLogs(sl).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }.filter { PlayedTactic.confirmedOrLegacy(it) }) })
     }.getOrNull()
     val res = runCatching {
-        Results.of((1..4).flatMap { sl -> repo.dao.tacticLogs(sl).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() } })
+        Results.of((1..4).flatMap { sl -> repo.dao.tacticLogs(sl).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() }.filter { PlayedTactic.attributable(it) } })
     }.getOrNull()
     runCatching {
         // log ao vivo: o que o app está pedindo agora, por slot, e por quê (só quando muda)

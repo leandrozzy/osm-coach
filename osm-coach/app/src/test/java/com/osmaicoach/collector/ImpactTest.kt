@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ImpactTest {
-    private fun g(result: String, dev: Boolean) = JSONObject().put("result", result).put("deviated", dev)
+    private fun g(result: String, dev: Boolean) = JSONObject().put("result", result).put("usage", if (dev) PlayedTactic.ALTEROU else PlayedTactic.SEGUIU)
 
     @Test fun followedSplitsByDeviation() {
         val logs = listOf(g("V", false), g("V", false), g("E", false), g("D", false), g("D", true), g("D", true), g("E", true), g("D", true))

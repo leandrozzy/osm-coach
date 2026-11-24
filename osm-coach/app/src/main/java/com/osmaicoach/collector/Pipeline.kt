@@ -292,6 +292,8 @@ class FramePipeline private constructor(private val ctx: Context) {
                 val merged = old ?: JSONObject()
                 for (k in seen.keys()) merged.put(k, seen.get(k))
                 dao.putPlan(PlanEntity(slot, "tacmounted", merged.put("at", now).put("round", round).toString(), now))
+                // registro por PARTIDA (slot + competição + rodada + rival), com origem e hora por campo
+                PlayedTactic.record(repo, slot, seen.keys().asSequence().associateWith { k -> seen.optString(k) }, "tela", now)
             }
         }
         pending = Pending(slot, ScreenType.TACTIC, null)
