@@ -137,6 +137,22 @@ internal fun durShort(ms: Long): String {
     return if (min < 60) "${min} min" else "${min / 60} h ${min % 60} min"
 }
 
+/** Eventos da Agenda que o usuário dispensou ("não vale mais"): plano global `agendaskip` (chave slot|título|hora). */
+internal object AgendaSkip {
+    suspend fun load(ctx: Context): Set<String> = runCatching {
+        val a = org.json.JSONArray(Repo(ctx).dao.plan(0, "agendaskip")?.json ?: "[]")
+        (0 until a.length()).map { a.optString(it) }.toSet()
+    }.getOrDefault(emptySet())
+
+    suspend fun add(ctx: Context, keys: Collection<String>) {
+        val repo = Repo(ctx)
+        val cur = load(ctx).toMutableSet(); cur.addAll(keys)
+        val arr = org.json.JSONArray(); cur.toList().takeLast(400).forEach { arr.put(it) }
+        repo.dao.putPlan(PlanEntity(0, "agendaskip", arr.toString(), System.currentTimeMillis()))
+        UiBus.bump()
+    }
+}
+
 /** Linha do tempo de tudo o que tem hora: jogos, fim de treino e obra do estádio, de todos os slots, por dia. */
 @Composable
 internal fun AgendaTab() {
@@ -144,6 +160,8 @@ internal fun AgendaTab() {
     val tick = rememberTick(1000L)
     val data = rememberLoaded(TodayCache.last, tick / 5, UiBus.version) { loadToday(ctx) }
     val now = System.currentTimeMillis()
+    val skip = rememberLoaded(emptySet<String>(), tick / 5, UiBus.version) { AgendaSkip.load(ctx) }
+    val scope = rememberCoroutineScope()
     class Ev(val at: Long, val icon: String, val title: String, val sub: String, val slot: Int, val col: Color, val todo: String, val path: String)
     val evs = ArrayList<Ev>()
     val H = 3600000L
@@ -164,7 +182,7 @@ internal fun AgendaTab() {
                 "A obra terminou: colete e comece a próxima melhoria.", "S${w.slot}: Menu ☰ → Estádio (${c.label})"))
         }
     }
-    val sorted = evs.sortedBy { it.at }
+    val sorted = evs.filter { "${it.slot}|${it.title}|${it.at}" !in skip }.sortedBy { it.at }
     val overdue = sorted.filter { it.at < now }
     val upcoming = sorted.filter { it.at >= now }
     val dayFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
@@ -198,6 +216,7 @@ internal fun AgendaTab() {
             if (late) {
                 Text("👉 ${e.todo}", fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
                 Text("Toque para abrir o OSM • ${e.path.substringAfter(": ")}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+                TextButton(onClick = { scope.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { AgendaSkip.add(ctx, listOf("${e.slot}|${e.title}|${e.at}")) } } }) { Text("✕ Não vale mais (dispensar)", fontSize = 12.5.sp, color = C.MUTED) }
             }
         }
     }
@@ -210,6 +229,8 @@ internal fun AgendaTab() {
         if (overdue.isNotEmpty()) {
             Title("⏰ Passou do horário — faça agora (${overdue.size})")
             for (e in overdue) EventRow(e, true)
+            val bySlot = overdue.groupBy { it.slot }
+            for ((sl, l) in bySlot) if (l.size >= 2) TextButton(onClick = { scope.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { AgendaSkip.add(ctx, l.map { "${it.slot}|${it.title}|${it.at}" }) } } }) { Text("✕ Dispensar os ${l.size} pendentes do S$sl", fontSize = 12.5.sp, color = C.MUTED) }
         }
         var lastDay = ""
         for (e in upcoming) {

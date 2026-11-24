@@ -1629,6 +1629,9 @@ internal suspend fun loadToday(ctx: Context): TodayData {
         runCatching {
             val f = repo.fieldMap(s)
             if (Hints.slotFree(f)) return@runCatching null
+            // slot sem competição (livre, procurando, pré-época) ou com a competição/batalha encerrada: treino e obra de antes não valem mais
+            if (known(f, K.SLOT_STATE) in listOf("vazio", "procurando", "preepoca")) return@runCatching null
+            if (Hints.competitionOver(repo, s, f, now)) return@runCatching null
             val team = known(f, K.TEAM) ?: known(f, K.HUB_TITLE) ?: "Slot $s"
             val screen = repo.dao.plan(s, "trainscreen")?.json?.let { JSONObject(it) }
             Work.of(s, team, screen, repo.timers(s), f).takeIf { it.hasData }
