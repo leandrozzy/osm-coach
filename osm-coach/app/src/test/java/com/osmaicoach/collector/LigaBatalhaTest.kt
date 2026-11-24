@@ -248,4 +248,14 @@ class LigaBatalhaTest {
         assertEquals("em 35 min", SlotWidget.until(now + 35 * 60_000L, now)); assertEquals("em 3 h", SlotWidget.until(now + 3 * 3600_000L + 5000, now))
         assertEquals("em 2 d", SlotWidget.until(now + 50 * 3600_000L, now)); assertEquals("", SlotWidget.until(null, now))
     }
+
+    @Test fun widgetHeroIsSoonestConfirmedGame() {
+        val now = 100L * 3600_000L
+        fun row(slot: Int, at: Long?) = SlotWidget.buildRow(slot, mapOf(K.TEAM to sf("T$slot", now), K.RIVAL_TEAM to sf("R$slot", now), K.MATCH_AT to sf((at ?: 0L).toString(), now)), false, null, null, now)
+        val rows = listOf(row(1, now + 9 * 3600_000L), row(2, now + 2 * 3600_000L), row(3, null), SlotWidget.buildRow(4, emptyMap(), false, null, null, now))
+        assertEquals(2, SlotWidget.hero(rows)!!.slot)
+        assertEquals("em 2 h", rows[1].`when`)
+        assertEquals(3, SlotWidget.hero(listOf(rows[3], rows[2]))!!.slot)       // sem horário confirmado: primeiro slot com clube
+        assertNull(SlotWidget.hero(listOf(rows[3])))
+    }
 }
