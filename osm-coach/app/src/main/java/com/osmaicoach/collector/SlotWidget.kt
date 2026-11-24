@@ -156,8 +156,13 @@ object SlotWidget {
         return bmp
     }
 
-    private fun setProb(v: RemoteViews, id: Int, r: Row) {
-        if (r.win != null && r.draw != null && r.loss != null) { v.setImageViewBitmap(id, probBar(r.win, r.draw, r.loss)); v.setViewVisibility(id, android.view.View.VISIBLE) } else v.setViewVisibility(id, android.view.View.GONE)
+    /** A barra é desenhada JÁ no tamanho real (px) e mostrada sem esticar: largura = parte da largura do widget (máx. 260 dp), altura 8 dp. */
+    private fun setProb(ctx: Context, v: RemoteViews, id: Int, r: Row, widthDp: Float) {
+        if (r.win != null && r.draw != null && r.loss != null) {
+            val d = ctx.resources.displayMetrics.density
+            v.setImageViewBitmap(id, probBar(r.win, r.draw, r.loss, (minOf(widthDp, 260f) * d).toInt().coerceAtLeast(60), (8 * d).toInt().coerceAtLeast(6)))
+            v.setViewVisibility(id, android.view.View.VISIBLE)
+        } else v.setViewVisibility(id, android.view.View.GONE)
     }
 
     private fun probText(r: Row) = if (r.win != null) "V ${r.win}%  E ${r.draw}%  D ${r.loss}%" else ""
@@ -177,7 +182,7 @@ object SlotWidget {
     private fun upd(now: Long) = "atualizado " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(now))
 
     /** 2×2: o próximo jogo (escudos, forças, chances, hora). */
-    fun small(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
+    fun small(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 110): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_small)
         val h = hero(rows)
         if (h == null) { v.setTextViewText(R.id.s_head, "OSM AI Coach"); v.setTextViewText(R.id.s_probtxt, "sem clube nos slots"); return v }
@@ -185,7 +190,7 @@ object SlotWidget {
         v.setInt(R.id.s_badge, "setBackgroundResource", badgeFor(h.state)); v.setTextViewText(R.id.s_badge, h.slot.toString())
         setCrest(ctx, v, R.id.s_crest_me, h.club, 96); setCrest(ctx, v, R.id.s_crest_opp, h.rival, 96)
         v.setTextViewText(R.id.s_vs, strengths(h))
-        setProb(v, R.id.s_prob, h)
+        setProb(ctx, v, R.id.s_prob, h, wDp - 28f)
         v.setTextViewText(R.id.s_probtxt, probText(h).ifEmpty { h.rival?.let { "× $it" } ?: h.short })
         v.setTextViewText(R.id.s_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)} ${where(h)}".trim() else h.icon + " " + h.short)
         click(ctx, v, R.id.s_root, h, 800)
@@ -209,7 +214,7 @@ object SlotWidget {
     }
 
     /** 4×4: jogo em destaque (escudos, forças, contagem, chances, forma, status) e a lista dos 4 slots com rodada, rival e estado. */
-    fun large(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
+    fun large(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_large)
         val h = hero(rows)
         if (h != null) {
@@ -219,7 +224,7 @@ object SlotWidget {
             v.setTextViewText(R.id.h_when, h.`when`.ifEmpty { "sem jogo" })
             v.setTextViewText(R.id.h_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)}" else h.short)
             v.setTextViewText(R.id.h_str, strengths(h) + (h.round?.let { "  •  $it" } ?: "") + (h.pos?.let { "  •  $it" } ?: ""))
-            setProb(v, R.id.h_prob, h); v.setTextViewText(R.id.h_probtxt, (probText(h) + "  " + where(h)).trim())
+            setProb(ctx, v, R.id.h_prob, h, wDp * 0.6f); v.setTextViewText(R.id.h_probtxt, (probText(h) + "  " + where(h)).trim())
             v.setTextViewText(R.id.h_form_me, formEmoji(h.formMe)); v.setTextViewText(R.id.h_form_opp, formEmoji(h.formOpp))
             v.setTextViewText(R.id.h_status, h.icon + " " + h.short)
             click(ctx, v, R.id.h_card, h, 900)
@@ -238,9 +243,9 @@ object SlotWidget {
 
     /** Escolhe o layout pelo tamanho atual do widget (dp) — funciona do Android 11 em diante (opções do widget), sem depender do modo responsivo do Android 12. */
     fun views(ctx: Context, rows: List<Row>, now: Long, wDp: Int, hDp: Int): RemoteViews = when {
-        wDp >= 200 && hDp >= 210 -> large(ctx, rows, now)
+        wDp >= 200 && hDp >= 210 -> large(ctx, rows, now, wDp)
         wDp >= 200 -> wide(ctx, rows, now)
-        else -> small(ctx, rows, now)
+        else -> small(ctx, rows, now, wDp)
     }
 
     fun intentFor(ctx: Context, r: Row): Intent = Intent(ctx, MainActivity::class.java)
