@@ -24,7 +24,18 @@ object SlotWidget {
     const val TACTIC_WINDOW = Director.TACTIC_WINDOW_MS
 
     /** Dados puros de uma linha (testável sem Android). */
-    class Row(val slot: Int, val title: String, val line: String, val status: String, val stale: Boolean, val tab: Int, val readAt: Long?)
+    class Row(
+        val slot: Int, val title: String, val line: String, val status: String, val stale: Boolean, val tab: Int, val readAt: Long?,
+        val club: String = "", val rival: String? = null, val `when`: String = "", val state: Int = STATE_NONE
+    )
+    const val STATE_OK = 0; const val STATE_WAIT = 1; const val STATE_OLD = 2; const val STATE_NONE = 3
+
+    /** "em 35 min", "em 3 h", "em 2 d" (sem hora de jogo confirmada = vazio). */
+    fun until(at: Long?, now: Long): String {
+        if (at == null || at <= now) return ""
+        val m = (at - now) / 60_000L
+        return if (m < 60) "em ${maxOf(1, m)} min" else if (m < 48 * 60) "em ${m / 60} h" else "em ${m / (24 * 60)} d"
+    }
 
     private val HOUR = SimpleDateFormat("dd/MM HH:mm", Locale("pt", "BR"))
     private fun fmt(t: Long) = HOUR.format(Date(t))
@@ -35,7 +46,7 @@ object SlotWidget {
         val team = f[K.TEAM]?.value?.takeIf { FieldMerge.known(it) } ?: f[K.HUB_TITLE]?.value?.takeIf { FieldMerge.known(it) }
         val state = f[K.SLOT_STATE]?.value
         val readAt = f.values.maxOfOrNull { it.updatedAt }?.takeIf { it > 0L }
-        if (team == null || state == "vazio" || state == "procurando") return Row(slot, "S$slot · sem clube", "", "", false, 0, readAt)
+        if (team == null || state == "vazio" || state == "procurando") return Row(slot, "S$slot · sem clube", "", "", false, 0, readAt, club = "sem clube", state = STATE_NONE)
         val stale = readAt == null || now - readAt > STALE_MS
         val rival = f[K.RIVAL_TEAM]?.value?.takeIf { FieldMerge.known(it) }
         val at = f[K.MATCH_AT]?.value?.toLongOrNull()?.takeIf { it > now }
@@ -52,7 +63,16 @@ object SlotWidget {
         if (battleAgg != null) status += " • ⚔ $battleAgg"
         status += " • " + (if (stale) "⚠ antigo, $readTxt" else readTxt)
         val tab = when { battle && at == null -> 0; at != null && tacticReady -> 4; at != null -> 1; else -> 0 }
-        return Row(slot, "S$slot · $team", line, status, stale, tab, readAt)
+        val st = when { stale -> STATE_OLD; at != null && tacticReady -> STATE_OK; else -> STATE_WAIT }
+        val statusShort = when {
+            at != null && tacticReady -> "tática pronta"
+            at != null && at - now <= TACTIC_WINDOW -> "aguardando leitura do rival"
+            at != null -> "tática só nas 8 h antes"
+            lastResult != null -> "último: $lastResult"
+            else -> "aguardando leitura"
+        } + (if (battleAgg != null) " • ⚔ $battleAgg" else "") + (if (stale) " • ⚠ antigo" else "")
+        val line2 = (if (rival != null && at != null) "× $rival • ${fmt(at).substringBefore(' ')}  ${fmt(at).substringAfter(' ')} • " else "") + statusShort
+        return Row(slot, "S$slot · $team", line, status, stale, tab, readAt, club = team, rival = rival, `when` = until(at, now), state = st).let { Row(it.slot, it.title, line2, it.status, it.stale, it.tab, it.readAt, it.club, it.rival, it.`when`, it.state) }
     }
 
     suspend fun loadRows(ctx: Context, now: Long = System.currentTimeMillis()): List<Row> {
@@ -73,10 +93,21 @@ object SlotWidget {
         }
     }
 
-    private val IDS = listOf(
-        Triple(R.id.row1, R.id.title1, Pair(R.id.line1, R.id.status1)), Triple(R.id.row2, R.id.title2, Pair(R.id.line2, R.id.status2)),
-        Triple(R.id.row3, R.id.title3, Pair(R.id.line3, R.id.status3)), Triple(R.id.row4, R.id.title4, Pair(R.id.line4, R.id.status4))
+    private val ROWS = listOf(
+        intArrayOf(R.id.row1, R.id.badge1, R.id.crest1, R.id.title1, R.id.line1, R.id.when1), intArrayOf(R.id.row2, R.id.badge2, R.id.crest2, R.id.title2, R.id.line2, R.id.when2),
+        intArrayOf(R.id.row3, R.id.badge3, R.id.crest3, R.id.title3, R.id.line3, R.id.when3), intArrayOf(R.id.row4, R.id.badge4, R.id.crest4, R.id.title4, R.id.line4, R.id.when4)
     )
+
+    private fun badgeFor(state: Int) = when (state) { STATE_OK -> R.drawable.w_badge_ok; STATE_WAIT -> R.drawable.w_badge_wait; STATE_OLD -> R.drawable.w_badge_old; else -> R.drawable.w_badge_none }
+
+    /** Escudo pequeno já salvo pelo app (nunca baixa nada aqui); ≤ 64 px para caber no limite de memória do widget. */
+    private fun crestOf(ctx: Context, team: String): android.graphics.Bitmap? = runCatching {
+        val f = CrestWeb.find(ctx.filesDir, team) ?: return null
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(f.absolutePath, o)
+        val ss = maxOf(1, maxOf(o.outWidth, o.outHeight) / 64)
+        android.graphics.BitmapFactory.decodeFile(f.absolutePath, android.graphics.BitmapFactory.Options().apply { inSampleSize = ss })
+    }.getOrNull()
 
     fun intentFor(ctx: Context, r: Row): Intent = Intent(ctx, MainActivity::class.java)
         .setAction("com.osmaicoach.collector.WIDGET_OPEN").setData(Uri.parse("osmcoach://slot/${r.slot}/${r.tab}"))
@@ -85,12 +116,14 @@ object SlotWidget {
     fun views(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_slots)
         for ((i, r) in rows.withIndex()) {
-            val (row, title, ls) = IDS[i]
-            v.setTextViewText(title, r.title); v.setTextViewText(ls.first, r.line); v.setTextViewText(ls.second, r.status)
-            v.setTextColor(ls.second, if (r.stale) 0xFFFFB454.toInt() else 0xFFFFD54A.toInt())
-            v.setOnClickPendingIntent(row, PendingIntent.getActivity(ctx, 700 + r.slot, intentFor(ctx, r), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            val id = ROWS[i]
+            v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
+            v.setTextViewText(id[3], r.club.ifBlank { r.title }); v.setTextViewText(id[4], r.line.ifBlank { "abra o OSM com a captura ligada" }); v.setTextViewText(id[5], r.`when`)
+            val bmp = if (r.state == STATE_NONE) null else crestOf(ctx, r.club)
+            if (bmp != null) { v.setImageViewBitmap(id[2], bmp); v.setViewVisibility(id[2], android.view.View.VISIBLE) } else v.setViewVisibility(id[2], android.view.View.GONE)
+            v.setOnClickPendingIntent(id[0], PendingIntent.getActivity(ctx, 700 + r.slot, intentFor(ctx, r), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         }
-        v.setTextViewText(R.id.footer, "atualizado ${HOUR.format(Date(now))}")
+        v.setTextViewText(R.id.footer, "atualizado " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(now)))
         return v
     }
 

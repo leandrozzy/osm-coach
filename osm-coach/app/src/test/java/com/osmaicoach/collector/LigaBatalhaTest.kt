@@ -143,7 +143,7 @@ class LigaBatalhaTest {
         assertEquals(11, r.games[0].round); assertFalse(r.games[0].home); assertEquals(2, r.games[0].gf); assertEquals(1, r.games[0].ga)
         assertEquals(1, r.games[0].oppRank?.minus(1))             // Flamengo = 2º na referência
         assertNotNull(r.homeAvg); assertNotNull(r.awayAvg); assertNotNull(r.reference)
-        assertNull(LeagueResults.radar(emptyList(), "Red Bull Bragantino", table, 5L))
+        assertEquals(0, LeagueResults.radar(emptyList(), "Red Bull Bragantino", table, 5L)!!.games.size)   // sem jogos individuais: só a campanha da tabela
     }
 
     // ---------------------------------------------------------------- batalha
@@ -220,5 +220,32 @@ class LigaBatalhaTest {
         assertTrue(s4.status.contains("78×60")); assertTrue(s4.status.contains("último")); assertEquals(0, s4.tab); assertEquals(4, s4.slot)
         val vazio = SlotWidget.buildRow(3, mapOf(K.TEAM to sf("X", now), K.SLOT_STATE to sf("vazio", now)), false, null, null, now)
         assertTrue(vazio.title.contains("sem clube"))
+    }
+
+    @Test fun dedupeMergesOcrVariantsOfSameClub() {
+        val rows = listOf(League.Row("SG Sonnenhof Großaspach", null, 5, at = 1L), League.Row("SG Sonnenhof Grossaspach", null, 5, at = 9L), League.Row("Liefering", null, 1, at = 2L))
+        val d = League.dedupe(rows)
+        assertEquals(2, d.size)
+        assertEquals("SG Sonnenhof Grossaspach", d.first { it.club.startsWith("SG") }.club)    // fica a leitura mais recente
+    }
+
+    @Test fun skippedReasonsAreSeparated() {
+        val g = listOf(LeagueResults.Stored(38, "Flamengo", "Red Bull Bragantino", 1, 2, 1, 0L), LeagueResults.Stored(11, "Clube Fantasma", "Bahia", 1, 0, 1, 0L))
+        val a = LeagueResults.adjust(table, g)
+        assertEquals(1, a.roundGap); assertEquals(38, a.maxSkippedRound); assertEquals(1, a.unmatched)
+        val p = LeagueResults.project(a, "Flamengo", 38, true)!!
+        assertTrue(p.limits.any { it.contains("não achei na classificação") } && p.limits.any { it.contains("J38") })
+    }
+
+    @Test fun radarWithoutGamesStillShowsLeagueCampaign() {
+        val r = LeagueResults.radar(emptyList(), "Bahia", table, 5L)!!
+        assertEquals(0, r.games.size); assertEquals(10, r.campaign!!.j)
+        assertNull(LeagueResults.radar(emptyList(), "Clube Fantasma", table, 5L))
+    }
+
+    @Test fun widgetCountdownText() {
+        val now = 1_000_000_000L
+        assertEquals("em 35 min", SlotWidget.until(now + 35 * 60_000L, now)); assertEquals("em 3 h", SlotWidget.until(now + 3 * 3600_000L + 5000, now))
+        assertEquals("em 2 d", SlotWidget.until(now + 50 * 3600_000L, now)); assertEquals("", SlotWidget.until(null, now))
     }
 }

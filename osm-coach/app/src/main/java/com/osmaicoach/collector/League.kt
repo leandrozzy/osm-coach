@@ -12,7 +12,7 @@ object League {
     data class Row(
         val club: String, val nick: String?, val rank: Int?,
         val j: Int? = null, val v: Int? = null, val e: Int? = null, val d: Int? = null, val pts: Int? = null, val gf: Int? = null, val ga: Int? = null,
-        val value: Double? = null, val players: Int? = null, val avg: Double? = null
+        val value: Double? = null, val players: Int? = null, val avg: Double? = null, val at: Long? = null
     )
 
     fun isStandings(fullText: String): Boolean {
@@ -74,7 +74,7 @@ object League {
         o.optString("club"), o.optString("nick").takeIf { it.isNotBlank() && it != "null" }, if (o.isNull("rank")) null else o.optInt("rank"),
         o.optInt("j", -1).takeIf { it >= 0 }, o.optInt("v", -1).takeIf { it >= 0 }, o.optInt("e", -1).takeIf { it >= 0 }, o.optInt("d", -1).takeIf { it >= 0 },
         o.optInt("pts", -1).takeIf { it >= 0 }, o.optInt("gf", -1).takeIf { it >= 0 }, o.optInt("ga", -1).takeIf { it >= 0 },
-        o.optDouble("value", Double.NaN).takeIf { !it.isNaN() }, o.optInt("players", -1).takeIf { it >= 0 }, o.optDouble("avg", Double.NaN).takeIf { !it.isNaN() }
+        o.optDouble("value", Double.NaN).takeIf { !it.isNaN() }, o.optInt("players", -1).takeIf { it >= 0 }, o.optDouble("avg", Double.NaN).takeIf { !it.isNaN() }, o.optLong("at", 0L).takeIf { it > 0L }
     )
 
     /** Junta as linhas lidas ao que já estava guardado (a leitura nova de um clube substitui a velha). */
@@ -82,7 +82,7 @@ object League {
         val j = old ?: JSONObject()
         val m = j.optJSONObject(kind) ?: JSONObject()
         val prevAt = j.optLong(kind + "At", 0L)
-        for (r in rows) m.put(key(r.club), toJson(r))
+        for (r in rows) m.put(key(r.club), toJson(r).put("at", now))
         j.put(kind, m).put(kind + "At", now)
         if (kind == "st") snapshotPass(j, m, rows, prevAt, now)
         return j
@@ -109,6 +109,16 @@ object League {
         val keep = org.json.JSONArray()
         for (i in maxOf(0, arr.length() - 6) until arr.length()) keep.put(arr.get(i))
         j.put("snaps", keep)
+    }
+
+    /** Junta variações do mesmo clube (o OCR gera "Sonnenhof Grossaspach" e "Sonnenhof Großaspach"): fica a linha mais recente. */
+    fun dedupe(rows: List<Row>): List<Row> {
+        val out = ArrayList<Row>()
+        for (r in rows.sortedByDescending { it.at ?: 0L }) {
+            val k = key(r.club)
+            if (out.none { o -> key(o.club) == k || Txt.sim(key(o.club), k) >= 0.88 }) out.add(r)
+        }
+        return out
     }
 
     fun table(j: JSONObject?, kind: String): List<Row> {

@@ -19,14 +19,18 @@ internal fun fmtAt(t: Long): String = SimpleDateFormat("dd/MM HH:mm", Locale("pt
 /** Tudo que os cartões de liga precisam, lido do banco (nada pedido ao usuário). */
 internal class LeagueView(
     val cov: LeagueResults.Coverage?, val adj: LeagueResults.AdjResult?, val movement: LeagueResults.Movement?, val projection: LeagueResults.Projection?,
-    val stAt: Long?, val clubs: Int, val radar: LeagueResults.Radar?
+    val stAt: Long?, val clubs: Int, val radar: LeagueResults.Radar?, val partial: Boolean = false
 )
 
 internal suspend fun loadLeagueView(repo: Repo, slot: Int): LeagueView {
     val f = repo.fieldMap(slot)
     val lg = repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
     val lres = repo.dao.plan(slot, "lres")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-    val st = League.table(lg, "st")
+    val stAll = League.dedupe(League.table(lg, "st"))
+    val stAtL = lg?.optLong("stAt")?.takeIf { it > 0 }
+    // linhas lidas em passadas diferentes (horas de distância) = tabela misturada: não projeta em cima disso
+    val partial = stAtL != null && stAll.any { (it.at ?: 0L) < stAtL - 180_000L }
+    val st = if (partial) stAll.filter { (it.at ?: 0L) >= stAtL!! - 180_000L }.let { fresh -> if (fresh.size >= 6) fresh else stAll } else stAll
     val comp = LeagueResults.compKey(f)
     val games = if (comp != null) LeagueResults.games(lres, comp) else emptyList()
     val me = known(f, K.TEAM) ?: known(f, K.HUB_TITLE)
@@ -35,9 +39,9 @@ internal suspend fun loadLeagueView(repo: Repo, slot: Int): LeagueView {
     val mv = LeagueResults.movement(lg?.optJSONArray("snaps"), me, games)
     val total = known(f, K.ROUND_TOTAL)?.filter { it.isDigit() }?.toIntOrNull()
     val hasNext = known(f, K.MATCH_AT)?.toLongOrNull()?.let { it > System.currentTimeMillis() } == true && known(f, K.RIVAL_TEAM) != null
-    val proj = adj?.let { LeagueResults.project(it, me, total, hasNext) }
+    val proj = if (partial && st.size < stAll.size) null else adj?.let { LeagueResults.project(it, me, total, hasNext) }
     val radar = LeagueResults.radar(games, known(f, K.RIVAL_TEAM), st, lg?.optLong("stAt")?.takeIf { it > 0 })
-    return LeagueView(cov, adj, mv, proj, lg?.optLong("stAt")?.takeIf { it > 0 }, st.size, radar)
+    return LeagueView(cov, adj, mv, proj, stAtL, stAll.size, radar, partial)
 }
 
 @Composable
@@ -53,6 +57,7 @@ internal fun LeagueResultsCard(slot: Int) {
             Text("Cobertura: ${c.rounds} jornada(s), ${c.games} jogo(s)" + (c.expectedPerRound?.let { " (esperado ≈ $it por jornada)" } ?: "") + " • última leitura ${fmtAt(c.lastAt)}", fontSize = 13.sp)
             Text(c.perRound.entries.joinToString("  ") { "J${it.key}: ${it.value}" }, fontSize = 12.sp, color = C.MUTED)
         }
+        if (v.partial) Text("⚠ A classificação guardada mistura leituras feitas em horários diferentes. Abra a Classificação no OSM e role a tabela inteira de uma vez para a projeção voltar.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 4.dp))
         v.stAt?.let { Text("Classificação lida em ${fmtAt(it)} (${v.clubs} clubes)", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)) }
         v.adj?.let { a ->
             val applied = a.rows.filter { it.applied.isNotEmpty() }
@@ -87,18 +92,21 @@ internal fun RivalRadarCard(slot: Int, d: SlotData) {
     val ctx = LocalContext.current
     val v = rememberLoaded<LeagueView?>(null, UiBus.version, "radar$slot") { runCatching { loadLeagueView(Repo(ctx), slot) }.getOrNull() }
     val r = v?.radar
-    Fold("🛰", "Radar do rival", r?.let { "${it.games.size} jogo(s)" }, startOpen = true) {
+    Fold("🛰", "Radar do rival", r?.let { if (it.games.isEmpty()) "campanha" else "${it.games.size} jogo(s)" }, startOpen = true) {
         if (r == null) {
             Text("Sem partidas do rival lidas. Abra os resultados da liga no OSM (jornadas anteriores) com a captura ligada: o Radar monta sozinho.", fontSize = 13.sp, color = C.MUTED)
             return@Fold
         }
-        Text("${r.rival}: últimas ${r.games.size} partida(s) confirmadas nesta competição", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        r.campaign?.let { c -> Text("Campanha na liga (classificação lida): ${c.j} jogos • ${c.v}V ${c.e}E ${c.d}D • gols ${c.gf}–${c.ga} • ${c.pts} pts", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+        if (r.games.isEmpty()) Text("Nenhum jogo individual dele lido ainda: abra os resultados de cada jornada (uma vez por jornada, o app guarda).", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+        else Text("${r.rival}: últimas ${r.games.size} partida(s) confirmadas nesta competição", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+        if (r.games.isNotEmpty() && r.games.size < 5) Text("Só aparecem jogos que passaram pela tela de resultados com a captura ligada. Abra os resultados das jornadas anteriores para completar (cada jornada uma vez).", fontSize = 11.5.sp, color = C.MUTED)
         for (g in r.games) Text(
             "J${g.round} • ${if (g.home) "casa" else "fora"} • ${g.opponent}${g.oppRank?.let { " (${it}º)" } ?: ""} • ${g.gf}×${g.ga} " + (if (g.gf > g.ga) "V" else if (g.gf < g.ga) "D" else "E"),
             fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp)
         )
-        val gf = r.games.sumOf { it.gf }; val ga = r.games.sumOf { it.ga }
-        Text("Marcou $gf • sofreu $ga em ${r.games.size} jogo(s)", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+        if (r.games.isNotEmpty()) { val gf = r.games.sumOf { it.gf }; val ga = r.games.sumOf { it.ga }
+        Text("Marcou $gf • sofreu $ga em ${r.games.size} jogo(s)", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
         r.homeAvg?.let { Text("Em casa: ${"%.1f".format(it.first)} marcados / ${"%.1f".format(it.second)} sofridos por jogo", fontSize = 12.5.sp, color = C.MUTED) }
         r.awayAvg?.let { Text("Fora: ${"%.1f".format(it.first)} marcados / ${"%.1f".format(it.second)} sofridos por jogo", fontSize = 12.5.sp, color = C.MUTED) }
         r.reference?.let { Text("Nível dos adversários: $it", fontSize = 11.5.sp, color = C.MUTED) }

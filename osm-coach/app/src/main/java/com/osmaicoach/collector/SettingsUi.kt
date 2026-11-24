@@ -161,12 +161,6 @@ internal fun NotificationsPanel() {
         SwitchRow("30 min depois do jogo: registrar ou ler o resultado", res) { res = it; toggle("result", it) }
         var autoT by remember { mutableStateOf(Settings.get(ctx, "auto_tactic", "1") == "1") }
         SwitchRow("Gerar a tática sozinho depois de ler o Pré-jogo e a Análise do rival (nas 8 h antes do jogo)", autoT) { autoT = it; Settings.put(ctx, "auto_tactic", if (it) "1" else "0") }
-        var bTeam by remember { mutableStateOf(Settings.get(ctx, Battle.SETTING, Battle.DEFAULT_TEAM)) }
-        OutlinedTextField(bTeam, { bTeam = it; Settings.put(ctx, Battle.SETTING, it.trim()) }, label = { Text("Minha equipe de batalha") }, singleLine = true,
-            supportingText = { Text("Usada para achar meu lado (esquerda/direita) na tela de resultados da batalha. Trocar vale para as próximas leituras; o histórico não muda.") },
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-        var labOn by remember { mutableStateOf(Settings.get(ctx, "lab_on", "0") == "1") }
-        SwitchRow("🧪 Modo de teste: motor novo em paralelo (só registra e compara; não troca a tática)", labOn) { labOn = it; Settings.put(ctx, "lab_on", if (it) "1" else "0") }
         SwitchRow("Alertas do diretor (ao encerrar a leitura e a cada hora, com o app fechado)", dir) { dir = it; toggle("director", it) }
         SwitchRow("Fim de cada treino e de cada obra do estádio (lidos nas telas do OSM)", tim) { tim = it; toggle("timers", it) }
         // Com o app fechado: alarme exato liberado e bateria sem restrição (senão o Android atrasa ou corta os avisos).
@@ -559,6 +553,8 @@ internal fun SettingsTab() {
         PageTitle("⚙", "Ajustes")
         SectionLabel("Avisos", "Como o app te chama quando algo precisa de você")
         NotificationsPanel()
+        SectionLabel("Batalha e testes", "Equipe da batalha e o motor novo em paralelo")
+        BattleLabPanel()
         SectionLabel("Preferências", "Regras do app e táticas da comunidade")
         var spendBc by remember { mutableStateOf(Settings.get(ctx, "spend_bc", "0") == "1") }
         Fold("💎", "Boss Coins", if (spendBc) "gastar" else "preservar") {
@@ -1053,5 +1049,29 @@ internal fun GptGuideFold() {
         Text("Link do Projeto ou da conversa (o botão \"ChatGPT\" da aba Artes abre este link):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
         androidx.compose.material3.OutlinedTextField(value = link, onValueChange = { link = it; ArtsGpt.setLink(ctx, it) }, singleLine = true, placeholder = { Text("https://chatgpt.com/g/…") }, modifier = Modifier.fillMaxWidth())
         msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
+    }
+}
+
+/** Equipe de batalha e modo de teste do motor novo: seção própria (antes estavam escondidos dentro de "Avisos"). */
+@Composable
+internal fun BattleLabPanel() {
+    val ctx = LocalContext.current
+    var bTeam by remember { mutableStateOf(Settings.get(ctx, Battle.SETTING, Battle.DEFAULT_TEAM)) }
+    Fold("⚔", "Minha equipe de batalha", bTeam.ifBlank { Battle.DEFAULT_TEAM }, startOpen = true) {
+        Text("O nome com que você aparece nas batalhas. O app usa para achar o seu lado (esquerda ou direita) na tela de resultados da batalha. Vale para as próximas leituras; o histórico de batalhas já lidas não muda. Uma batalha nova com outras equipes é reconhecida sozinha.", fontSize = 13.sp, color = C.MUTED)
+        OutlinedTextField(bTeam, { bTeam = it; Settings.put(ctx, Battle.SETTING, it.trim()) }, label = { Text("Minha equipe de batalha") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        Text("Padrão: ${Battle.DEFAULT_TEAM}", fontSize = 12.sp, color = C.MUTED)
+    }
+    var labOn by remember { mutableStateOf(Settings.get(ctx, "lab_on", "0") == "1") }
+    Fold("🧪", "Modo de teste do motor novo", if (labOn) "ligado" else "desligado", startOpen = true) {
+        Text("Roda um segundo motor em paralelo só para comparar. A tática recomendada continua sendo a do motor atual; o novo aparece num bloco fechado na aba Tática do slot. Antes de cada jogo o app congela as previsões dos dois (sem refazer depois do resultado). Desligado por padrão.", fontSize = 13.sp, color = C.MUTED)
+        SwitchRow("Ligar o modo de teste", labOn) { labOn = it; Settings.put(ctx, "lab_on", if (it) "1" else "0") }
+        if (labOn) {
+            Text("Objetivo por slot: por padrão maximiza a chance de vitória. Ligue \"empate basta\" para maximizar pontos (3×vitória + empate).", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            for (n in 1..4) {
+                var pts by remember { mutableStateOf(Settings.get(ctx, "lab_obj_S$n", EngineLab.OBJ_WIN) == EngineLab.OBJ_POINTS) }
+                SwitchRow("S$n: empate basta (maximizar pontos)", pts) { pts = it; Settings.put(ctx, "lab_obj_S$n", if (it) EngineLab.OBJ_POINTS else EngineLab.OBJ_WIN) }
+            }
+        }
     }
 }

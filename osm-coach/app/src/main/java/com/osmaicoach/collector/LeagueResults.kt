@@ -116,7 +116,7 @@ object LeagueResults {
 
     // ------------------------------------------------------------------ classificação ajustada (sem somar duas vezes)
     class Adj(val club: String, val rank: Int?, val j: Int, val pts: Int, val applied: List<String>)
-    class AdjResult(val rows: List<Adj>, val skipped: Int, val mixedRounds: Boolean)
+    class AdjResult(val rows: List<Adj>, val skipped: Int, val mixedRounds: Boolean, val unmatched: Int = 0, val roundGap: Int = 0, val maxSkippedRound: Int = 0)
 
     /**
      * Parte da classificação LIDA e só soma partidas que ela AINDA NÃO inclui: o jogo da jornada R está incluído se os dois clubes já têm j ≥ R.
@@ -126,10 +126,10 @@ object LeagueResults {
         val base = st.filter { it.j != null && it.pts != null }
         val pts = HashMap<String, Int>(); val jj = HashMap<String, Int>(); val ap = HashMap<String, MutableList<String>>()
         for (r in base) { pts[r.club] = r.pts!!; jj[r.club] = r.j!!; ap[r.club] = ArrayList() }
-        var skipped = 0
+        var skipped = 0; var unmatched = 0; var roundGap = 0; var maxRound = 0
         for (g in games.sortedBy { it.round }) {
             val h = League.find(base, g.home)?.club; val a = League.find(base, g.away)?.club
-            if (h == null || a == null || h == a) { skipped++; continue }
+            if (h == null || a == null || h == a) { skipped++; unmatched++; continue }
             val jh = jj[h]!!; val ja = jj[a]!!
             when {
                 jh >= g.round && ja >= g.round -> {}                        // já está na tabela
@@ -138,12 +138,12 @@ object LeagueResults {
                     pts[h] = pts[h]!! + ph; pts[a] = pts[a]!! + pa; jj[h] = jh + 1; jj[a] = ja + 1
                     ap[h]!!.add("J${g.round} ${g.home} ${g.gh}×${g.ga} ${g.away}"); ap[a]!!.add("J${g.round} ${g.home} ${g.gh}×${g.ga} ${g.away}")
                 }
-                else -> skipped++
+                else -> { skipped++; roundGap++; maxRound = maxOf(maxRound, g.round) }
             }
         }
         val rows = base.map { Adj(it.club, it.rank, jj[it.club]!!, pts[it.club]!!, ap[it.club]!!) }
         val js = rows.map { it.j }
-        return AdjResult(rows, skipped, js.isNotEmpty() && js.max() - js.min() > 1)
+        return AdjResult(rows, skipped, js.isNotEmpty() && js.max() - js.min() > 1, unmatched, roundGap, maxRound)
     }
 
     fun rankOf(rows: List<Adj>, club: String?): Int? {
@@ -200,7 +200,8 @@ object LeagueResults {
         val me = rows.firstOrNull { League.key(it.club) == League.key(myClub) } ?: League.find(rows.map { League.Row(it.club, null, it.rank) }, myClub)?.let { m -> rows.firstOrNull { it.club == m.club } } ?: return null
         val lim = ArrayList<String>()
         if (adj.mixedRounds) lim.add("a tabela mistura jornadas diferentes: o efeito do próximo jogo não é comparável")
-        if (adj.skipped > 0) lim.add("${adj.skipped} resultado(s) lido(s) não puderam ser casados com a tabela")
+        if (adj.unmatched > 0) lim.add("${adj.unmatched} resultado(s) com clube que não achei na classificação lida")
+        if (adj.roundGap > 0) lim.add("${adj.roundGap} resultado(s) lido(s) são de jornada que a classificação guardada ainda não alcança (J${adj.maxSkippedRound}): leia a Classificação de novo para somar")
         val tot = totalRounds?.takeIf { it >= me.j }
         if (tot == null) lim.add("total de jornadas desconhecido: sem faixa final")
         val rem = tot?.minus(me.j)
@@ -229,13 +230,14 @@ object LeagueResults {
 
     // ------------------------------------------------------------------ Radar do próximo rival
     class RadarGame(val round: Int, val opponent: String, val home: Boolean, val gf: Int, val ga: Int, val oppRank: Int?)
-    class Radar(val rival: String, val games: List<RadarGame>, val homeAvg: Pair<Double, Double>?, val awayAvg: Pair<Double, Double>?, val reference: String?)
+    class Radar(val rival: String, val games: List<RadarGame>, val homeAvg: Pair<Double, Double>?, val awayAvg: Pair<Double, Double>?, val reference: String?, val campaign: League.Row? = null)
 
     /** Até 5 partidas CONFIRMADAS (lidas) do rival na mesma competição; a amostra é a que existe (3 jogos = 3). Nada de formação/estilo deduzido. */
     fun radar(all: List<Stored>, rival: String?, st: List<League.Row>, stAt: Long?): Radar? {
         if (rival.isNullOrBlank()) return null
+        val camp = League.find(st, rival)?.takeIf { it.j != null && it.pts != null }
         val mine = all.filter { same(it.home, rival) || same(it.away, rival) }.sortedByDescending { it.round }.take(5)
-        if (mine.isEmpty()) return null
+        if (mine.isEmpty() && camp == null) return null
         val gs = mine.map { g ->
             val home = same(g.home, rival)
             val opp = if (home) g.away else g.home
@@ -243,6 +245,6 @@ object LeagueResults {
         }
         fun avg(l: List<RadarGame>) = if (l.isEmpty()) null else Pair(l.sumOf { it.gf }.toDouble() / l.size, l.sumOf { it.ga }.toDouble() / l.size)
         val ref = if (st.any { it.rank != null } && stAt != null) "posição na classificação lida em " + java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale("pt", "BR")).format(java.util.Date(stAt)) + " (a de hoje, não a da data do jogo)" else null
-        return Radar(rival, gs, avg(gs.filter { it.home }), avg(gs.filter { !it.home }), ref)
+        return Radar(rival, gs, avg(gs.filter { it.home }), avg(gs.filter { !it.home }), ref, camp)
     }
 }
