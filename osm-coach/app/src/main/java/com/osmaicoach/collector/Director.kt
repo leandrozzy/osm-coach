@@ -455,7 +455,7 @@ object Director {
         )
     }
 
-    private fun record(hist: List<HistRow>, plan: WinModel.Plan?): List<String> {
+    internal fun record(hist: List<HistRow>, plan: WinModel.Plan?): List<String> {
         if (plan == null) return emptyList()
         val f0 = plan.formation.split(" ")[0]
         val done = hist.filter { it.result != null && it.formation.split(" ")[0] == f0 }
@@ -892,6 +892,7 @@ object Director {
         val json = tacticPlanJson(res3, round, rival, false, f[K.MATCH_AT]?.value?.toLongOrNull())
         json.put("basis", RivalWatch.basis(f))
         repo.dao.putPlan(PlanEntity(slot, "tactic", json.toString(), now))
+        runCatching { EngineLab.freeze(repo, slot, res2.tactic, res2.rows, now) }
         repo.dao.deletePlan(slot, "rivalchange")
         val sp = simPlan(res2.tactic, res2.rows)
         val pp = WinModel.predict(base.copy(plan = sp, tacticRecord = record(hist, sp)))
@@ -902,8 +903,18 @@ object Director {
             val altC = cands.firstOrNull { it.tactic.formation != fin.formation || it.tactic.playStyle != fin.playStyle }
             if (altC != null) {
                 val a = altC.tactic
+                // plano B só é ÚTIL quando, em algum cenário plausível do rival, ele rende mais que a principal; o gatilho diz QUAL leitura justificaria trocar
+                val mainPlan = simPlan(fin, res3.rows); val altPlan = simPlan(a, altC.rows)
+                var bestGain = 0.0; var bestScen: WinModel.Input? = null
+                for ((inp, _) in scen) {
+                    val me = WinModel.expectedPoints(inp.copy(plan = mainPlan, tacticRecord = record(hist, mainPlan))) ?: continue
+                    val ae = WinModel.expectedPoints(inp.copy(plan = altPlan, tacticRecord = record(hist, altPlan))) ?: continue
+                    if (ae - me > bestGain) { bestGain = ae - me; bestScen = inp }
+                }
+                val useful = bestScen != null && bestGain >= PLAN_B_MIN_GAIN
                 repo.dao.putPlan(PlanEntity(slot, "whyalt", JSONObject().put("main", fin.formation + "|" + fin.playStyle)
                     .put("alt", JSONObject().put("formation", a.formation).put("style", a.playStyle).put("pressure", a.pressure).put("mentality", a.mentality).put("tempo", a.tempo).put("pts", altC.points))
+                    .put("useful", useful).put("gain", bestGain).put("trigger", if (useful) planBTrigger(bestScen!!, base) else "")
                     .put("round", round ?: -1).toString(), now))
             }
         }
@@ -940,6 +951,19 @@ object Director {
             (if (m.trusted) "" else " Ainda poucos jogos: as regras de segurança continuam valendo.")
     }
 
+    /** Ganho mínimo (pontos esperados) para o plano B valer a pena: abaixo disso ele só confunde. */
+    const val PLAN_B_MIN_GAIN = 0.10
+
+    /** Qual leitura do rival (diferente da lida agora) faria o plano B render mais. */
+    fun planBTrigger(s: WinModel.Input, base: WinModel.Input): String {
+        val parts = ArrayList<String>()
+        if (s.rivalFormation != null && s.rivalFormation != base.rivalFormation) parts.add("formação ${s.rivalFormation}")
+        if (s.rivalStyle != null && s.rivalStyle != base.rivalStyle) parts.add("estilo ${s.rivalStyle}")
+        if (s.rivalTackle != null && s.rivalTackle != base.rivalTackle) parts.add("desarme ${s.rivalTackle}")
+        if (s.rivalStrength != null && base.rivalStrength != null && s.rivalStrength > base.rivalStrength) parts.add("força ${s.rivalStrength} (acima da lida: ${base.rivalStrength})")
+        return if (parts.isEmpty()) "a leitura atual do rival mudar de forma que o app ainda não viu" else "a releitura da Análise/Pré-jogo do rival (até 20 min antes) mostrar " + parts.joinToString(", ")
+    }
+
     const val PROVEN_MARGIN = 0.30
     private val NO_FLOORS = TacticEngine.Floors(0, false, 0, 0)
 
@@ -958,7 +982,7 @@ object Director {
      * usou (perfil pelo apelido), porque ele pode mudar antes do jogo. Contra CPU: só o lido.
      */
     /** Táticas que humanos mais usam no OSM: contra humano sem perfil, a nossa tem que aguentar todas. */
-    private val HUMAN_TYPICAL = listOf(
+    internal val HUMAN_TYPICAL = listOf(
         Triple("4-3-3 A", "Contra-ataque", "Agressivo"),
         Triple("4-5-1", "Contra-ataque", "Normal"),
         Triple("4-4-2 A", "Jogo de passe", "Normal"),
@@ -966,7 +990,7 @@ object Director {
         Triple("5-3-2", "Contra-ataque", "Normal")
     )
 
-    private suspend fun scenarios(repo: Repo, slot: Int, base0: WinModel.Input): List<Pair<WinModel.Input, Double>> {
+    internal suspend fun scenarios(repo: Repo, slot: Int, base0: WinModel.Input): List<Pair<WinModel.Input, Double>> {
         // Força do rival não lida: simula como jogo parelho (não deixa a escolha sem simulação).
         val base = if (base0.rivalStrength == null && base0.rivalAtk == null && base0.rivalMid == null && base0.rivalDef == null &&
             base0.myStrength != null
@@ -1021,7 +1045,7 @@ object Director {
     }
 
     /** Formação+estilo que já PERDERAM para este mesmo rival (aprendizado: não repetir o erro). */
-    private suspend fun lostAgainst(repo: Repo, slot: Int): Map<String, Int> {
+    internal suspend fun lostAgainst(repo: Repo, slot: Int): Map<String, Int> {
         val rivalName = repo.fieldMap(slot)[K.RIVAL_TEAM]?.value?.takeIf { FieldMerge.known(it) }
         val out = HashMap<String, Int>()
         // o que o treinador mandou evitar (perdeu para este rival ou perdeu 2+ vezes com a mesma tática)
@@ -1039,7 +1063,7 @@ object Director {
     }
 
     /** Nota de uma tática: pontos esperados médios nos cenários do rival, menos o que já deu errado contra ele. */
-    private fun score(t: Tactic, rows: List<List<PlayerEntity?>>, scen: List<Pair<WinModel.Input, Double>>, hist: List<HistRow>, lost: Map<String, Int>, prior: HumanPrior.Prior? = null): Double? {
+    internal fun score(t: Tactic, rows: List<List<PlayerEntity?>>, scen: List<Pair<WinModel.Input, Double>>, hist: List<HistRow>, lost: Map<String, Int>, prior: HumanPrior.Prior? = null): Double? {
         val sp = simPlan(t, rows)
         var sum = 0.0
         var wsum = 0.0
@@ -1078,7 +1102,7 @@ object Director {
         return out
     }
 
-    private fun candidates(
+    internal fun candidates(
         res: TacticEngine.Result, inp: TacticEngine.Input, scen: List<Pair<WinModel.Input, Double>>,
         hist: List<HistRow>, lost: Map<String, Int>, prior: HumanPrior.Prior? = null
     ): List<Cand> {
@@ -1389,6 +1413,7 @@ object Director {
         val now = System.currentTimeMillis()
         out.put("basis", RivalWatch.basis(repo.fieldMap(slot)))
         repo.dao.putPlan(PlanEntity(slot, "tactic", out.toString(), now))
+        runCatching { EngineLab.freeze(repo, slot, pick.tactic, pick.rows, now) }
         repo.dao.deletePlan(slot, "rivalchange")
         repo.dao.putPlan(PlanEntity(slot, "tlog_R${round ?: 0}", logJson(pick.tactic, round, rival, inp, pickProb, base, f[K.RIVAL_NICK]?.value, aiInfo).toString(), now))
         AiStatus.set("")

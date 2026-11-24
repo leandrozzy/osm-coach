@@ -151,7 +151,7 @@ internal fun AuditCard(slot: Int, d: SlotData) {
 }
 
 /** Plano B (a alternativa que a simulação deixou em segundo lugar), com as mesmas barras da tática principal. */
-data class AltPlan(val formation: String, val style: String, val pressure: Int, val mentality: Int, val tempo: Int)
+data class AltPlan(val formation: String, val style: String, val pressure: Int, val mentality: Int, val tempo: Int, val trigger: String = "", val gain: Double = 0.0)
 
 internal suspend fun loadAltPlan(repo: Repo, slot: Int, tp: PlanEntity): AltPlan? {
     val j = runCatching { JSONObject(tp.json) }.getOrNull() ?: return null
@@ -161,7 +161,9 @@ internal suspend fun loadAltPlan(repo: Repo, slot: Int, tp: PlanEntity): AltPlan
     val ok = altJ.optString("main") == "$formation|${j.optString("playStyle")}" || (altJ.optString("main").startsWith(Formations.base(formation)) && altJ.optString("main").endsWith("|$style"))
     if (!ok) return null
     val a = altJ.optJSONObject("alt") ?: return null
-    return AltPlan(a.optString("formation"), a.optString("style"), a.optInt("pressure"), a.optInt("mentality"), a.optInt("tempo"))
+    // só aparece quando é ÚTIL (rende mais em algum cenário plausível do rival); registro sem essa prova não mostra plano B
+    if (!altJ.optBoolean("useful", false)) return null
+    return AltPlan(a.optString("formation"), a.optString("style"), a.optInt("pressure"), a.optInt("mentality"), a.optInt("tempo"), altJ.optString("trigger"), altJ.optDouble("gain", 0.0))
 }
 
 @Composable
@@ -182,7 +184,8 @@ internal fun PlanBView(a: AltPlan) {
                 }
             }
         }
-        Text("Fica de reserva: use se o rival mudar a tática ou se a leitura dele estiver incerta. Não substitui a principal.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+        if (a.trigger.isNotBlank()) Text("Quando trocar: se ${a.trigger}. Ganho estimado +${"%.2f".format(a.gain).replace('.', ',')} pts esperados nesse cenário.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
+        Text("Fica de reserva e só aparece quando rende mais em algum cenário plausível. Não substitui a principal.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

@@ -418,6 +418,7 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
     WhyCard(slot, d)
     AuditCard(slot, d)
     PlanBCard(slot, d)
+    LabCard(slot)
     GameContextCard(d)
     if (d.rivalChanged.isNotEmpty()) RivalChangedCard(d.rivalChanged) { startGeneration(ctx, "tactic", slot) }
     d.rivalPred?.takeIf { it.guesses.isNotEmpty() }?.let { RivalPredictCard(it, known(d.fields, K.RIVAL_NICK)) }
