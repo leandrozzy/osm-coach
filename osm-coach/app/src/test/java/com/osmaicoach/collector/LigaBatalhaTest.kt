@@ -273,4 +273,14 @@ class LigaBatalhaTest {
         assertTrue(ok.short.contains("pronta e montada")); assertEquals(SlotWidget.STATE_OK, ok.state); assertEquals(4, ok.tab)
         assertEquals(SlotWidget.STATE_WAIT, SlotWidget.buildRow(3, f, true, null, null, now, sum(ready = true, stale = true)).state)   // tática velha não é "pronta"
     }
+
+    @Test fun mountedBeatsStaleMountDiffAndChoosesLayoutBySize() {
+        val now = 100L * 3600_000L; val kick = now + 3_600_000L
+        val f = mapOf(K.TEAM to sf("Red Bull Bragantino", now), K.RIVAL_TEAM to sf("Atlético Paranaense", now), K.MATCH_AT to sf(kick.toString(), now))
+        val s = SlotSummary(slot = 3, title = "S3", known = true, competition = null, compType = null, roundDone = "37", roundTotal = "43", rival = null, human = null, pct = 100, updated = 0L,
+            tacticReady = true, mounted = true, mountDiff = listOf("Desarme Cuidadoso"), myStr = 106, rivalStr = 108, myForm = "VVVEV", home = true)
+        val r = SlotWidget.buildRow(3, f, true, null, null, now, s)
+        assertTrue(r.short.contains("pronta e montada"))                    // conferida no OSM: a diferença antiga não vale mais
+        assertEquals(106, r.strMe); assertEquals("J38/43", r.round); assertEquals(true, r.home); assertEquals("VVVEV", r.formMe)
+    }
 }

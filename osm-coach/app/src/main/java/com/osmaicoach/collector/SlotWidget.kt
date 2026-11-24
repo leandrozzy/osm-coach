@@ -27,7 +27,9 @@ object SlotWidget {
     class Row(
         val slot: Int, val title: String, val line: String, val status: String, val stale: Boolean, val tab: Int, val readAt: Long?,
         val club: String = "", val rival: String? = null, val `when`: String = "", val state: Int = STATE_NONE,
-        val at: Long? = null, val short: String = "", val icon: String = ""
+        val at: Long? = null, val short: String = "", val icon: String = "",
+        val strMe: Int? = null, val strOpp: Int? = null, val win: Int? = null, val draw: Int? = null, val loss: Int? = null,
+        val formMe: String? = null, val formOpp: String? = null, val round: String? = null, val home: Boolean? = null, val pos: String? = null
     )
     const val STATE_OK = 0; const val STATE_WAIT = 1; const val STATE_OLD = 2; const val STATE_NONE = 3
 
@@ -70,8 +72,8 @@ object SlotWidget {
         val statusShort = if (sum != null) when {
             sum.needsResult -> "registrar o resultado do jogo"
             sum.rivalChanged.isNotEmpty() -> "rival mudou: revisar a tática"
-            at != null && sum.tacticReady && !sum.tacticStale && sum.mountDiff.isNotEmpty() -> "tática pronta • ajustar no OSM"
             at != null && sum.tacticReady && !sum.tacticStale && sum.mounted -> "tática pronta e montada"
+            at != null && sum.tacticReady && !sum.tacticStale && sum.mountDiff.isNotEmpty() -> "tática pronta • ajustar no OSM"
             at != null && sum.tacticReady && !sum.tacticStale -> "tática pronta • falta montar no OSM"
             inWindow && (sum.tacticStale || sum.rivalGaps) -> "reler Pré-jogo e Análise do rival"
             inWindow -> "rival lido • gerando a tática"
@@ -87,7 +89,11 @@ object SlotWidget {
         } + (if (battleAgg != null) " • ⚔ $battleAgg" else "") + (if (stale) " • ⚠ antigo" else "")
         val line2 = (if (rival != null && at != null) "× $rival • ${fmt(at).substringBefore(' ')}  ${fmt(at).substringAfter(' ')} • " else "") + statusShort
         val icon = when (st) { STATE_OK -> "✅"; STATE_OLD -> "⚠"; else -> "⏳" }
-        return Row(slot, "S$slot · $team", line2, status, stale, tab, readAt, club = team, rival = rival, `when` = until(at, now), state = st, at = at, short = statusShort, icon = icon)
+        return Row(slot, "S$slot · $team", line2, status, stale, tab, readAt, club = team, rival = rival, `when` = until(at, now), state = st, at = at, short = statusShort, icon = icon,
+            strMe = sum?.myStr, strOpp = sum?.rivalStr, win = sum?.win?.win, draw = sum?.win?.draw, loss = sum?.win?.loss,
+            formMe = sum?.myForm?.takeIf { it.isNotBlank() }, formOpp = sum?.rivalForm?.takeIf { it.isNotBlank() },
+            round = if (sum?.roundDone != null && sum.roundTotal != null) "J${(sum.roundDone.toIntOrNull() ?: 0) + 1}/${sum.roundTotal}" else f[K.ROUND]?.value?.filter { it.isDigit() }?.takeIf { it.isNotEmpty() }?.let { "J$it" },
+            home = sum?.home, pos = f[K.LEAGUE_POS]?.value?.takeIf { FieldMerge.known(it) })
     }
 
     suspend fun loadRows(ctx: Context, now: Long = System.currentTimeMillis()): List<Row> {
@@ -135,32 +141,58 @@ object SlotWidget {
     private fun clock(at: Long?): String = at?.let { SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(it)) } ?: "--:--"
     private fun day(at: Long?): String = at?.let { SimpleDateFormat("EEE dd/MM", Locale("pt", "BR")).format(Date(it)) } ?: ""
 
+    /** Barra de chances desenhada em bitmap (vitória verde, empate âmbar, derrota vermelha): funciona em qualquer Android, sem depender de métodos remotos. */
+    fun probBar(win: Int, draw: Int, loss: Int, w: Int = 300, h: Int = 14): android.graphics.Bitmap {
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val tot = maxOf(1, win + draw + loss).toFloat()
+        val clip = android.graphics.Path().apply { addRoundRect(android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()), h / 2f, h / 2f, android.graphics.Path.Direction.CW) }
+        c.clipPath(clip)
+        var x = 0f
+        for ((v, col) in listOf(win to 0xFF2ECC71.toInt(), draw to 0xFFFFC043.toInt(), loss to 0xFFE5534B.toInt())) {
+            val ww = w * v / tot; p.color = col; c.drawRect(x, 0f, x + ww, h.toFloat(), p); x += ww
+        }
+        return bmp
+    }
+
+    private fun setProb(v: RemoteViews, id: Int, r: Row) {
+        if (r.win != null && r.draw != null && r.loss != null) { v.setImageViewBitmap(id, probBar(r.win, r.draw, r.loss)); v.setViewVisibility(id, android.view.View.VISIBLE) } else v.setViewVisibility(id, android.view.View.GONE)
+    }
+
+    private fun probText(r: Row) = if (r.win != null) "V ${r.win}%  E ${r.draw}%  D ${r.loss}%" else ""
+    private fun formEmoji(f: String?) = f?.map { when (it) { 'V' -> "🟢"; 'E' -> "🟡"; 'D' -> "🔴"; else -> "" } }?.joinToString("").orEmpty()
+    private fun strengths(r: Row) = if (r.strMe != null && r.strOpp != null) "${r.strMe} × ${r.strOpp}" else "×"
+    private fun where(r: Row) = when (r.home) { true -> "🏠 casa"; false -> "✈ fora"; null -> "" }
+
     private val WIDE = listOf(
-        intArrayOf(R.id.wc1, R.id.wc1_badge, R.id.wc1_crest, R.id.wc1_name, R.id.wc1_when), intArrayOf(R.id.wc2, R.id.wc2_badge, R.id.wc2_crest, R.id.wc2_name, R.id.wc2_when),
-        intArrayOf(R.id.wc3, R.id.wc3_badge, R.id.wc3_crest, R.id.wc3_name, R.id.wc3_when), intArrayOf(R.id.wc4, R.id.wc4_badge, R.id.wc4_crest, R.id.wc4_name, R.id.wc4_when)
+        intArrayOf(R.id.wc1, R.id.wc1_badge, R.id.wc1_crest, R.id.wc1_name, R.id.wc1_when, R.id.wc1_info), intArrayOf(R.id.wc2, R.id.wc2_badge, R.id.wc2_crest, R.id.wc2_name, R.id.wc2_when, R.id.wc2_info),
+        intArrayOf(R.id.wc3, R.id.wc3_badge, R.id.wc3_crest, R.id.wc3_name, R.id.wc3_when, R.id.wc3_info), intArrayOf(R.id.wc4, R.id.wc4_badge, R.id.wc4_crest, R.id.wc4_name, R.id.wc4_when, R.id.wc4_info)
     )
     private val LIST = listOf(
-        intArrayOf(R.id.lr1, R.id.lr1_badge, R.id.lr1_crest, R.id.lr1_title, R.id.lr1_line, R.id.lr1_when), intArrayOf(R.id.lr2, R.id.lr2_badge, R.id.lr2_crest, R.id.lr2_title, R.id.lr2_line, R.id.lr2_when),
-        intArrayOf(R.id.lr3, R.id.lr3_badge, R.id.lr3_crest, R.id.lr3_title, R.id.lr3_line, R.id.lr3_when), intArrayOf(R.id.lr4, R.id.lr4_badge, R.id.lr4_crest, R.id.lr4_title, R.id.lr4_line, R.id.lr4_when)
+        intArrayOf(R.id.lr1, R.id.lr1_badge, R.id.lr1_crest, R.id.lr1_title, R.id.lr1_line, R.id.lr1_when, R.id.lr1_sub), intArrayOf(R.id.lr2, R.id.lr2_badge, R.id.lr2_crest, R.id.lr2_title, R.id.lr2_line, R.id.lr2_when, R.id.lr2_sub),
+        intArrayOf(R.id.lr3, R.id.lr3_badge, R.id.lr3_crest, R.id.lr3_title, R.id.lr3_line, R.id.lr3_when, R.id.lr3_sub), intArrayOf(R.id.lr4, R.id.lr4_badge, R.id.lr4_crest, R.id.lr4_title, R.id.lr4_line, R.id.lr4_when, R.id.lr4_sub)
     )
 
     private fun upd(now: Long) = "atualizado " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(now))
 
-    /** 2×2: o próximo jogo em destaque (escudos, contagem, hora). */
+    /** 2×2: o próximo jogo (escudos, forças, chances, hora). */
     fun small(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_small)
         val h = hero(rows)
-        if (h == null) { v.setTextViewText(R.id.s_head, "OSM AI Coach"); v.setTextViewText(R.id.s_rival, "sem clube nos slots"); return v }
+        if (h == null) { v.setTextViewText(R.id.s_head, "OSM AI Coach"); v.setTextViewText(R.id.s_probtxt, "sem clube nos slots"); return v }
         v.setTextViewText(R.id.s_head, "S${h.slot}" + (if (h.`when`.isNotEmpty()) " • ${h.`when`}" else ""))
         v.setInt(R.id.s_badge, "setBackgroundResource", badgeFor(h.state)); v.setTextViewText(R.id.s_badge, h.slot.toString())
         setCrest(ctx, v, R.id.s_crest_me, h.club, 96); setCrest(ctx, v, R.id.s_crest_opp, h.rival, 96)
-        v.setTextViewText(R.id.s_rival, if (h.rival != null && h.at != null) "× ${h.rival}" else h.short.ifBlank { h.club })
-        v.setTextViewText(R.id.s_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)}" else h.icon + " " + h.short)
+        v.setTextViewText(R.id.s_vs, strengths(h))
+        setProb(v, R.id.s_prob, h)
+        v.setTextViewText(R.id.s_probtxt, probText(h).ifEmpty { h.rival?.let { "× $it" } ?: h.short })
+        v.setTextViewText(R.id.s_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)} ${where(h)}".trim() else h.icon + " " + h.short)
         click(ctx, v, R.id.s_root, h, 800)
         return v
     }
 
-    /** 4×2: quatro cartões lado a lado (estilo previsão do tempo): escudo, clube, contagem e cor de estado. */
+    /** 4×2: quatro cartões lado a lado (estilo previsão do tempo): escudo, clube, contagem, estado e chances. */
     fun wide(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_wide)
         for ((i, r) in rows.withIndex()) {
@@ -168,6 +200,7 @@ object SlotWidget {
             v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
             v.setTextViewText(id[3], r.club.ifBlank { "sem clube" })
             v.setTextViewText(id[4], r.`when`.ifEmpty { if (r.state == STATE_NONE) "—" else r.icon })
+            v.setTextViewText(id[5], if (r.win != null && r.at != null) "V${r.win} E${r.draw} D${r.loss}" else r.round ?: "")
             setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club)
             click(ctx, v, id[0], r, 700)
         }
@@ -175,7 +208,7 @@ object SlotWidget {
         return v
     }
 
-    /** 4×4: jogo em destaque no topo (dois escudos, contagem, hora) e a lista dos 4 slots com status. */
+    /** 4×4: jogo em destaque (escudos, forças, contagem, chances, forma, status) e a lista dos 4 slots com rodada, rival e estado. */
     fun large(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_large)
         val h = hero(rows)
@@ -185,6 +218,9 @@ object SlotWidget {
             v.setTextViewText(R.id.h_me, h.club); v.setTextViewText(R.id.h_opp, h.rival ?: "—")
             v.setTextViewText(R.id.h_when, h.`when`.ifEmpty { "sem jogo" })
             v.setTextViewText(R.id.h_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)}" else h.short)
+            v.setTextViewText(R.id.h_str, strengths(h) + (h.round?.let { "  •  $it" } ?: "") + (h.pos?.let { "  •  $it" } ?: ""))
+            setProb(v, R.id.h_prob, h); v.setTextViewText(R.id.h_probtxt, (probText(h) + "  " + where(h)).trim())
+            v.setTextViewText(R.id.h_form_me, formEmoji(h.formMe)); v.setTextViewText(R.id.h_form_opp, formEmoji(h.formOpp))
             v.setTextViewText(R.id.h_status, h.icon + " " + h.short)
             click(ctx, v, R.id.h_card, h, 900)
         }
@@ -192,6 +228,7 @@ object SlotWidget {
             val id = LIST[i]
             v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
             v.setTextViewText(id[3], r.club.ifBlank { "sem clube" }); v.setTextViewText(id[4], r.line.ifBlank { "abra o OSM com a captura ligada" }); v.setTextViewText(id[5], r.`when`)
+            v.setTextViewText(id[6], listOfNotNull(r.round, r.pos, r.win?.let { "V$it%" }).joinToString(" • "))
             setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club, 48)
             click(ctx, v, id[0], r, 700)
         }
@@ -199,27 +236,30 @@ object SlotWidget {
         return v
     }
 
-    /** Responsivo (Android 12+): o launcher escolhe 2×2, 4×2 ou 4×4 conforme o tamanho que você der ao widget. */
-    fun views(ctx: Context, rows: List<Row>, now: Long): RemoteViews =
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S)
-            RemoteViews(mapOf(
-                android.util.SizeF(110f, 110f) to small(ctx, rows, now),
-                android.util.SizeF(250f, 110f) to wide(ctx, rows, now),
-                android.util.SizeF(250f, 230f) to large(ctx, rows, now)
-            ))
-        else wide(ctx, rows, now)
+    /** Escolhe o layout pelo tamanho atual do widget (dp) — funciona do Android 11 em diante (opções do widget), sem depender do modo responsivo do Android 12. */
+    fun views(ctx: Context, rows: List<Row>, now: Long, wDp: Int, hDp: Int): RemoteViews = when {
+        wDp >= 200 && hDp >= 210 -> large(ctx, rows, now)
+        wDp >= 200 -> wide(ctx, rows, now)
+        else -> small(ctx, rows, now)
+    }
 
     fun intentFor(ctx: Context, r: Row): Intent = Intent(ctx, MainActivity::class.java)
         .setAction("com.osmaicoach.collector.WIDGET_OPEN").setData(Uri.parse("osmcoach://slot/${r.slot}/${r.tab}"))
         .putExtra("slot", r.slot).putExtra("tab", r.tab).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 
+    val PROVIDERS = listOf(SlotWidgetProvider::class.java, SlotWidgetSmallProvider::class.java, SlotWidgetLargeProvider::class.java)
+
     suspend fun update(ctx: Context) {
         val mgr = AppWidgetManager.getInstance(ctx)
-        val ids = mgr.getAppWidgetIds(ComponentName(ctx, SlotWidgetProvider::class.java))
-        if (ids.isEmpty()) return
+        val all = PROVIDERS.flatMap { c -> mgr.getAppWidgetIds(ComponentName(ctx, c)).toList() }
+        if (all.isEmpty()) return
         val now = System.currentTimeMillis()
-        val v = views(ctx, loadRows(ctx, now), now)
-        for (id in ids) mgr.updateAppWidget(id, v)
+        val rows = loadRows(ctx, now)
+        for (id in all) {
+            val o = mgr.getAppWidgetOptions(id)
+            val w = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250); val h = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 120))
+            runCatching { mgr.updateAppWidget(id, views(ctx, rows, now, w, h)) }
+        }
     }
 
     @Volatile private var appCtx: Context? = null
@@ -242,12 +282,19 @@ object SlotWidget {
     }
 }
 
-class SlotWidgetProvider : AppWidgetProvider() {
-    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+open class SlotWidgetProvider : AppWidgetProvider() {
+    private fun go(context: Context) {
         SlotWidget.attach(context)
         val pending = goAsync()
-        AppScope.scope.launch(Dispatchers.IO) {
-            try { SlotWidget.update(context) } finally { pending.finish() }
-        }
+        AppScope.scope.launch(Dispatchers.IO) { try { SlotWidget.update(context) } finally { pending.finish() } }
     }
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) = go(context)
+    /** Redimensionar o widget troca o layout (2×2 / 4×2 / 4×4) na hora. */
+    override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: android.os.Bundle) = go(context)
 }
+
+/** Mesmo widget, oferecido no seletor com tamanho inicial 2×2 (próximo jogo). */
+class SlotWidgetSmallProvider : SlotWidgetProvider()
+
+/** Mesmo widget, oferecido no seletor com tamanho inicial 4×4 (painel completo). */
+class SlotWidgetLargeProvider : SlotWidgetProvider()

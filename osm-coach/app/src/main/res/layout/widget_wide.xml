@@ -5,49 +5,41 @@
         <TextView android:id="@+id/w_footer" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#7F93B8" android:textSize="10sp" />
     </LinearLayout>
     <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:layout_marginTop="4dp">
-        <LinearLayout android:id="@+id/wc1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="4dp" android:background="@drawable/w_tile">
-            <ImageView android:id="@+id/wc1_crest" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" />
-            <TextView android:id="@+id/wc1_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
-                android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="2dp">
+        <LinearLayout android:id="@+id/wc1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="3dp" android:background="@drawable/w_tile">
+            <ImageView android:id="@+id/wc1_crest" android:layout_width="28dp" android:layout_height="28dp" android:scaleType="fitCenter" />
+            <TextView android:id="@+id/wc1_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
                 <TextView android:id="@+id/wc1_badge" android:layout_width="15dp" android:layout_height="15dp" android:textSize="9sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#08121F" android:textStyle="bold" />
-                <TextView android:id="@+id/wc1_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp"
-                    android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
+                <TextView android:id="@+id/wc1_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
             </LinearLayout>
+            <TextView android:id="@+id/wc1_info" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#9FB4D8" android:textSize="9sp" android:maxLines="1" android:ellipsize="end" />
         </LinearLayout>
-        <LinearLayout android:id="@+id/wc2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="4dp" android:background="@drawable/w_tile">
-            <ImageView android:id="@+id/wc2_crest" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" />
-            <TextView android:id="@+id/wc2_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
-                android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="2dp">
+        <LinearLayout android:id="@+id/wc2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="3dp" android:background="@drawable/w_tile">
+            <ImageView android:id="@+id/wc2_crest" android:layout_width="28dp" android:layout_height="28dp" android:scaleType="fitCenter" />
+            <TextView android:id="@+id/wc2_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
                 <TextView android:id="@+id/wc2_badge" android:layout_width="15dp" android:layout_height="15dp" android:textSize="9sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#08121F" android:textStyle="bold" />
-                <TextView android:id="@+id/wc2_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp"
-                    android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
+                <TextView android:id="@+id/wc2_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
             </LinearLayout>
+            <TextView android:id="@+id/wc2_info" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#9FB4D8" android:textSize="9sp" android:maxLines="1" android:ellipsize="end" />
         </LinearLayout>
-        <LinearLayout android:id="@+id/wc3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="4dp" android:background="@drawable/w_tile">
-            <ImageView android:id="@+id/wc3_crest" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" />
-            <TextView android:id="@+id/wc3_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
-                android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="2dp">
+        <LinearLayout android:id="@+id/wc3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="3dp" android:background="@drawable/w_tile">
+            <ImageView android:id="@+id/wc3_crest" android:layout_width="28dp" android:layout_height="28dp" android:scaleType="fitCenter" />
+            <TextView android:id="@+id/wc3_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
                 <TextView android:id="@+id/wc3_badge" android:layout_width="15dp" android:layout_height="15dp" android:textSize="9sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#08121F" android:textStyle="bold" />
-                <TextView android:id="@+id/wc3_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp"
-                    android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
+                <TextView android:id="@+id/wc3_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
             </LinearLayout>
+            <TextView android:id="@+id/wc3_info" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#9FB4D8" android:textSize="9sp" android:maxLines="1" android:ellipsize="end" />
         </LinearLayout>
-        <LinearLayout android:id="@+id/wc4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-            android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="4dp" android:background="@drawable/w_tile">
-            <ImageView android:id="@+id/wc4_crest" android:layout_width="30dp" android:layout_height="30dp" android:scaleType="fitCenter" />
-            <TextView android:id="@+id/wc4_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
-                android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="2dp">
+        <LinearLayout android:id="@+id/wc4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:layout_marginHorizontal="2dp" android:orientation="vertical" android:gravity="center" android:padding="3dp" android:background="@drawable/w_tile">
+            <ImageView android:id="@+id/wc4_crest" android:layout_width="28dp" android:layout_height="28dp" android:scaleType="fitCenter" />
+            <TextView android:id="@+id/wc4_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#FFFFFF" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
                 <TextView android:id="@+id/wc4_badge" android:layout_width="15dp" android:layout_height="15dp" android:textSize="9sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#08121F" android:textStyle="bold" />
-                <TextView android:id="@+id/wc4_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp"
-                    android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
+                <TextView android:id="@+id/wc4_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="4dp" android:textColor="#4CD3FF" android:textSize="11.5sp" android:textStyle="bold" android:maxLines="1" />
             </LinearLayout>
+            <TextView android:id="@+id/wc4_info" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#9FB4D8" android:textSize="9sp" android:maxLines="1" android:ellipsize="end" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
