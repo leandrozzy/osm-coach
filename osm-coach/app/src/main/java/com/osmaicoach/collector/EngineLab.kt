@@ -162,7 +162,7 @@ object EngineLab {
         notes.add("Objetivo: " + (if (objective == OBJ_POINTS) "pontos esperados (3×P(vitória) + P(empate))" else "chance de vitória") + (if (battle) " • batalha: rival tratado como humano" else ""))
         notes.add("Leitura do rival: " + ev.joinToString(", ") { "${it.field} ${it.status.label}" })
         if (SecretTraining.on(f)) notes.add("Treino secreto do rival: o que não foi lido continua desconhecido (nada é inferido).")
-        if (referee != null && Referee.COLORS.indices.any { Referee.tackle(referee) == "Cuidadoso" }) notes.add("Árbitro $referee: desarme limitado a ${allowed.last()}.")
+        if (referee != null && allowed.last() != "Extremo") notes.add("Árbitro $referee: desarme limitado a ${allowed.last()}.")
         if (emergency) notes.add("Força confirmada +$cdiff: o 4-3-3 de emergência foi testado (não é forçado).")
         notes.add("Nota = " + (if (balanced) "50% média + 50% pior cenário (jogo equilibrado/incerto)" else "75% média + 25% pior cenário") + " em ${scen.size} cenário(s) do rival.")
         return Rec(best.c.tactic, best.c.rows, objective, pr?.win ?: 0, pr?.draw ?: 0, pr?.loss ?: 0, best.value, best.worst, scen.size, ev, notes, alt, emergency)

@@ -2068,40 +2068,53 @@ internal fun PageTitle(icon: String, title: String, chip: String? = null) {
 
 
 /** "Para fazer agora": só o que precisa de você, em ordem de urgência, de todos os slots. */
-@Composable
-internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
-    val now = System.currentTimeMillis()
-    class Todo(val slot: Int, val icon: String, val title: String, val sub: String, val urgency: Int, val tab: Int)
-    val todo = ArrayList<Todo>()
+/** Uma pendência do Hoje (puro, testável). */
+internal class TodoItem(val slot: Int, val icon: String, val title: String, val sub: String, val urgency: Int, val tab: Int)
+
+/** Todas as pendências, da mais urgente para a menos (mesmas regras de antes). */
+internal fun todoItems(data: TodayData, now: Long): List<TodoItem> {
+    val todo = ArrayList<TodoItem>()
     for (s in data.slots) {
         if (s.ended || s.state != null) continue
         val at = s.nextAt
-        if (s.needsResult) todo.add(Todo(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
+        if (s.needsResult) todo.add(TodoItem(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
         if (at != null && at > now && (s.tacticStale || s.rivalGaps) && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
-            todo.add(Todo(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
+            todo.add(TodoItem(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
         else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
-            todo.add(Todo(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
-        if (s.rivalChanged.isNotEmpty()) todo.add(Todo(s.slot, "⚠", "O rival mudou a tática", "Gere a tática de novo antes do jogo", 6, 4))
-        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(if (s.mountDiff.isNotEmpty()) Todo(s.slot, "📋", "Ajustar a tática montada no OSM", "Li a Tática do jogo e está diferente da gerada: " + s.mountDiff.joinToString(" • "), 3, 4)
-            else Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
+            todo.add(TodoItem(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
+        if (s.rivalChanged.isNotEmpty()) todo.add(TodoItem(s.slot, "⚠", "Revisar tática", (if (at != null && at > now) (if (s.compType?.contains("atalha", true) == true) "batalha em " else "jogo em ") + countdownShort(at) + " · " else "") + "rival mudou: " + s.rivalChanged.take(2).joinToString(", ") { c -> c.label.lowercase() + " " + c.from + "→" + c.to }, 6, 4))
+        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(if (s.mountDiff.isNotEmpty()) TodoItem(s.slot, "📋", "Ajustar a tática montada no OSM", "Li a Tática do jogo e está diferente da gerada: " + s.mountDiff.joinToString(" • "), 3, 4)
+            else TodoItem(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
     }
     for (w in data.work) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }
-        if (idle.isNotEmpty()) todo.add(Todo(w.slot, "🏋", "Treinador parado: " + idle.joinToString { Timers.roleLabel(it.role) }, "Treino parado é evolução perdida", 3, 6))
+        if (idle.isNotEmpty()) todo.add(TodoItem(w.slot, "🏋", "Treinador parado: " + idle.joinToString { Timers.roleLabel(it.role) }, "Treino parado é evolução perdida", 3, 6))
     }
     // "Reler Pré-jogo e Análise do rival" já cobre essas duas telas: não repete como "Atualizar: Pré-jogo/Análise" no mesmo slot
     val reread = todo.filter { it.title.startsWith("Reler Pré-jogo") }.map { it.slot }.toSet()
     for (n in data.needs.filter { it.urgency >= 1 && !(it.slot in reread && (it.type == ScreenType.PREGAME || it.type == ScreenType.REPORT)) }) {
-        todo.add(Todo(n.slot, "🔄", "Atualizar: " + (Fresh.NAME[n.type] ?: n.type.name), n.reason.substringBefore(":").replaceFirstChar { it.uppercase() }, 2, 0))
+        todo.add(TodoItem(n.slot, "🔄", "Atualizar: " + (Fresh.NAME[n.type] ?: n.type.name), n.reason.substringBefore(":").replaceFirstChar { it.uppercase() }, 2, 0))
     }
-    val sorted = todo.sortedWith(compareByDescending<Todo> { it.urgency }.thenBy { it.slot })
+    return todo.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenBy { it.slot })
+}
+
+/** UMA ação prioritária por slot (a mais urgente), slots urgentes primeiro; slot sem pendência fica de fora (aparece compacto como "em dia"). */
+internal fun priorityPerSlot(items: List<TodoItem>): List<TodoItem> =
+    items.groupBy { it.slot }.values.map { it.first() }.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenBy { it.slot })
+
+@Composable
+internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
+    val now = System.currentTimeMillis()
+    val all = todoItems(data, now)
+    val sorted = priorityPerSlot(all)
+    val readySlots = data.slots.filter { !it.ended && it.state == null && sorted.none { t -> t.slot == it.slot } }.map { it.slot }
     Column(Modifier.fillMaxWidth().padding(top = 14.dp).osmPanel().padding(vertical = 8.dp)) {
         Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Para fazer agora", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            Text("Prioridade por slot", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
             if (sorted.isNotEmpty()) Pill("${sorted.size}", false)
         }
         if (sorted.isEmpty()) {
-            Text("✅ Tudo em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+            Text("✅ Todos os slots em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
         }
         for (t in sorted.take(6)) {
             Row(
@@ -2111,15 +2124,19 @@ internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
                 Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) { Text(t.icon, fontSize = 18.sp) }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(t.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(t.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(t.title + " →", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(t.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text("S${t.slot}", fontSize = 13.sp, color = C.GOLD, fontWeight = FontWeight.ExtraBold)
                 Text("  ›", fontSize = 18.sp, color = C.MUTED)
             }
         }
-        if (sorted.size > 6) Text("+ ${sorted.size - 6} outras pendências", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        if (readySlots.isNotEmpty() && sorted.isNotEmpty()) Text("✅ " + readySlots.joinToString(" • ") { "S$it" } + " em dia", fontSize = 13.sp, color = C.OK, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        val extra = all.size - sorted.size
+        if (extra > 0) Fold("📋", "Outras pendências", "$extra") {
+            for (t in all.filter { a -> sorted.none { it === a } }) Text("S${t.slot} · ${t.title} — ${t.sub}", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(vertical = 3.dp).clickable { onOpenSlot(t.slot, t.tab) })
+        }
     }
 }
 
