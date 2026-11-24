@@ -413,6 +413,7 @@ internal fun SlotCalendar(slot: Int, d: SlotData) {
         return
     }
     ResultsStrip(d)
+    LeagueResultsCard(slot)
     val sorted = d.matches.sortedBy { it.round ?: 999 }
     // o total do hub pode contar só a liga (34) enquanto o calendário traz também as copas (43): vale o maior
     val total = fv(d, K.ROUND_TOTAL).toIntOrNull()?.let { t -> maxOf(t, sorted.maxOfOrNull { it.round ?: 0 } ?: 0) }

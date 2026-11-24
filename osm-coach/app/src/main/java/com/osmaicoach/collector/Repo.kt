@@ -1154,6 +1154,7 @@ class Repo(private val ctx: Context) {
             val old = dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
             dao.putPlan(PlanEntity(slot, "league", League.merge(old, kind, rows, now).toString(), now))
         }
+        runCatching { ResultsIngest.onScreen(this, slot, type, ocr, now) }
         val deals = Sponsors.parse(ocr)
         if (deals.size >= 2) {
             dao.putPlan(PlanEntity(slot, "sponsor", Sponsors.toJson(deals, now), now))

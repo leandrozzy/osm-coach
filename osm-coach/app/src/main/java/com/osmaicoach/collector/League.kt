@@ -81,9 +81,34 @@ object League {
     fun merge(old: JSONObject?, kind: String, rows: List<Row>, now: Long): JSONObject {
         val j = old ?: JSONObject()
         val m = j.optJSONObject(kind) ?: JSONObject()
+        val prevAt = j.optLong(kind + "At", 0L)
         for (r in rows) m.put(key(r.club), toJson(r))
         j.put(kind, m).put(kind + "At", now)
+        if (kind == "st") snapshotPass(j, m, rows, prevAt, now)
         return j
+    }
+
+    /**
+     * Fotografia COMPLETA da classificação, para comparar duas leituras (quem passou, quem encostou). Uma "passada" são as rolagens seguidas (até 3 min entre elas);
+     * a foto só nasce quando a passada cobriu todos os clubes conhecidos, nunca de uma tabela meio velha meio nova. No máx. 6 fotos; igual à anterior não repete.
+     */
+    private fun snapshotPass(j: JSONObject, m: JSONObject, rows: List<Row>, prevAt: Long, now: Long) {
+        val pass = if (now - prevAt > 180_000L) JSONObject() else (j.optJSONObject("stPass") ?: JSONObject())
+        for (r in rows) pass.put(key(r.club), 1)
+        j.put("stPass", pass)
+        val total = m.length()
+        if (total < 6 || pass.length() < total) return
+        val snap = JSONObject().put("at", now)
+        val rr = JSONObject()
+        var sumJ = 0
+        for (k in m.keys()) { val o = m.optJSONObject(k) ?: continue; rr.put(k, org.json.JSONArray().put(o.optInt("rank", -1)).put(o.optInt("j", -1)).put(o.optInt("pts", -1)).put(o.optString("club"))); sumJ += o.optInt("j", 0) }
+        snap.put("r", rr).put("sumJ", sumJ)
+        val arr = j.optJSONArray("snaps") ?: org.json.JSONArray()
+        if (arr.length() > 0 && arr.getJSONObject(arr.length() - 1).optInt("sumJ", -1) == sumJ && arr.getJSONObject(arr.length() - 1).optJSONObject("r")?.toString() == rr.toString()) return
+        arr.put(snap)
+        val keep = org.json.JSONArray()
+        for (i in maxOf(0, arr.length() - 6) until arr.length()) keep.put(arr.get(i))
+        j.put("snaps", keep)
     }
 
     fun table(j: JSONObject?, kind: String): List<Row> {

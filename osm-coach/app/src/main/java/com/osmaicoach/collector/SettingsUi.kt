@@ -161,6 +161,10 @@ internal fun NotificationsPanel() {
         SwitchRow("30 min depois do jogo: registrar ou ler o resultado", res) { res = it; toggle("result", it) }
         var autoT by remember { mutableStateOf(Settings.get(ctx, "auto_tactic", "1") == "1") }
         SwitchRow("Gerar a tática sozinho depois de ler o Pré-jogo e a Análise do rival (nas 8 h antes do jogo)", autoT) { autoT = it; Settings.put(ctx, "auto_tactic", if (it) "1" else "0") }
+        var bTeam by remember { mutableStateOf(Settings.get(ctx, Battle.SETTING, Battle.DEFAULT_TEAM)) }
+        OutlinedTextField(bTeam, { bTeam = it; Settings.put(ctx, Battle.SETTING, it.trim()) }, label = { Text("Minha equipe de batalha") }, singleLine = true,
+            supportingText = { Text("Usada para achar meu lado (esquerda/direita) na tela de resultados da batalha. Trocar vale para as próximas leituras; o histórico não muda.") },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
         var labOn by remember { mutableStateOf(Settings.get(ctx, "lab_on", "0") == "1") }
         SwitchRow("🧪 Modo de teste: motor novo em paralelo (só registra e compara; não troca a tática)", labOn) { labOn = it; Settings.put(ctx, "lab_on", if (it) "1" else "0") }
         SwitchRow("Alertas do diretor (ao encerrar a leitura e a cada hora, com o app fechado)", dir) { dir = it; toggle("director", it) }

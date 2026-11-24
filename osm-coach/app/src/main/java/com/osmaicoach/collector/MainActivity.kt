@@ -187,6 +187,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Health.install(applicationContext)
         Diag.init(applicationContext)
+        SlotWidget.attach(applicationContext)
         Settings.migrate(applicationContext)
         AppScope.scope.launch { Repo(applicationContext).purgeLegacy() }
         Notifier.ensureChannels(applicationContext)
@@ -337,6 +338,7 @@ object UiBus {
         if (now - lastBump < 1200L) return
         lastBump = now
         main.post { version++ }
+        SlotWidget.requestRefresh()
     }
 }
 
@@ -3237,6 +3239,7 @@ internal fun SlotSummaryTab(slot: Int, d: SlotData) {
     } else {
         MatchupHero(slot, d)
         if (d.eve.isNotEmpty()) EveCard(d.eve)
+        BattleCard(slot, d)
         StrengthsAttention(d)
         CompareCard(d)
         DirectorChat(slot, d)
@@ -3376,6 +3379,7 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
         }
         return
     }
+    RivalRadarCard(slot, d)
     val at = fv(d, K.MATCH_AT).toLongOrNull()
     // IA sempre no topo
     OutlinedButton(

@@ -44,6 +44,7 @@ class CaptureService : AccessibilityService() {
 
     override fun onServiceConnected() {
         Health.install(applicationContext)
+        SlotWidget.attach(applicationContext)
         Health.beat(applicationContext)
         instance = this
         Diag.serviceConnected = true
