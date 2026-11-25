@@ -360,10 +360,11 @@ internal fun UnreadCard(round: Int, modifier: Modifier, onClick: () -> Unit) {
 @Composable
 internal fun FilterPill(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.padding(end = 6.dp).clip(RoundedCornerShape(50))
-            .background(if (selected) C.PRIMARY else C.SURFACE2).clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-    ) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else C.MUTED) }
+        Modifier.padding(end = 6.dp).heightIn(min = 44.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL))
+            .background(if (selected) C.PRIMARY else C.SURFACE2).border(1.dp, if (selected) C.PRIMARY else C.BORDER, RoundedCornerShape(DS.RADIUS_CONTROL)).clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (selected) DS.ON_LIME else C.MUTED) }
 }
 
 /** Resumo dos últimos jogos do seu time: bolinhas V/E/D, aproveitamento e gols. */
