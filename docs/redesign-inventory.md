@@ -77,3 +77,4 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Abertura**: app aberto do zero começa sempre em Hoje (`onCreate` com `savedInstanceState == null`); girar a tela/memória e voltar do OSM mantêm o lugar.
 - **Botão "App" da bolha**: abre o slot em que o OSM está (`Diag.currentSlot`) na aba atual (`Route.tab = -1` = manter).
 - **Missões (Hoje "Atualizar: Missões")**: a tela com todas as missões liberadas só mostra "A semana reinicia em"; o cronômetro antigo de "novas missões" ficava vencido para sempre. Agora ler a tela sem esse contador apaga o cronômetro vencido (`Repo.applyExtra`, MISSIONS). Teste novo em `ScreensTest`.
+- **Posição na liga (novo)**: `Standings.kt` + `StandingsCard` (aba Calendário) usam só a Classificação do OSM, sem cruzar resultados das jornadas. Testes com a tabela real do usuário (`StandingsTest`) e com o layout real das telas de Classificação e de Resultados (`RealLayoutTest`).

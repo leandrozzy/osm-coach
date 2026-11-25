@@ -1,5 +1,6 @@
 package com.osmaicoach.collector
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
@@ -189,5 +190,76 @@ internal fun BattleCard(slot: Int, d: SlotData) {
         }
         st.myRow?.let { Text("Meu jogo: ${it.name} • ${it.games} jogo(s) • ${it.pts} pts", fontSize = 13.sp) }
         Text("Jogos pendentes: não lidos • sem regra de pontuação lida, não calculo \"empate basta\" nem \"precisa vencer\".", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** Carrega a tabela lida da Classificação do slot (plano "league") e monta a visão (ver [Standings]). */
+internal suspend fun loadStandings(repo: Repo, slot: Int, matches: List<MatchEntity>): Standings.View? {
+    val lg = repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+    val f = repo.fieldMap(slot)
+    val my = f[K.TEAM]?.value?.takeIf { FieldMerge.known(it) } ?: f[K.HUB_TITLE]?.value
+    val leagueDone = matches.count { it.result != null && it.round != null && !Fixtures.isCup(it) }.takeIf { it > 0 }
+    val hasNext = f[K.MATCH_AT]?.value?.toLongOrNull()?.let { it > System.currentTimeMillis() } == true
+    return Standings.build(League.table(lg, "st"), lg.optLong("stAt", 0L), my, leagueDone, hasNext)
+}
+
+/** Posição na liga: do jeito que a Classificação do OSM mostra (posição, pontos, jogos, V/E/D, gols), com o escudo de cada clube. */
+@Composable
+internal fun StandingsCard(slot: Int, d: SlotData) {
+    val ctx = LocalContext.current
+    val v = rememberLoaded<Standings.View?>(null, UiBus.version, "stand$slot") { runCatching { loadStandings(Repo(ctx), slot, d.matches) }.getOrNull() }
+    if (v == null) {
+        Panel {
+            Text("Posição na liga: ainda não li a Classificação.", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text("No jogo: menu → Classificação, e role a tabela inteira (uma vez).", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+        }
+        return
+    }
+    val me = v.me
+    DsSection("Classificação", "lida ${ago(v.readAt)}")
+    Column(Modifier.fillMaxWidth().padding(bottom = 6.dp).dsHero(C.GOLD).padding(16.dp)) {
+        if (me != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${me.rank}º", fontSize = 44.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
+                Column(Modifier.padding(start = 14.dp)) {
+                    Text("de ${v.rows.maxOf { it.rank ?: 0 }} clubes", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("${me.pts} pontos em ${me.j} jogos", fontSize = 14.sp, color = C.MUTED)
+                    if (me.v != null) Text("${me.v}V ${me.e}E ${me.d}D • gols ${me.gf}-${me.ga}", fontSize = 13.sp, color = C.MUTED)
+                }
+            }
+        } else Text("Não achei o seu clube na tabela lida. Confira o nome do time no slot.", fontSize = 14.sp, color = C.WARN)
+        if (v.stale) Text("⚠ Você já jogou mais depois desta leitura: abra a Classificação no OSM para atualizar.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
+        if (v.missingRanks.isNotEmpty()) Text("⚠ Faltam as posições ${v.missingRanks.joinToString(", ") { "${it}º" }}: role a Classificação até o fim.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
+    }
+    if (v.ifWin != null && v.ifDraw != null && v.ifLoss != null) {
+        Text("Se no próximo jogo você…", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((lab, pos, col) in listOf(Triple("vencer", v.ifWin, C.OK), Triple("empatar", v.ifDraw, C.GOLD), Triple("perder", v.ifLoss, C.BAD))) Column(
+                Modifier.weight(1f).clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, col.copy(alpha = 0.5f), RoundedCornerShape(DS.RADIUS_CARD)).padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally
+            ) { Text("${pos}º", fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, color = col); Text(lab, fontSize = 12.sp, color = C.MUTED) }
+        }
+        Text("Conta feita na tabela de agora: os outros jogos da rodada não entram.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(horizontal = 6.dp, vertical = 8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp)) {
+            Text("#", Modifier.width(28.dp), fontSize = 11.5.sp, color = C.MUTED, fontWeight = FontWeight.Bold)
+            Text("CLUBE", Modifier.weight(1f).padding(start = 34.dp), fontSize = 11.5.sp, color = C.MUTED, fontWeight = FontWeight.Bold)
+            Text("J", Modifier.width(30.dp), fontSize = 11.5.sp, color = C.MUTED, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text("PTS", Modifier.width(40.dp), fontSize = 11.5.sp, color = C.MUTED, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        }
+        for (r in v.rows) {
+            val mine = r === me
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 2.dp).then(if (mine) Modifier.clip(RoundedCornerShape(12.dp)).background(C.GOLD.copy(alpha = 0.16f)) else Modifier).padding(horizontal = 6.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("${r.rank}", Modifier.width(28.dp), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = if (mine) C.GOLD else C.MUTED)
+                RivalShield(r.club, 26.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(r.club, Modifier.weight(1f), fontSize = 14.sp, fontWeight = if (mine) FontWeight.ExtraBold else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (mine) C.GOLD else C.TEXT)
+                Text("${r.j ?: ""}", Modifier.width(30.dp), fontSize = 13.sp, color = C.MUTED, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("${r.pts}", Modifier.width(40.dp), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+            }
+        }
     }
 }
