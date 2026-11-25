@@ -27,6 +27,17 @@ object WorldSync {
     /** Progresso REAL da tarefa em andamento (bytes lidos / bytes do arquivo); null quando não há total conhecido. */
     @Volatile var progress: Float? = null; private set
     @Volatile var counters: WorldImport.Counters = WorldImport.Counters(); private set
+    /** Etapa geral da sincronização ("2 de 6") — a barra geral = etapas concluídas + progresso da atual. */
+    @Volatile var step: Int = 0; private set
+    @Volatile var steps: Int = 0; private set
+    val overall: Float? get() = if (running == null || steps == 0) null else ((step.toFloat() + (progress ?: 0f)) / steps).coerceIn(0f, 1f)
+
+    /** Tarefas deixadas "sincronizando" por um app fechado no meio da importação: viram "interrompida" (a importação retoma do checkpoint). */
+    fun healStale(db: WorldDb) {
+        if (running != null) return
+        db.w.execSQL("UPDATE football_sync_jobs SET status='interrompida', finished=COALESCE(finished,started), message=COALESCE(message,'')||' (o app foi fechado; retoma do ponto salvo)' WHERE status='sincronizando'")
+        db.w.execSQL("UPDATE football_sources SET status=CASE WHEN last_sync IS NOT NULL THEN 'atualizada' WHEN imported>0 THEN 'operacional' ELSE 'aguardando sincronização' END WHERE status='sincronizando'")
+    }
 
     private val failStreak = HashMap<String, Int>()
     private val blockedUntil = HashMap<String, Long>()
@@ -77,10 +88,13 @@ object WorldSync {
         if (!lock.tryLock()) return
         val db = WorldDb.get(ctx)
         try {
-            WorldSources.seed(db)
+            WorldSources.seed(db); healStale(db)
+            running = "Lendo o que o OSM já mostrou"; step = 0; steps = 4 + TASKS.size; progress = null; UiBus.bump()
+            runCatching { WorldOsm.refresh(ctx, force = true) }                           // local: não depende de rede
             if (!allowedNet(ctx)) { lastMessage = "Aguardando Wi‑Fi (a importação grande só roda em rede sem limite de dados)."; return }
             ensureCountries(ctx, db)
             val now = System.currentTimeMillis()
+            step = 1
             for (t in TASKS) {
                 if (only != null && t.sourceId != only) continue
                 if (!currentCoroutineContext().isActive || pause.get()) break
@@ -88,12 +102,18 @@ object WorldSync {
                 val src = db.query("SELECT enabled FROM football_sources WHERE id=?", t.sourceId) { it.getInt(0) }.firstOrNull() ?: 1
                 if (src == 0) continue
                 if (!force && !due(db, t, now)) continue
-                runTask(ctx, db, t)
+                runTask(ctx, db, t); step++
             }
+            running = "Confederações (Wikidata)"; progress = null; UiBus.bump()
             if (only == null || only == WorldSources.WIKIDATA) runCatching { WorldWikidata.syncConfederations(ctx, db) }
+            step++
+            running = "Identificando o que o OSM mostrou"; UiBus.bump()
+            runCatching { WorldOsm.refresh(ctx, force = true) }
+            step++; running = "Bandeiras, escudos e fotos do OSM"; progress = null; UiBus.bump()
+            runCatching { WorldOsm.prefetchImages(ctx) }
             runCatching { WorldCoverage.snapshot(db) }
-            runCatching { WorldOcr.resolvePending(ctx, 400) }
-        } finally { running = null; progress = null; lock.unlock(); UiBus.bump() }
+            lastMessage = "Concluída: " + WorldOsm.lastReport
+        } finally { running = null; progress = null; step = 0; steps = 0; lock.unlock(); UiBus.bump() }
     }
 
     private suspend fun currentCoroutineContext() = kotlin.coroutines.coroutineContext

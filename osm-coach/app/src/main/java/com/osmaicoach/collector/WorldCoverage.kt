@@ -24,7 +24,7 @@ object WorldCoverage {
 
     class Row(val label: String, val a: Long, val b: Long, val c: Long)
     /** Por país (clubes, competições, jogadores) — só dos países com algum dado. */
-    fun byCountry(db: WorldDb, limit: Int = 300): List<Triple<String, String, LongArray>> = db.query(
-        "SELECT c.iso2, c.name_pt, c.name_en, (SELECT COUNT(*) FROM football_clubs x WHERE x.iso2=c.iso2), (SELECT COUNT(*) FROM football_competitions y WHERE y.iso2=c.iso2), (SELECT COUNT(*) FROM football_players p WHERE p.nationality_iso=c.iso2) FROM football_countries c ORDER BY 4 DESC LIMIT $limit"
+    fun byCountry(db: WorldDb, limit: Int = 300, all: Boolean = true): List<Triple<String, String, LongArray>> = db.query(
+        "SELECT c.iso2, c.name_pt, c.name_en, (SELECT COUNT(*) FROM football_clubs x WHERE x.iso2=c.iso2${if (all) "" else " AND x.osm_seen>0"}), (SELECT COUNT(*) FROM football_competitions y WHERE y.iso2=c.iso2${if (all) "" else " AND y.osm_seen>0"}), (SELECT COUNT(*) FROM football_players p WHERE p.nationality_iso=c.iso2${if (all) "" else " AND p.osm_seen>0"}) FROM football_countries c ${if (all) "" else "WHERE c.osm_seen>0 "}ORDER BY 4 DESC, 2 LIMIT $limit"
     ) { cu -> Triple(cu.getString(0), cu.getString(1) ?: cu.getString(2), longArrayOf(cu.getLong(3), cu.getLong(4), cu.getLong(5))) }.filter { it.third.sum() > 0 }
 }

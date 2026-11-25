@@ -8,8 +8,8 @@ import android.database.sqlite.SQLiteOpenHelper
 
 /** Base Mundial — banco próprio `world_football.db` (ver [WorldSchema]). Acesso simples por SQL; leituras paginadas no servidor/SQLite, nunca a base inteira na memória. */
 class WorldDb private constructor(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "world_football.db", null, WorldSchema.VERSION) {
-    override fun onCreate(db: SQLiteDatabase) { WorldSchema.DDL.forEach { db.execSQL(it) } }
-    override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) { WorldSchema.DDL.forEach { db.execSQL(it) } }   // só aditivo
+    override fun onCreate(db: SQLiteDatabase) { WorldSchema.DDL.forEach { db.execSQL(it) }; WorldSchema.ALTERS.forEach { runCatching { db.execSQL(it) } } }
+    override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) { WorldSchema.DDL.forEach { db.execSQL(it) }; WorldSchema.ALTERS.forEach { runCatching { db.execSQL(it) } } }   // só aditivo
     override fun onConfigure(db: SQLiteDatabase) { db.enableWriteAheadLogging() }
 
     val w: SQLiteDatabase get() = writableDatabase

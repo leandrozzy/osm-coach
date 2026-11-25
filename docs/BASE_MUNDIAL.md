@@ -5,6 +5,13 @@ Dados REAIS de países/competições/clubes/jogadores ficam num banco **separado
 `osm_coach.db` (Room v1, sem migração) **não foi alterado**. Atributos do OSM (camada OSM) nunca se misturam com a camada
 real; a ligação entre as duas é só a tabela de mapeamentos (camada de mapeamento).
 
+## Foco no OSM (revisão 25/11)
+A aba mostra **só o que o OSM já exibiu ao app** (padrão "Só o que está no OSM"; "Toda a base mundial" é opcional). `WorldOsm.refresh` lê os elencos,
+adversários, competição do slot, bandeiras de jogadores (`natiso4`) e o atlas de ligas do app (somente leitura do Room), cria observações, identifica e marca `osm_seen`
+em países/competições/clubes/jogadores. Países/ligas/clubes sem relação com o OSM não aparecem. `WorldClean` descarta nomes fora do alfabeto latino, com "?"/"�" e
+todo futebol feminino (na importação e numa limpeza única do que já estava no banco, `world_clean_v1`). Imagens: bandeira (`FlagWeb`), escudo (`CrestWeb`) e foto (Commons) são pedidas só para o escopo do OSM, com barra de progresso.
+Dados manuais do usuário (escudos/bandeiras em `crests/manual.json`, `FlagManual`) não são tocados; a Base nunca sobrescreve nada do Room. Banco `world_football.db` versão 2 (coluna `countries.osm_seen`, ALTER aditivo).
+
 ## Arquitetura
 | Arquivo (`com.osmaicoach.collector`) | Papel |
 |---|---|

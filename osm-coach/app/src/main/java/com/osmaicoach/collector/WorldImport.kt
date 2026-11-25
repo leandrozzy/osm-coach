@@ -61,10 +61,11 @@ object WorldImport {
         private fun g(r: List<String>, k: String) = s(r, h[k] ?: -1)
         override fun row(r: List<String>, c: Counters) {
             c.analyzed++
-            val en = g(r, "nom_anglais"); val local = g(r, "nom_local"); val name = (en ?: local) ?: run { c.failed++; return }
+            val en = g(r, "nom_anglais"); val local = g(r, "nom_local"); val name = listOfNotNull(en, local).firstOrNull { WorldClean.nameOk(it) } ?: run { c.failed++; return }
             val wd = qid(g(r, "wikidata")); val iso = g(r, "pays_iso")?.lowercase()?.takeIf { it.length == 2 }
             val key = WorldNorm.clubKey(name)
-            val cat = g(r, "categorie"); val women = cat?.contains("fémin", true) == true || cat?.contains("women", true) == true
+            val cat = g(r, "categorie"); val women = cat?.contains("fémin", true) == true || cat?.contains("women", true) == true || WorldClean.isWomen(name)
+            if (women) return
             val marker = if (women && !key.marker.contains("W")) key.marker + "W" else key.marker
             val country = iso?.let { db.id("SELECT id FROM football_countries WHERE iso2=?", it) }
             var id = wd?.let { db.id("SELECT id FROM football_clubs WHERE wikidata=?", it) }
@@ -107,7 +108,7 @@ object WorldImport {
         private fun g(r: List<String>, k: String) = s(r, h[k] ?: -1)
         override fun row(r: List<String>, c: Counters) {
             c.analyzed++
-            val name = g(r, "name") ?: run { c.failed++; return }
+            val name = g(r, "name")?.takeIf { WorldClean.nameOk(it) && !WorldClean.isWomen(it) } ?: run { c.failed++; return }
             val wd = qid(g(r, "key_wikidata")); val reep = g(r, "reep_id")
             val iso = ci.iso(g(r, "country")); val key = WorldNorm.clubKey(name)
             val country = iso?.let { db.id("SELECT id FROM football_countries WHERE iso2=?", it) }
@@ -131,7 +132,7 @@ object WorldImport {
         private fun g(r: List<String>, k: String) = s(r, h[k] ?: -1)
         override fun row(r: List<String>, c: Counters) {
             c.analyzed++
-            val name = g(r, "name") ?: run { c.failed++; return }
+            val name = g(r, "name")?.takeIf { WorldClean.nameOk(it) && !WorldClean.isWomen(it) } ?: run { c.failed++; return }
             val wd = qid(g(r, "key_wikidata")); val iso = ci.iso(g(r, "country"))
             val country = iso?.let { db.id("SELECT id FROM football_countries WHERE iso2=?", it) }
             var id = wd?.let { db.id("SELECT id FROM football_competitions WHERE wikidata=?", it) } ?: db.id("SELECT id FROM football_competitions WHERE name_key=? AND COALESCE(iso2,'')=?", WorldNorm.fold(name), iso ?: "")
@@ -151,7 +152,7 @@ object WorldImport {
         override fun row(r: List<String>, c: Counters) {
             if (g(r, "type") != "player") return
             c.analyzed++
-            val name = g(r, "name") ?: run { c.failed++; return }
+            val name = g(r, "name")?.takeIf { WorldClean.nameOk(it) } ?: run { c.failed++; return }
             val reep = g(r, "reep_id") ?: run { c.failed++; return }
             val dob = g(r, "date_of_birth"); val nat = g(r, "nationality"); val k = WorldNorm.playerKey(name)
             val vals = arrayOf<Any?>(name, g(r, "full_name"), k.full, k.surname, k.initial, dob, year(dob), nat, ci.iso(nat), g(r, "position"), g(r, "height_cm")?.toDoubleOrNull()?.toInt(), qid(g(r, "key_wikidata")), reep, g(r, "key_transfermarkt"), g(r, "key_api_football"), WorldSources.REEP_PEOPLE, "desconhecido", now)

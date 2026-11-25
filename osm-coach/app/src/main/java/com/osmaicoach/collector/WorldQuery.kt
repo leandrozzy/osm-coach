@@ -8,41 +8,44 @@ object WorldQuery {
 
     class CountryRow(val iso: String, val name: String, val confed: String?, val clubs: Long, val comps: Long, val players: Long)
     class CompRow(val id: Long, val name: String, val iso: String?, val country: String?, val level: Int?, val kind: String?, val clubs: Long, val osmSeen: Boolean)
-    class ClubRow(val id: Long, val name: String, val iso: String?, val city: String?, val marker: String, val category: String?, val league: String?, val osmSeen: Boolean, val wikidata: String?)
+    class ClubRow(val id: Long, val name: String, val iso: String?, val city: String?, val marker: String, val category: String?, val league: String?, val osmSeen: Boolean, val wikidata: String?, val country: String? = null)
     class PlayerRow(val id: Long, val name: String, val dob: String?, val nat: String?, val iso: String?, val pos: String?, val osmSeen: Boolean, val hasPhoto: Boolean)
 
     private fun like(q: String) = WorldNorm.fold(q).let { if (it.isEmpty()) "%" else "$it%" }
     private fun contains(q: String) = WorldNorm.fold(q).let { if (it.isEmpty()) "%" else "%$it%" }
 
-    fun countries(db: WorldSql, q: String, confed: String?, offset: Int): List<CountryRow> {
+    fun countries(db: WorldSql, q: String, confed: String?, offset: Int, all: Boolean = true): List<CountryRow> {
         val args = ArrayList<String>(); val w = ArrayList<String>()
         if (q.isNotBlank()) { w.add("(c.name_key LIKE ? OR lower(c.iso2)=?)"); args.add(contains(q)); args.add(q.trim().lowercase()) }
+        if (!all) w.add("c.osm_seen>0") else w.add("(EXISTS(SELECT 1 FROM football_clubs z WHERE z.iso2=c.iso2) OR EXISTS(SELECT 1 FROM football_competitions z WHERE z.iso2=c.iso2))")
         if (confed == "-") w.add("c.confederation_id IS NULL") else if (confed != null) { w.add("f.code=?"); args.add(confed) }
-        return db.q("SELECT c.iso2,COALESCE(c.name_pt,c.name_en),f.code,(SELECT COUNT(*) FROM football_clubs x WHERE x.iso2=c.iso2),(SELECT COUNT(*) FROM football_competitions y WHERE y.iso2=c.iso2),(SELECT COUNT(*) FROM football_players p WHERE p.nationality_iso=c.iso2) FROM football_countries c LEFT JOIN football_confederations f ON f.id=c.confederation_id" +
-            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY 2 LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { CountryRow(it.getString(0), it.getString(1), it.getString(2), it.getLong(3), it.getLong(4), it.getLong(5)) }
+        return db.q("SELECT c.iso2,COALESCE(c.name_pt,c.name_en),f.code,(SELECT COUNT(*) FROM football_clubs x WHERE x.iso2=c.iso2${if (all) "" else " AND x.osm_seen>0"}),(SELECT COUNT(*) FROM football_competitions y WHERE y.iso2=c.iso2${if (all) "" else " AND y.osm_seen>0"}),(SELECT COUNT(*) FROM football_players p WHERE p.nationality_iso=c.iso2${if (all) "" else " AND p.osm_seen>0"}) FROM football_countries c LEFT JOIN football_confederations f ON f.id=c.confederation_id" +
+            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY COALESCE(f.code,'ZZZ'), 2 LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { CountryRow(it.getString(0), it.getString(1), it.getString(2), it.getLong(3), it.getLong(4), it.getLong(5)) }
     }
 
-    fun competitions(db: WorldSql, q: String, iso: String?, offset: Int): List<CompRow> {
+    fun competitions(db: WorldSql, q: String, iso: String?, offset: Int, all: Boolean = true): List<CompRow> {
         val args = ArrayList<String>(); val w = ArrayList<String>()
         if (q.isNotBlank()) { w.add("c.name_key LIKE ?"); args.add(contains(q)) }
         if (iso != null) { w.add("c.iso2=?"); args.add(iso) }
+        if (!all) w.add("c.osm_seen>0")
         return db.q("SELECT c.id,c.name,c.iso2,COALESCE(k.name_pt,k.name_en),c.level,c.kind,(SELECT COUNT(*) FROM football_competition_clubs cc WHERE cc.competition_id=c.id),c.osm_seen FROM football_competitions c LEFT JOIN football_countries k ON k.iso2=c.iso2" +
-            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY 7 DESC, c.name LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { CompRow(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), if (it.isNull(4)) null else it.getInt(4), it.getString(5), it.getLong(6), it.getInt(7) > 0) }
+            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY COALESCE(k.name_pt,k.name_en,'~'), COALESCE(c.level,99), c.name LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { CompRow(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), if (it.isNull(4)) null else it.getInt(4), it.getString(5), it.getLong(6), it.getInt(7) > 0) }
     }
 
     /** `category`: null = todos; "principal" | "reserva" | "feminino". */
-    fun clubs(db: WorldSql, q: String, iso: String?, category: String?, competitionId: Long?, offset: Int): List<ClubRow> {
+    fun clubs(db: WorldSql, q: String, iso: String?, category: String?, competitionId: Long?, offset: Int, all: Boolean = true): List<ClubRow> {
         val args = ArrayList<String>(); val w = ArrayList<String>(); var join = ""
         val key = WorldNorm.fold(q)
         if (key.isNotEmpty()) { w.add("(c.name_key LIKE ? OR c.id IN (SELECT entity_id FROM football_entity_aliases WHERE entity_type='club' AND alias_key LIKE ?))"); args.add(contains(q)); args.add("$key%") }
         if (iso != null) { w.add("c.iso2=?"); args.add(iso) }
+        if (!all) w.add("c.osm_seen>0")
         when (category) { "principal" -> w.add("c.marker=''"); "reserva" -> w.add("(c.marker<>'' AND c.marker NOT LIKE '%W%')"); "feminino" -> w.add("c.marker LIKE '%W%'") }
         if (competitionId != null) { join = " JOIN football_competition_clubs cc ON cc.club_id=c.id AND cc.competition_id=?"; args.add(0, competitionId.toString()) }
-        return db.q("SELECT c.id,c.name,c.iso2,c.city,c.marker,c.category,(SELECT comp.name FROM football_competition_clubs x JOIN football_competitions comp ON comp.id=x.competition_id WHERE x.club_id=c.id LIMIT 1),c.osm_seen,c.wikidata FROM football_clubs c$join" +
-            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY c.osm_seen DESC, c.name LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { ClubRow(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4) ?: "", it.getString(5), it.getString(6), it.getInt(7) > 0, it.getString(8)) }
+        return db.q("SELECT c.id,c.name,c.iso2,c.city,c.marker,c.category,(SELECT comp.name FROM football_competition_clubs x JOIN football_competitions comp ON comp.id=x.competition_id WHERE x.club_id=c.id LIMIT 1),c.osm_seen,c.wikidata,(SELECT COALESCE(k.name_pt,k.name_en) FROM football_countries k WHERE k.iso2=c.iso2) FROM football_clubs c$join" +
+            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY COALESCE((SELECT COALESCE(k.name_pt,k.name_en) FROM football_countries k WHERE k.iso2=c.iso2),'~'), c.name_key LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { ClubRow(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4) ?: "", it.getString(5), it.getString(6), it.getInt(7) > 0, it.getString(8), it.getString(9)) }
     }
 
-    class PlayerFilter(val q: String = "", val nat: String? = null, val confed: String? = null, val pos: String? = null, val minYear: Int? = null, val maxYear: Int? = null, val withPhoto: Boolean = false, val validated: Boolean = false)
+    class PlayerFilter(val q: String = "", val nat: String? = null, val confed: String? = null, val pos: String? = null, val minYear: Int? = null, val maxYear: Int? = null, val withPhoto: Boolean = false, val validated: Boolean = false, val osmOnly: Boolean = false)
     fun players(db: WorldSql, f: PlayerFilter, offset: Int): List<PlayerRow> {
         val args = ArrayList<String>(); val w = ArrayList<String>(); val key = WorldNorm.playerKey(f.q)
         if (f.q.isNotBlank()) { w.add("(p.name_key LIKE ? OR p.surname_key=?)"); args.add(WorldNorm.fold(f.q) + "%"); args.add(key.surname.ifEmpty { WorldNorm.fold(f.q) }) }
@@ -52,9 +55,9 @@ object WorldQuery {
         if (f.minYear != null) { w.add("p.birth_year>=?"); args.add(f.minYear.toString()) }
         if (f.maxYear != null) { w.add("p.birth_year<=?"); args.add(f.maxYear.toString()) }
         if (f.withPhoto) w.add("p.id IN (SELECT entity_id FROM football_images WHERE entity_type='player' AND kind='photo' AND status='ok')")
-        if (f.validated) w.add("p.osm_seen>0")
+        if (f.validated || f.osmOnly) w.add("p.osm_seen>0")
         return db.q("SELECT p.id,p.name,p.dob,p.nationality,p.nationality_iso,p.position,p.osm_seen,(SELECT 1 FROM football_images i WHERE i.entity_type='player' AND i.entity_id=p.id AND i.status='ok' LIMIT 1) FROM football_players p" +
-            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY p.osm_seen DESC, p.name_key LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { PlayerRow(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), it.getInt(6) > 0, !it.isNull(7)) }
+            (if (w.isEmpty()) "" else " WHERE " + w.joinToString(" AND ")) + " ORDER BY p.name_key LIMIT $PAGE OFFSET $offset", *args.toTypedArray()) { PlayerRow(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), it.getInt(6) > 0, !it.isNull(7)) }
     }
 
     /** Busca global: até 4 de cada tipo. */

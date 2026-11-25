@@ -135,7 +135,8 @@ internal fun WorldValidation() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val tabs = listOf("Confirmados" to listOf("confirmado"), "Prováveis" to listOf("provável", "muito alta"), "Ambíguos" to listOf("ambíguo"), "Desconhecidos" to emptyList(), "Divergências" to listOf("desfeito"), "Histórico" to emptyList())
     WorldPage {
-        Text("O app confirma sozinho só com evidência suficiente (nome + pelo menos duas pistas independentes e margem sobre o 2º candidato). Prováveis e ambíguos esperam novas leituras. Nada aqui gera notificação.", fontSize = 12.5.sp, color = C.MUTED)
+        val nObs = rememberWorld(0L) { it.count("football_ocr_observations") }
+        Text(if (nObs == 0L) "Ainda não há leituras: esta lista se preenche sozinha quando o app lê telas do OSM (Plantel, Calendário, Pré-jogo) com a captura ligada. Não precisa abrir nada específico." else "$nObs leituras do OCR comparadas com a base real. O app confirma sozinho só com evidência além do nome; o resto espera novas leituras. Nada aqui gera notificação.", fontSize = 12.5.sp, color = C.MUTED)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { tabs.forEachIndexed { i, (l, _) -> FilterPill(l, tab == i) { tab = i } } }
         when (tab) {
             3 -> WorldPaged("unres", "Nenhuma entidade sem correspondência", { db, off -> WorldQuery.unresolved(db, off) }) { u ->
@@ -159,33 +160,24 @@ internal fun WorldValidation() {
 }
 
 // ------------------------------------------------------------------ 7 · Cobertura
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun WorldCoverageView(nav: WorldNav) {
     var sel by rememberSaveable { mutableStateOf<String?>(null) }
-    val rows = rememberWorld(emptyList<Triple<String, String, LongArray>>()) { WorldCoverage.byCountry(it, 400) }
-    val weight = remember(rows) { rows.associate { it.first to it.third[0] } }
-    val gaps = rememberWorld(emptyList<String>()) { db -> db.query("SELECT COALESCE(name_pt,name_en) FROM football_countries WHERE length(iso2)=2 AND iso2 NOT IN (SELECT iso2 FROM football_clubs WHERE iso2 IS NOT NULL) ORDER BY 1 LIMIT 60") { it.getString(0) } }
-    val obs = rememberWorld(longArrayOf(0, 0, 0, 0)) { db -> longArrayOf(db.count("football_clubs", "osm_seen>0"), db.count("football_competitions", "osm_seen>0"), db.count("football_unresolved_entities", "kind='club'"), db.count("football_ocr_observations", "kind='club'")) }
-    val withConf = rememberWorld(longArrayOf(0, 0)) { db -> longArrayOf(db.count("football_countries", "confederation_id IS NOT NULL"), db.count("football_countries")) }
+    val rows = rememberWorld(emptyList<Triple<String, String, LongArray>>(), nav.all) { WorldCoverage.byCountry(it, 400, nav.all) }
+    val weight = remember(rows) { rows.associate { it.first to it.third[0].coerceAtLeast(1L) } }
+    fun line(n: LongArray) = listOf(n[0] to "clubes", n[1] to "ligas", n[2] to "jogadores").filter { it.first > 0 }.joinToString(" • ") { "${fmtN(it.first)} ${it.second}" }
     WorldPage {
-        Text("Mapa clicável: o tom mostra quantos clubes a base tem em cada país (cinza = nenhum). Toque num país.", fontSize = 12.5.sp, color = C.MUTED)
+        WorldScope(nav)
+        Text(if (nav.all) "Mapa: quanto mais claro, mais clubes a base mundial tem no país." else "Mapa: só os países que o OSM já mostrou ao app; quanto mais claro, mais clubes.", fontSize = 12.5.sp, color = C.MUTED)
         WorldMapView(sel, weight) { sel = it }
-        Text("Mapa: Natural Earth 1:110m (domínio público) via world-atlas (ISC). Microestados e ilhas pequenas não aparecem no desenho; estão na lista abaixo.", fontSize = 11.sp, color = C.MUTED)
         sel?.let { iso ->
             val r = rows.firstOrNull { it.first == iso }
-            WorldCard(tint = C.INFO, onClick = { nav.detail = "c:$iso" }) { Row(verticalAlignment = Alignment.CenterVertically) { FlagBadge(iso.uppercase(), null, null, 34.dp, 24.dp); Column { Text(r?.second ?: iso.uppercase(), fontWeight = FontWeight.ExtraBold, fontSize = 17.sp); Text(r?.let { "${fmtN(it.third[0])} clubes • ${fmtN(it.third[1])} competições • ${fmtN(it.third[2])} jogadores" } ?: "sem dados nesta base", fontSize = 12.5.sp, color = C.MUTED) } } ; Text("Toque para abrir o país", fontSize = 11.5.sp, color = C.MUTED) }
+            WorldCard(tint = C.INFO, onClick = { nav.detail = "c:$iso" }) { Row(verticalAlignment = Alignment.CenterVertically) { FlagBadge(iso.uppercase(), null, null, 34.dp, 24.dp); Spacer(Modifier.width(8.dp)); Column { Text(r?.second ?: iso.uppercase(), fontWeight = FontWeight.ExtraBold, fontSize = 17.sp); Text(r?.let { line(it.third) } ?: "nada do OSM neste país", fontSize = 12.5.sp, color = C.MUTED) } } }
         }
-        DsSection("Três camadas, sem misturar")
-        WorldCard {
-            KV("Futebol real (clubes na base)", fmtN(rows.sumOf { it.third[0] })); KV("Observados no OSM (por OCR)", "${fmtN(obs[0])} clubes confirmados • ${fmtN(obs[3])} leituras"); KV("Sem correspondência real ainda", "${fmtN(obs[2])} clubes")
-            Text("Catálogo do OSM: o app só conhece o que as telas já mostraram; por isso não há percentual global. Percentuais só aparecem quando o denominador é conhecido (ex.: países com confederação: ${withConf[0]} de ${withConf[1]}).", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-        }
-        DsSection("Países com dados")
-        if (rows.isEmpty()) WorldEmpty("Sem dados importados ainda") else rows.take(60).forEach { (iso, name, n) -> WorldCard(onClick = { nav.detail = "c:$iso" }) { Row(verticalAlignment = Alignment.CenterVertically) { FlagBadge(iso.uppercase().takeIf { it.length == 2 }, null, null, 30.dp, 20.dp); Text(name, Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${fmtN(n[0])} • ${fmtN(n[1])} • ${fmtN(n[2])}", fontSize = 12.sp, color = C.MUTED) } } }
-        Text("colunas: clubes • competições • jogadores", fontSize = 11.sp, color = C.MUTED)
-        DsSection("Lacunas (países sem nenhum clube na base)")
-        WorldCard { if (gaps.isEmpty()) Text("Nenhuma lacuna conhecida.", fontSize = 13.sp, color = C.MUTED) else Text(gaps.joinToString(" • "), fontSize = 12.5.sp, color = C.MUTED) }
+        DsSection(if (nav.all) "Países com dados" else "Países do OSM")
+        if (rows.isEmpty()) WorldEmpty(if (nav.all) "Sem dados importados ainda" else "Nenhum país do OSM ainda", if (nav.all) null else OSM_HINT)
+        else rows.forEach { (iso, name, n) -> WorldCard(onClick = { nav.detail = "c:$iso" }) { Row(verticalAlignment = Alignment.CenterVertically) { FlagBadge(iso.uppercase().takeIf { it.length == 2 }, null, null, 30.dp, 20.dp); Spacer(Modifier.width(8.dp)); Text(name, Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(line(n), fontSize = 12.sp, color = C.MUTED, maxLines = 1) } } }
+        Text("Mapa: Natural Earth 1:110m via world-atlas. Microestados e ilhas pequenas não aparecem no desenho; estão na lista.", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
@@ -194,58 +186,100 @@ internal fun WorldCoverageView(nav: WorldNav) {
 internal fun WorldSyncView() {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     val tick = rememberTick(1000L); tick.let { }
-    val jobs = rememberWorld(emptyList<WorldQuery.Job>()) { WorldQuery.jobs(AndroidSql(it.readableDatabase)) }
+    val jobs = rememberWorld(emptyList<WorldQuery.Job>()) { WorldQuery.jobs(AndroidSql(it.readableDatabase), 15) }
     val srcs = rememberWorld(emptyList<WorldQuery.Source>()) { WorldQuery.sources(AndroidSql(it.readableDatabase)) }
     val size = rememberWorld(0L) { it.fileSize(ctx) }
+    val img = rememberWorld(null as WorldOsm.ImgStat?) { WorldOsm.imageStat(ctx) }
     val net = WorldSync.unmetered(ctx)
-    var verifying by remember { mutableStateOf(false) }
+    val running = WorldSync.running
+    var busyImg by remember { mutableStateOf(false) }
     WorldPage {
-        WorldCard(tint = if (WorldSync.running != null) C.INFO else C.BORDER) {
-            Text(WorldSync.running?.let { "Sincronizando: $it" } ?: if (WorldSync.paused) "Pausada" else "Em espera", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
-            val p = WorldSync.progress
-            if (WorldSync.running != null) { if (p != null) { LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), color = C.PRIMARY, trackColor = DS.ELEVATED); Text("${(p * 100).toInt()}% do arquivo (bytes lidos)", fontSize = 12.sp, color = C.MUTED) } else LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 6.dp), color = C.PRIMARY, trackColor = DS.ELEVATED) }
-            val c = WorldSync.counters
-            if (WorldSync.running != null) Text("${fmtN(c.analyzed)} analisados • ${fmtN(c.inserted)} novos • ${fmtN(c.updated)} atualizados • ${fmtN(c.deduped)} duplicados • ${fmtN(c.failed)} falhas", fontSize = 12.5.sp)
-            if (WorldSync.lastMessage.isNotEmpty()) Text(WorldSync.lastMessage, fontSize = 12.5.sp, color = C.MUTED)
-            Text("Rede: ${if (net) "Wi‑Fi/sem limite de dados ✓" else "dados móveis — a importação grande espera o Wi‑Fi"} • banco: ${fmtBytes(size)}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { WorldSync.requestRun(ctx) }, modifier = Modifier.weight(1f), enabled = WorldSync.running == null) { Text("Sincronizar agora", fontWeight = FontWeight.ExtraBold) }
-                if (WorldSync.paused) OutlinedButton(onClick = { WorldSync.resume(ctx) }, modifier = Modifier.weight(1f)) { Text("Retomar") } else OutlinedButton(onClick = { WorldSync.pause() }, modifier = Modifier.weight(1f), enabled = WorldSync.running != null) { Text("Pausar") }
+        WorldCard(tint = if (running != null) C.INFO else C.BORDER) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (running != null) "Sincronizando" else if (WorldSync.paused) "Pausada" else "Em espera", Modifier.weight(1f), fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                DsChip(if (running != null) "em andamento" else if (WorldSync.paused) "pausada" else "pronta", if (running != null) C.INFO else if (WorldSync.paused) C.GOLD else C.OK)
             }
-            OutlinedButton(onClick = { verifying = true; scope.launch { WorldSync.verify(ctx); verifying = false } }, enabled = !verifying, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (verifying) "Verificando as fontes…" else "Verificar as fontes agora") }
-            var mobile by remember { mutableStateOf(Settings.get(ctx, "world_mobile_data", "0") == "1") }
-            SwitchRow("Permitir a importação grande também em dados móveis (~80 MB)", mobile) { mobile = it; Settings.put(ctx, "world_mobile_data", if (it) "1" else "0") }
+            if (running != null) {
+                Text(running, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                val ov = WorldSync.overall
+                if (ov != null) { LinearProgressIndicator(progress = { ov }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), color = C.PRIMARY, trackColor = DS.ELEVATED); Text("Geral: etapa ${WorldSync.step + 1} de ${WorldSync.steps} • ${(ov * 100).toInt()}%", fontSize = 12.sp, color = C.MUTED) }
+                val p = WorldSync.progress
+                if (p != null) { LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), color = C.INFO, trackColor = DS.ELEVATED); Text("Arquivo atual: ${(p * 100).toInt()}% (bytes lidos)", fontSize = 12.sp, color = C.MUTED) }
+                val c = WorldSync.counters
+                if (c.analyzed > 0) Text("${fmtN(c.analyzed)} lidos • ${fmtN(c.inserted)} novos • ${fmtN(c.updated)} atualizados • ${fmtN(c.deduped)} duplicados", fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            if (WorldSync.lastMessage.isNotEmpty()) Text(WorldSync.lastMessage, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            Text("Rede: ${if (net) "Wi‑Fi ✓" else "dados móveis (a importação grande espera o Wi‑Fi)"} • banco no celular: ${fmtBytes(size)}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { WorldSync.requestRun(ctx) }, modifier = Modifier.weight(1f), enabled = running == null) { Text("Sincronizar agora", fontWeight = FontWeight.ExtraBold) }
+                if (WorldSync.paused) OutlinedButton(onClick = { WorldSync.resume(ctx) }, modifier = Modifier.weight(1f)) { Text("Retomar") } else OutlinedButton(onClick = { WorldSync.pause() }, modifier = Modifier.weight(1f), enabled = running != null) { Text("Pausar") }
+            }
+        }
+        img?.let { im ->
+            val rows = listOf(Triple("Bandeiras", im.flagsHave, im.flagsNeed), Triple("Escudos", im.crestsHave, im.crestsNeed), Triple("Fotos de jogadores", im.photosHave, im.photosNeed)).filter { it.third > 0 }
+            DsSection("Imagens do que está no OSM")
+            WorldCard {
+                if (rows.isEmpty()) Text("Ainda não há países, clubes ou jogadores do OSM identificados; as imagens são pedidas assim que houver.", fontSize = 13.sp, color = C.MUTED)
+                for ((l, h, n) in rows) WorldBar(l, h, n)
+                if (rows.isNotEmpty()) OutlinedButton(onClick = { busyImg = true; scope.launch(Dispatchers.IO) { runCatching { WorldOsm.prefetchImages(ctx, 12) }; busyImg = false } }, enabled = !busyImg, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (busyImg) "Baixando…" else "Baixar imagens que faltam") }
+            }
         }
         DsSection("Por fonte")
-        for (s in srcs.filter { WorldSources.def(it.id)?.adapter == true && WorldSources.def(it.id)?.probe?.endsWith(".csv") == true }) WorldCard {
-            Row(verticalAlignment = Alignment.CenterVertically) { Text(s.name, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 2); DsChip(s.status, statusColor(s.status)) }
-            Text("importados ${fmtN(s.imported)} • atualizados/duplicados ${fmtN(s.updated)} • erros ${s.errors} • última: ${s.lastSync?.let { ago(it) } ?: "nunca"} • próxima: ${s.nextSync?.let { fmtTime(it) } ?: "—"}", fontSize = 12.sp, color = C.MUTED)
-            OutlinedButton(onClick = { WorldSync.requestSource(ctx, s.id) }, enabled = WorldSync.running == null, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Sincronizar esta fonte", fontSize = 12.sp) }
+        for (s in srcs.filter { WorldSources.def(it.id)?.adapter == true && WorldSources.def(it.id)?.probe?.endsWith(".csv") == true }) {
+            val last = jobs.firstOrNull { it.source == s.id }
+            val st = if (running == null && s.status == "sincronizando") "interrompida" else s.status
+            WorldCard {
+                Row(verticalAlignment = Alignment.CenterVertically) { Text(s.name.substringBefore(" —"), Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 2); DsChip(st, statusColor(st)) }
+                Text("${fmtN(s.imported)} importados • última: ${s.lastSync?.let { ago(it) } ?: "nunca"}" + (s.nextSync?.let { " • próxima: ${fmtTime(it)}" } ?: ""), fontSize = 12.sp, color = C.MUTED)
+                if (last?.status == "erro" && !last.message.isNullOrBlank()) Text("Erro: ${last.message}", fontSize = 12.sp, color = C.BAD)
+                OutlinedButton(onClick = { WorldSync.requestSource(ctx, s.id) }, enabled = running == null, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Sincronizar esta fonte", fontSize = 12.sp) }
+            }
         }
         DsSection("Histórico")
-        if (jobs.isEmpty()) Text("Nenhuma sincronização ainda.", fontSize = 13.sp, color = C.MUTED)
-        for (j in jobs) WorldCard { Row(verticalAlignment = Alignment.CenterVertically) { Text(WorldSources.def(j.source)?.name ?: j.source, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); DsChip(j.status, statusColor(j.status)) }
-            Text("${j.started?.let { fmtTime(it) } ?: ""} • ${fmtN(j.analyzed)} lidos • ${fmtN(j.inserted)} novos • ${fmtN(j.deduped)} duplicados • ${j.failed} falhas", fontSize = 12.sp, color = C.MUTED); j.message?.let { Text(it, fontSize = 11.5.sp, color = C.MUTED) } }
+        val hist = jobs.filter { running != null || it.status != "sincronizando" }
+        if (hist.isEmpty()) Text("Nenhuma sincronização ainda.", fontSize = 13.sp, color = C.MUTED)
+        for (j in hist) WorldCard { Row(verticalAlignment = Alignment.CenterVertically) { Text(WorldSources.def(j.source)?.name?.substringBefore(" —") ?: j.source, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); DsChip(j.status, statusColor(j.status)) }
+            Text("${j.started?.let { fmtTime(it) } ?: ""} • ${fmtN(j.analyzed)} lidos • ${fmtN(j.inserted)} novos${if (j.failed > 0) " • ${j.failed} descartados" else ""}", fontSize = 12.sp, color = C.MUTED); j.message?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.5.sp, color = C.MUTED) } }
     }
 }
 
 // ------------------------------------------------------------------ 9 · Fontes de dados
 @Composable
 internal fun WorldSourcesView() {
-    val ctx = LocalContext.current
+    val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     val srcs = rememberWorld(emptyList<WorldQuery.Source>()) { WorldQuery.sources(AndroidSql(it.readableDatabase)) }
+    val enabled = rememberWorld(emptySet<String>()) { db -> db.query("SELECT id FROM football_sources WHERE enabled=1") { it.getString(0) }.toSet() }
+    var verifying by remember { mutableStateOf(false) }; var reading by remember { mutableStateOf(false) }; var msg by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf(Settings.get(ctx, PhotoWeb.KEY, "")) }
+    var mobile by remember { mutableStateOf(Settings.get(ctx, "world_mobile_data", "0") == "1") }
+    val inUse = srcs.filter { WorldSources.def(it.id)?.adapter == true }
+    val others = srcs.filter { WorldSources.def(it.id)?.adapter != true }
     WorldPage {
-        Text("Cada fonte foi pesquisada em 25/11/26. O status só vira \"operacional\" depois de uma verificação real feita por este aparelho (aba Sincronização → Verificar as fontes) e de dados realmente gravados.", fontSize = 12.5.sp, color = C.MUTED)
-        if (srcs.isEmpty()) WorldEmpty("Registro de fontes ainda não criado", "Abra a aba Sincronização uma vez.")
-        for (s in srcs) WorldCard(tint = statusColor(s.status).copy(alpha = 0.5f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Text(s.name, Modifier.weight(1f), fontWeight = FontWeight.ExtraBold, fontSize = 15.sp); DsChip(s.status, statusColor(s.status)) }
-            KV("Tipo", s.kind ?: "—"); KV("Licença", s.license ?: "—"); KV("Credencial", s.credential ?: "—"); KV("Limites/uso", s.quota ?: "—"); KV("Categorias", s.categories ?: "—")
-            KV("Importados / atualizados / erros", "${fmtN(s.imported)} / ${fmtN(s.updated)} / ${s.errors}"); KV("Versão", s.version ?: "—"); KV("Última / próxima sincronização", "${s.lastSync?.let { ago(it) } ?: "—"} / ${s.nextSync?.let { fmtTime(it) } ?: "—"}"); KV("Verificada", s.verifiedAt?.let { ago(it) } ?: "ainda não")
-            s.notes?.let { Text(it, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)) }
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                s.site?.let { u -> OutlinedButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Site", fontSize = 12.sp) } }
-                s.docs?.let { u -> OutlinedButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Documentação", fontSize = 12.sp) } }
+        DsSection("Configurar")
+        WorldCard {
+            SwitchRow("Permitir a importação grande (~80 MB) também em dados móveis", mobile) { mobile = it; Settings.put(ctx, "world_mobile_data", if (it) "1" else "0") }
+            OutlinedTextField(key, { key = it; Settings.put(ctx, PhotoWeb.KEY, it.trim()) }, singleLine = true, label = { Text("Chave da API-Football (opcional, grátis)") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Text("Sem chave, a API-Football fica desligada; o resto funciona sem cadastro. A chave só fica neste aparelho.", fontSize = 11.5.sp, color = C.MUTED)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { verifying = true; scope.launch { WorldSync.verify(ctx); verifying = false } }, enabled = !verifying, modifier = Modifier.weight(1f)) { Text(if (verifying) "Verificando…" else "Verificar fontes", fontSize = 13.sp) }
+                OutlinedButton(onClick = { reading = true; scope.launch { msg = runCatching { WorldOsm.refresh(ctx, force = true) }.getOrElse { "Falhou: ${it.message}" }; reading = false } }, enabled = !reading, modifier = Modifier.weight(1f)) { Text(if (reading) "Lendo…" else "Ler o que o app já viu", fontSize = 13.sp) }
             }
+            if (msg.isNotEmpty()) Text(msg, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+        }
+        DsSection("Fontes em uso")
+        if (inUse.isEmpty()) WorldEmpty("Registro de fontes ainda não criado", "Abra a aba Sincronização uma vez.")
+        for (s in inUse) {
+            val on = s.id in enabled
+            WorldCard(tint = statusColor(s.status).copy(alpha = 0.5f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) { Text(s.name.substringBefore(" —"), Modifier.weight(1f), fontWeight = FontWeight.ExtraBold, fontSize = 15.sp); DsChip(s.status, statusColor(s.status)) }
+                Text(listOfNotNull(s.categories, s.license?.let { "licença: $it" }).joinToString(" • "), fontSize = 12.sp, color = C.MUTED)
+                Text("${fmtN(s.imported)} importados • última: ${s.lastSync?.let { ago(it) } ?: "nunca"} • erros: ${s.errors}", fontSize = 12.sp, color = C.MUTED)
+                SwitchRow("Ativa", on) { v -> scope.launch(Dispatchers.IO) { WorldDb.get(ctx).w.execSQL("UPDATE football_sources SET enabled=? WHERE id=?", arrayOf(if (v) 1 else 0, s.id)); UiBus.bump() } }
+                s.site?.let { u -> OutlinedButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Abrir site", fontSize = 12.sp) } }
+            }
+        }
+        Fold("list", "Outras fontes avaliadas", badge = others.size.toString()) {
+            for (s in others) WorldCard { Row(verticalAlignment = Alignment.CenterVertically) { Text(s.name.substringBefore(" —"), Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp); DsChip(s.status, statusColor(s.status)) }; s.notes?.let { Text(it, fontSize = 12.sp, color = C.MUTED) } }
         }
     }
 }

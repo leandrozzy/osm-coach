@@ -5,11 +5,13 @@ package com.osmaicoach.collector
  * Camadas: REAL (football_*), OSM (observações/mapeamentos por slot) e CORRESPONDÊNCIA (football_osm_entity_mappings). Dado externo nunca grava força/valor/atributo do jogo.
  */
 object WorldSchema {
-    const val VERSION = 1
+    const val VERSION = 2
+    /** Colunas novas (v2): ALTER aditivo, ignorado se já existir. */
+    val ALTERS = listOf("ALTER TABLE football_countries ADD COLUMN osm_seen INTEGER NOT NULL DEFAULT 0")
     val DDL: List<String> = listOf(
         """CREATE TABLE IF NOT EXISTS football_confederations(id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, continent TEXT, wikidata TEXT, source_id TEXT, updated_at INTEGER)""",
         """CREATE TABLE IF NOT EXISTS football_countries(id INTEGER PRIMARY KEY, iso2 TEXT UNIQUE, iso3 TEXT, fifa TEXT, name_en TEXT NOT NULL, name_pt TEXT, name_official TEXT, name_osm TEXT, name_key TEXT,
-            continent TEXT, confederation_id INTEGER REFERENCES football_confederations(id), association_id INTEGER, flag_url TEXT, wikidata TEXT, source_id TEXT, validation INTEGER NOT NULL DEFAULT 0, updated_at INTEGER)""",
+            continent TEXT, confederation_id INTEGER REFERENCES football_confederations(id), association_id INTEGER, flag_url TEXT, wikidata TEXT, source_id TEXT, validation INTEGER NOT NULL DEFAULT 0, osm_seen INTEGER NOT NULL DEFAULT 0, updated_at INTEGER)""",
         """CREATE TABLE IF NOT EXISTS football_associations(id INTEGER PRIMARY KEY, country_id INTEGER REFERENCES football_countries(id), name TEXT NOT NULL, code TEXT, confederation_id INTEGER REFERENCES football_confederations(id), wikidata TEXT UNIQUE, source_id TEXT, updated_at INTEGER)""",
         """CREATE TABLE IF NOT EXISTS football_competitions(id INTEGER PRIMARY KEY, name TEXT NOT NULL, name_osm TEXT, name_key TEXT, country_id INTEGER REFERENCES football_countries(id), iso2 TEXT, association_id INTEGER, level INTEGER,
             kind TEXT, category TEXT, gender TEXT, sport TEXT NOT NULL DEFAULT 'football', wikidata TEXT UNIQUE, source_id TEXT, validation INTEGER NOT NULL DEFAULT 0, osm_seen INTEGER NOT NULL DEFAULT 0, updated_at INTEGER)""",
