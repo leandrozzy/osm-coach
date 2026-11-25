@@ -42,4 +42,20 @@ object WorldClean {
         n += db.exec("DELETE FROM football_competition_clubs WHERE club_id NOT IN (SELECT id FROM football_clubs) OR competition_id NOT IN (SELECT id FROM football_competitions)", emptyArray())
         return n
     }
+
+    /**
+     * Migração única para o modelo "base no Supabase": apaga da cópia local TUDO que veio da importação em massa antiga e o OSM nunca mostrou
+     * (jogadores/clubes/competições sem leitura e sem vínculo), em blocos de 5 000 com pausa, e depois compacta o arquivo (VACUUM). Observações e mapeamentos do OCR ficam.
+     */
+    fun slim(db: WorldSql): Long {
+        var n = 0L
+        fun chunked(sql: String) { while (true) { val k = db.exec(sql, emptyArray()); n += k; if (k < 1) break; Thread.sleep(20) } }
+        chunked("DELETE FROM football_players WHERE id IN (SELECT id FROM football_players WHERE osm_seen=0 AND remote_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE entity_type='player' AND entity_id IS NOT NULL) LIMIT 5000)")
+        chunked("DELETE FROM football_clubs WHERE id IN (SELECT id FROM football_clubs WHERE osm_seen=0 AND remote_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE entity_type='club' AND entity_id IS NOT NULL) LIMIT 5000)")
+        n += db.exec("DELETE FROM football_competition_clubs WHERE club_id NOT IN (SELECT id FROM football_clubs)", emptyArray())
+        chunked("DELETE FROM football_competitions WHERE id IN (SELECT id FROM football_competitions WHERE osm_seen=0 AND remote_id IS NULL AND id NOT IN (SELECT competition_id FROM football_competition_clubs) LIMIT 5000)")
+        chunked("DELETE FROM football_entity_aliases WHERE id IN (SELECT id FROM football_entity_aliases WHERE (entity_type='club' AND entity_id NOT IN (SELECT id FROM football_clubs)) OR (entity_type='player' AND entity_id NOT IN (SELECT id FROM football_players)) LIMIT 5000)")
+        n += db.exec("DELETE FROM football_sync_checkpoints", emptyArray())
+        return n
+    }
 }

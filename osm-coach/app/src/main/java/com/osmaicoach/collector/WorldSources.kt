@@ -13,7 +13,7 @@ object WorldSources {
     )
 
     const val OFB_CLUBS = "ofb_clubs"; const val REEP_TEAMS = "reep_teams"; const val REEP_COMP = "reep_competitions"; const val REEP_PEOPLE = "reep_people"
-    const val FLAGS = "flagcdn"; const val WIKIDATA = "wikidata"; const val COMMONS = "commons"; const val APIF = "api_football"
+    const val SUPABASE = "supabase"; const val FLAGS = "flagcdn"; const val WIKIDATA = "wikidata"; const val COMMONS = "commons"; const val APIF = "api_football"
 
     private const val RAW = "https://raw.githubusercontent.com"
     const val URL_OFB_CLUBS = "$RAW/florentfougeres/OpenFootballBase-Data/main/data/source/clubs_football.csv"
@@ -23,14 +23,17 @@ object WorldSources {
     const val URL_FLAG_CODES = "https://flagcdn.com/en/codes.json"
 
     val ALL: List<Def> = listOf(
+        Def(SUPABASE, "Supabase — Central Mundial (banco na nuvem)", "https://supabase.com/", "https://supabase.com/docs/guides/api", "banco Postgres + API REST (só leitura no app)", "seus dados (as fontes abertas têm CC0 / CC BY-SA)", "URL do projeto + chave anon (Base → Fontes → Configurar)",
+            "plano gratuito: 500 MB de banco e 5 GB de tráfego/mês (confirmar no painel); o app só pede nomes que o OSM mostrou", "países, competições, clubes, jogadores (carregados por tools/world_loader)",
+            "A base completa mora no Supabase. O aparelho guarda só uma cópia pequena do que o OSM mostrou e pergunta apenas o que mudou (updated_at).", null, true),
         Def(OFB_CLUBS, "OpenFootballBase — clubes do mundo (CSV)", "https://github.com/florentfougeres/OpenFootballBase-Data", "https://github.com/florentfougeres/OpenFootballBase-Data/blob/main/docs/en/data-model.md", "importação em massa (CSV, 9,8 MB)",
             "Dados: Wikidata (CC0) / repositório de dados CC BY-SA 4.0 (atribuição aos colaboradores da Wikipedia); código MIT. Logos Wikimedia: só ilustração.", "nenhuma", "sem cota (arquivo estático, ETag)", "clubes, ligas, estádios, fundação, IDs cruzados (Transfermarkt, FBref, Soccerway)",
-            "42.888 clubes (36.162 com país ISO, 16.382 com liga). Arquivo dentro do repositório Git, baixado por raw.githubusercontent.com.", URL_OFB_CLUBS, true),
+            "42.888 clubes (36.162 com país ISO, 16.382 com liga). Arquivo dentro do repositório Git, baixado por raw.githubusercontent.com.", URL_OFB_CLUBS, false),
         Def(REEP_TEAMS, "Reep v0 — clubes (CSV)", "https://reep.football/", "https://github.com/withqwerty/reep", "importação em massa (CSV, 4,1 MB)", "CC0 1.0 (derivado do Wikidata)", "nenhuma", "sem cota", "clubes, país, fundação, IDs cruzados (30+ provedores)",
-            "45.337 clubes. Arquivos v0 CONGELADOS (última versão 2026.25, 21/06/2026): servem como cadastro histórico; o v1 atual (DuckDB 321 MB) é grande demais para o aparelho.", URL_REEP_TEAMS, true),
-        Def(REEP_COMP, "Reep v0 — competições (CSV)", "https://reep.football/", "https://github.com/withqwerty/reep", "importação (CSV)", "CC0 1.0", "nenhuma", "sem cota", "ligas, copas, torneios e IDs cruzados", "212 competições.", URL_REEP_COMP, true),
+            "45.337 clubes. Arquivos v0 CONGELADOS (última versão 2026.25, 21/06/2026): servem como cadastro histórico; o v1 atual (DuckDB 321 MB) é grande demais para o aparelho.", URL_REEP_TEAMS, false),
+        Def(REEP_COMP, "Reep v0 — competições (CSV)", "https://reep.football/", "https://github.com/withqwerty/reep", "importação (CSV)", "CC0 1.0", "nenhuma", "sem cota", "ligas, copas, torneios e IDs cruzados", "212 competições.", URL_REEP_COMP, false),
         Def(REEP_PEOPLE, "Reep v0 — jogadores (CSV)", "https://reep.football/", "https://github.com/withqwerty/reep", "importação em massa (CSV, 65,8 MB)", "CC0 1.0", "nenhuma", "sem cota (importa só em Wi‑Fi, retomável)",
-            "jogadores: nome, nascimento, nacionalidade, posição, altura, IDs cruzados", "401.061 jogadores (392.156 com nascimento ou nacionalidade) + 43.646 treinadores (ignorados). Congelado em 2026.25.", URL_REEP_PEOPLE, true),
+            "jogadores: nome, nascimento, nacionalidade, posição, altura, IDs cruzados", "401.061 jogadores (392.156 com nascimento ou nacionalidade) + 43.646 treinadores (ignorados). Congelado em 2026.25.", URL_REEP_PEOPLE, false),
         Def(FLAGS, "Flagpedia / flagcdn — bandeiras", "https://flagpedia.net/", "https://flagpedia.net/download/api", "lista de países + imagens", "serviço gratuito; vetores da Wikimedia Commons (bandeiras de domínio público); atribuição recomendada", "nenhuma", "CDN gratuito (Cloudflare)", "países, territórios e bandeiras (PNG/SVG)",
             "A lista (codes.json) traz países e subdivisões (ex.: gb-eng). O app já guarda as bandeiras corretas em Ajustes → Imagens; nada é substituído.", URL_FLAG_CODES, true),
         Def(WIKIDATA, "Wikidata — enriquecimento (API/SPARQL)", "https://www.wikidata.org/", "https://www.wikidata.org/wiki/Wikidata:Data_access", "API + SPARQL (consultas pequenas, paginadas)", "CC0 1.0 (dados)", "nenhuma", "uso educado: 1 consulta/1,2 s, backoff em 429/503", "confederações, nomes alternativos, jogadores observados (nascimento, nacionalidade, posição), imagens",

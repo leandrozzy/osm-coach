@@ -15,11 +15,14 @@ object WorldHttp {
     val HOSTS = setOf("raw.githubusercontent.com", "flagcdn.com", "www.wikidata.org", "query.wikidata.org", "commons.wikimedia.org", "upload.wikimedia.org", "v3.football.api-sports.io",
         "www.thesportsdb.com", "reep.football", "www.reep.football")
 
+    /** Host extra autorizado em tempo de execução: SÓ o *.supabase.co que o usuário configurou (ver [WorldRemote.cfg]). */
+    @Volatile var extraHosts: Set<String> = emptySet()
+
     fun allowed(url: String): Boolean = runCatching {
         val u = URL(url)
         if (u.protocol != "https") return false
         val host = u.host.lowercase()
-        if (host !in HOSTS) return false
+        if (host !in HOSTS && host !in extraHosts) return false
         if (host.all { it.isDigit() || it == '.' || it == ':' }) return false
         // destino não pode resolver para rede interna
         InetAddress.getAllByName(host).none { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress || it.isSiteLocalAddress }

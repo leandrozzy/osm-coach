@@ -5,10 +5,15 @@ package com.osmaicoach.collector
  * Camadas: REAL (football_*), OSM (observações/mapeamentos por slot) e CORRESPONDÊNCIA (football_osm_entity_mappings). Dado externo nunca grava força/valor/atributo do jogo.
  */
 object WorldSchema {
-    const val VERSION = 3
+    const val VERSION = 4
     /** Colunas novas (v2): ALTER aditivo, ignorado se já existir. */
-    val ALTERS = listOf("ALTER TABLE football_countries ADD COLUMN osm_seen INTEGER NOT NULL DEFAULT 0")
+    val ALTERS = listOf(
+        "ALTER TABLE football_countries ADD COLUMN osm_seen INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE football_clubs ADD COLUMN remote_id INTEGER", "ALTER TABLE football_players ADD COLUMN remote_id INTEGER", "ALTER TABLE football_competitions ADD COLUMN remote_id INTEGER",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_clubs_remote ON football_clubs(remote_id)", "CREATE UNIQUE INDEX IF NOT EXISTS ux_players_remote ON football_players(remote_id)", "CREATE UNIQUE INDEX IF NOT EXISTS ux_comp_remote ON football_competitions(remote_id)"
+    )
     val DDL: List<String> = listOf(
+        """CREATE TABLE IF NOT EXISTS football_pull_log(kind TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, found INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind, key))""",
         """CREATE TABLE IF NOT EXISTS football_confederations(id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, continent TEXT, wikidata TEXT, source_id TEXT, updated_at INTEGER)""",
         """CREATE TABLE IF NOT EXISTS football_countries(id INTEGER PRIMARY KEY, iso2 TEXT UNIQUE, iso3 TEXT, fifa TEXT, name_en TEXT NOT NULL, name_pt TEXT, name_official TEXT, name_osm TEXT, name_key TEXT,
             continent TEXT, confederation_id INTEGER REFERENCES football_confederations(id), association_id INTEGER, flag_url TEXT, wikidata TEXT, source_id TEXT, validation INTEGER NOT NULL DEFAULT 0, osm_seen INTEGER NOT NULL DEFAULT 0, updated_at INTEGER)""",

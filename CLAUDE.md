@@ -91,7 +91,7 @@ Nada aqui foi validado no aparelho salvo quando dito; o histórico diz o que foi
 
 
 ## Base Mundial (branch `design`)
-Aba "Base" + banco **separado** `world_football.db` (não mexe no Room v1). Detalhes, fontes, licenças e limites em [docs/BASE_MUNDIAL.md](docs/BASE_MUNDIAL.md).
+Aba "Base" + banco local **separado** `world_football.db` (só CÓPIA do que o OSM mostrou; não mexe no Room v1). **A base completa mora no Supabase** (`supabase/`, `tools/world_loader/`, `WorldRemote`): NUNCA voltar a importar CSV/Parquet em massa no aparelho (148 MB travou o app em 25/11). Detalhes, fontes, licenças e limites em [docs/BASE_MUNDIAL.md](docs/BASE_MUNDIAL.md).
 Regras: dado real ≠ atributo OSM (só `football_osm_entity_mappings` liga os dois); o gancho `WorldOcr.fromExtraction` em `Repo.apply` é isolado e nunca bloqueia o OCR;
 nunca fundir homônimos/time B/clubes de países diferentes; foto só com licença livre conferida; hosts só da allowlist `WorldHttp.HOSTS`; sem chaves no repositório.
 Escopo = só o que o OSM mostrou (`WorldOsm.refresh/markScope`, `osm_seen`); `WorldClean` bloqueia nomes não latinos e feminino; listas agrupadas por país/confederação; imagens reaproveitam `FlagWeb`/`CrestWeb`. Lógica de negócio usa `WorldSql` (testes com `JdbcSql`). NADA da Base foi validado no aparelho.

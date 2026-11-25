@@ -224,16 +224,14 @@ internal fun WorldSyncView() {
                 if (rows.isNotEmpty()) OutlinedButton(onClick = { busyImg = true; scope.launch(Dispatchers.IO) { runCatching { WorldOsm.prefetchImages(ctx, 12) }; busyImg = false } }, enabled = !busyImg, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (busyImg) "Baixando…" else "Baixar imagens que faltam") }
             }
         }
-        DsSection("Por fonte")
-        for (s in srcs.filter { WorldSources.def(it.id)?.adapter == true && WorldSources.def(it.id)?.probe?.endsWith(".csv") == true }) {
-            val last = jobs.firstOrNull { it.source == s.id }
-            val st = if (running == null && s.status == "sincronizando") "interrompida" else s.status
-            WorldCard {
-                Row(verticalAlignment = Alignment.CenterVertically) { Text(s.name.substringBefore(" —"), Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 2); DsChip(st, statusColor(st)) }
-                Text("${fmtN(s.imported)} importados • última: ${s.lastSync?.let { ago(it) } ?: "nunca"}" + (s.nextSync?.let { " • próxima: ${fmtTime(it)}" } ?: ""), fontSize = 12.sp, color = C.MUTED)
-                if (last?.status == "erro" && !last.message.isNullOrBlank()) Text("Erro: ${last.message}", fontSize = 12.sp, color = C.BAD)
-                OutlinedButton(onClick = { WorldSync.requestSource(ctx, s.id) }, enabled = running == null, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("Sincronizar esta fonte", fontSize = 12.sp) }
-            }
+        DsSection("Supabase (base completa)")
+        val sb = srcs.firstOrNull { it.id == WorldSources.SUPABASE }
+        val cache = rememberWorld(LongArray(3)) { db -> longArrayOf(db.count("football_clubs"), db.count("football_players"), db.count("football_ocr_observations", "status='novo'")) }
+        WorldCard(tint = statusColor(sb?.status ?: "aguardando configuração").copy(alpha = 0.5f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("Banco na nuvem", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp); DsChip(sb?.status ?: "aguardando configuração", statusColor(sb?.status ?: "aguardando configuração")) }
+            Text(sb?.notes ?: "Configure a URL e a chave em Fontes de Dados → Configurar.", fontSize = 12.sp, color = C.MUTED)
+            Text("No aparelho (cópia do que o OSM mostrou): ${fmtN(cache[0])} clubes • ${fmtN(cache[1])} jogadores" + (if (cache[2] > 0) " • ${fmtN(cache[2])} leituras esperando rede" else ""), fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            Text("O app não baixa a base inteira: pede só os nomes lidos e, 1x por dia, só o que mudou.", fontSize = 11.5.sp, color = C.MUTED)
         }
         DsSection("Histórico")
         val hist = jobs.filter { running != null || it.status != "sincronizando" }
@@ -249,19 +247,19 @@ internal fun WorldSourcesView() {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     val srcs = rememberWorld(emptyList<WorldQuery.Source>()) { WorldQuery.sources(AndroidSql(it.readableDatabase)) }
     val enabled = rememberWorld(emptySet<String>()) { db -> db.query("SELECT id FROM football_sources WHERE enabled=1") { it.getString(0) }.toSet() }
-    var verifying by remember { mutableStateOf(false) }; var reading by remember { mutableStateOf(false) }; var msg by remember { mutableStateOf("") }
-    var key by remember { mutableStateOf(Settings.get(ctx, PhotoWeb.KEY, "")) }
-    var mobile by remember { mutableStateOf(Settings.get(ctx, "world_mobile_data", "0") == "1") }
+    var testing by remember { mutableStateOf(false) }; var reading by remember { mutableStateOf(false) }; var msg by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf(Settings.get(ctx, WorldRemote.K_URL, "")) }
+    var sbKey by remember { mutableStateOf(Settings.get(ctx, WorldRemote.K_KEY, "")) }
     val inUse = srcs.filter { WorldSources.def(it.id)?.adapter == true }
     val others = srcs.filter { WorldSources.def(it.id)?.adapter != true }
     WorldPage {
-        DsSection("Configurar")
+        DsSection("Configurar o Supabase")
         WorldCard {
-            SwitchRow("Permitir a importação grande (~80 MB) também em dados móveis", mobile) { mobile = it; Settings.put(ctx, "world_mobile_data", if (it) "1" else "0") }
-            OutlinedTextField(key, { key = it; Settings.put(ctx, PhotoWeb.KEY, it.trim()) }, singleLine = true, label = { Text("Chave da API-Football (opcional, grátis)") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            Text("Sem chave, a API-Football fica desligada; o resto funciona sem cadastro. A chave só fica neste aparelho.", fontSize = 11.5.sp, color = C.MUTED)
+            Text("1) Crie um projeto grátis em supabase.com  2) rode supabase/schema.sql  3) rode o workflow world-loader no GitHub (veja supabase/README.md)  4) cole abaixo a URL e a chave ANON (nunca a service_role).", fontSize = 12.sp, color = C.MUTED)
+            OutlinedTextField(url, { url = it; Settings.put(ctx, WorldRemote.K_URL, it.trim()) }, singleLine = true, label = { Text("URL do projeto (https://xxxx.supabase.co)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            OutlinedTextField(sbKey, { sbKey = it; Settings.put(ctx, WorldRemote.K_KEY, it.trim()) }, singleLine = true, label = { Text("Chave anon (somente leitura)") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { verifying = true; scope.launch { WorldSync.verify(ctx); verifying = false } }, enabled = !verifying, modifier = Modifier.weight(1f)) { Text(if (verifying) "Verificando…" else "Verificar fontes", fontSize = 13.sp) }
+                Button(onClick = { testing = true; scope.launch(Dispatchers.IO) { msg = WorldRemote.stats(ctx).fold({ "✅ Conectado: ${fmtN(it.countries)} países • ${fmtN(it.competitions)} competições • ${fmtN(it.clubs)} clubes • ${fmtN(it.players)} jogadores" + (it.lastRun?.let { r -> " • última carga: $r" } ?: "") }, { "❌ ${it.message}" }); testing = false } }, enabled = !testing, modifier = Modifier.weight(1f)) { Text(if (testing) "Testando…" else "Testar conexão", fontWeight = FontWeight.ExtraBold) }
                 OutlinedButton(onClick = { reading = true; scope.launch { msg = runCatching { WorldOsm.refresh(ctx, force = true) }.getOrElse { "Falhou: ${it.message}" }; reading = false } }, enabled = !reading, modifier = Modifier.weight(1f)) { Text(if (reading) "Lendo…" else "Ler o que o app já viu", fontSize = 13.sp) }
             }
             if (msg.isNotEmpty()) Text(msg, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))

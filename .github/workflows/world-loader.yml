@@ -1,0 +1,23 @@
+name: world-loader
+# Alimenta o Supabase da Central Mundial (países, competições, clubes, jogadores). Só roda manualmente ou 1x por mês; usa os secrets SUPABASE_URL e SUPABASE_SERVICE_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "O que carregar (países, competições, clubes, jogadores)"
+        default: "countries,competitions,clubs,players"
+  schedule:
+    - cron: "17 4 1 * *"
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Carregar no Supabase (só linhas novas ou alteradas)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python3 tools/world_loader/loader.py --only "${{ github.event.inputs.only || 'countries,competitions,clubs,players' }}"

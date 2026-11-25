@@ -73,7 +73,7 @@ object WorldOcr {
     private fun statusName(s: WorldIdentity.Status) = s.label
 
     /** Dependências que só existem no aparelho (bandeira identificada, busca externa): injetadas para a avaliação poder ser testada no JVM com dados reais. */
-    class Env(val natIso: (Int, String) -> String?, val enrich: (String) -> Boolean)
+    class Env(val natIso: (Int, String) -> String?, val enrich: (String) -> Boolean, val pullClub: (String) -> Boolean = { true }, val pullPlayer: (String) -> Boolean = { true })
 
     class Group(val kind: String, val norm: String, val slot: Int, val raw: String, val independent: Int, val context: JSONObject)
 
@@ -84,18 +84,27 @@ object WorldOcr {
 
     /** Avalia as observações (local e rápido). Devolve quantos grupos foram avaliados. */
     fun evaluate(db: WorldSql, env: Env, groups: List<Group>): Int {
+        var done = 0
         for (g in groups) {
+            // candidatos vêm do Supabase (só o nome lido); sem rede/limite o grupo continua "novo" para a próxima rodada (não vira "desconhecido" por falta de candidatos)
+            if (!runCatching { if (g.kind == KIND_CLUB) env.pullClub(g.raw) else env.pullPlayer(g.raw) }.getOrDefault(false)) continue
+            done++
             runCatching { if (g.kind == KIND_CLUB) resolveClub(db, g.slot, g.raw, g.norm, g.independent, g.context) else resolvePlayer(db, env, g.slot, g.raw, g.norm, g.independent, g.context) }
             db.exec("UPDATE football_ocr_observations SET status='avaliado',algo=? WHERE kind=? AND norm=? AND slot=? AND status='novo'", arrayOf(WorldIdentity.ALGO, g.kind, g.norm, g.slot))
         }
-        return groups.size
+        return done
     }
 
     fun resolvePending(ctx: Context, max: Int = 300): Int {
         val db = WorldDb.get(ctx); val sql = AndroidSql(db.w)
+        val wanted = WorldRemote.cfg(ctx) != null
+        val remote = wanted && WorldSync.networkOk(ctx)
+        var pulls = 0
         val env = Env(
             natIso = { slot, key -> runCatching { natIso(ctx, slot, key) }.getOrNull() },
-            enrich = { name -> budget(ctx) && run { val hits = runCatching { WorldWikidata.searchPlayers(ctx, db, name) }.getOrNull().orEmpty(); hits.forEach { runCatching { WorldWikidata.savePlayer(db, WorldImport.Countries.index(sql), it) } }; hits.isNotEmpty() } }
+            pullClub = { name -> if (!remote) !wanted else if (pulls++ > 80) false else WorldRemote.pullClub(ctx, sql, name) },
+            pullPlayer = { name -> if (!remote) !wanted else if (pulls++ > 80) false else WorldRemote.pullPlayer(ctx, sql, name) },
+            enrich = { name -> !wanted && budget(ctx) && run { val hits = runCatching { WorldWikidata.searchPlayers(ctx, db, name) }.getOrNull().orEmpty(); hits.forEach { runCatching { WorldWikidata.savePlayer(db, WorldImport.Countries.index(sql), it) } }; hits.isNotEmpty() } }
         )
         val n = evaluate(sql, env, pendingGroups(sql, max))
         if (n > 0) UiBus.bump()

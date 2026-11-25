@@ -5,6 +5,15 @@ Dados REAIS de países/competições/clubes/jogadores ficam num banco **separado
 `osm_coach.db` (Room v1, sem migração) **não foi alterado**. Atributos do OSM (camada OSM) nunca se misturam com a camada
 real; a ligação entre as duas é só a tabela de mapeamentos (camada de mapeamento).
 
+## Modelo atual: base no SUPABASE (revisão 25/11 tarde)
+A importação em massa no aparelho (148 MB, travava o app) foi REMOVIDA. A base completa (países, competições, clubes, jogadores) mora num projeto Supabase gratuito:
+- `supabase/schema.sql` (tabelas `wf_*`, RLS somente-leitura, busca por similaridade `wf_match_*`, cargas idempotentes `wf_upsert_*` só para `service_role`) e `supabase/README.md` (passo a passo).
+- `tools/world_loader/loader.py` + `.github/workflows/world-loader.yml`: baixam as fontes abertas, limpam (alfabeto latino, sem feminino), juntam por QID e gravam por RPC; só linhas novas/alteradas mudam (`row_hash`, `updated_at`). Secrets do GitHub: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
+- App (`WorldRemote`): URL + chave **anon** em Ajustes (nunca no repositório; diagnóstico mascara `*_key`). Lê o OCR → pede ao Supabase só os candidatos daquele nome → guarda cópia local pequena (só o que o OSM mostrou) → identifica (`WorldIdentity`, inalterado) → 1x/dia pergunta só o que mudou (`updated_at`). Sem rede, a leitura fica "nova" e é avaliada depois (nunca vira "desconhecido" por falta de candidatos).
+- Migração única (`WorldClean.slim`): apaga da cópia local o que veio da importação antiga e o OSM nunca mostrou, e compacta o arquivo.
+- O OCR grava as observações numa fila própria de baixa prioridade (`WorldOcr.submit`): a captura nunca espera o banco da Base.
+Não validado: o Supabase real (não há projeto/credenciais neste ambiente), a 1ª carga completa e o tempo de resposta no aparelho.
+
 ## Foco no OSM (revisão 25/11)
 A aba mostra **só o que o OSM já exibiu ao app** (padrão "Só o que está no OSM"; "Toda a base mundial" é opcional). `WorldOsm.refresh` lê os elencos,
 adversários, competição do slot, bandeiras de jogadores (`natiso4`) e o atlas de ligas do app (somente leitura do Room), cria observações, identifica e marca `osm_seen`

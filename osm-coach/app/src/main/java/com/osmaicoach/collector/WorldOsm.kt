@@ -77,13 +77,16 @@ object WorldOsm {
         try {
             val wdb = WorldDb.get(ctx); val sql: WorldSql = AndroidSql(wdb.w)
             var purged = 0L
-            if (Settings.get(ctx, "world_clean_v1", "0") != "1" && wdb.count("football_players") + wdb.count("football_clubs") > 0) { purged = WorldClean.purge(sql); Settings.put(ctx, "world_clean_v1", "1") }
+            if (Settings.get(ctx, "world_slim_v1", "0") != "1") {
+                if (wdb.count("football_players") + wdb.count("football_clubs") > 0) { purged = WorldClean.slim(sql); runCatching { wdb.w.execSQL("VACUUM") } }
+                Settings.put(ctx, "world_slim_v1", "1")
+            }
             val obs = backfill(ctx)
             var resolved = 0; repeat(6) { val k = WorldOcr.resolvePending(ctx, 400); resolved += k }
             markScope(ctx)
             lastAt = System.currentTimeMillis()
             lastReport = buildString {
-                if (purged > 0) append("Limpeza: $purged registros fora do padrão do OSM removidos. ")
+                if (purged > 0) append("Cópia local enxugada: $purged registros que o OSM nunca mostrou foram removidos (a base completa fica no Supabase). ")
                 append("Lidos do app: $obs leituras novas; $resolved identificadas.")
             }
             UiBus.bump(); lastReport

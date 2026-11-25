@@ -18,7 +18,7 @@ class JdbcSql(val c: Connection) : WorldSql {
     override fun commit() { c.commit(); c.autoCommit = true }
     override fun rollback() { c.rollback(); c.autoCommit = true }
     companion object {
-        fun fresh(): JdbcSql { val c = DriverManager.getConnection("jdbc:sqlite::memory:"); c.createStatement().use { s -> WorldSchema.DDL.forEach { s.execute(it) } }; return JdbcSql(c) }
+        fun fresh(): JdbcSql { val c = DriverManager.getConnection("jdbc:sqlite::memory:"); c.createStatement().use { s -> WorldSchema.DDL.forEach { s.execute(it) }; WorldSchema.ALTERS.forEach { a -> runCatching { s.execute(a) } } }; return JdbcSql(c) }
     }
 }
 
