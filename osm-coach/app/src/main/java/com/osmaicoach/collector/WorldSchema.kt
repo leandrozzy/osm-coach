@@ -5,14 +5,16 @@ package com.osmaicoach.collector
  * Camadas: REAL (football_*), OSM (observações/mapeamentos por slot) e CORRESPONDÊNCIA (football_osm_entity_mappings). Dado externo nunca grava força/valor/atributo do jogo.
  */
 object WorldSchema {
-    const val VERSION = 5
+    const val VERSION = 6
     /** Colunas novas (v2): ALTER aditivo, ignorado se já existir. */
     val ALTERS = listOf(
         "ALTER TABLE football_countries ADD COLUMN osm_seen INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE football_clubs ADD COLUMN remote_id INTEGER", "ALTER TABLE football_clubs ADD COLUMN prominence INTEGER NOT NULL DEFAULT 0", "ALTER TABLE football_players ADD COLUMN remote_id INTEGER", "ALTER TABLE football_competitions ADD COLUMN remote_id INTEGER",
+        "ALTER TABLE football_ocr_observations ADD COLUMN league TEXT", "ALTER TABLE football_clubs ADD COLUMN remote_id INTEGER", "ALTER TABLE football_clubs ADD COLUMN prominence INTEGER NOT NULL DEFAULT 0", "ALTER TABLE football_players ADD COLUMN remote_id INTEGER", "ALTER TABLE football_competitions ADD COLUMN remote_id INTEGER",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_clubs_remote ON football_clubs(remote_id)", "CREATE UNIQUE INDEX IF NOT EXISTS ux_players_remote ON football_players(remote_id)", "CREATE UNIQUE INDEX IF NOT EXISTS ux_comp_remote ON football_competitions(remote_id)"
     )
     val DDL: List<String> = listOf(
+        """CREATE TABLE IF NOT EXISTS football_ignored(kind TEXT NOT NULL, norm TEXT NOT NULL, raw TEXT, at INTEGER NOT NULL, PRIMARY KEY(kind, norm))""",
+        """CREATE TABLE IF NOT EXISTS football_pull_hits(kind TEXT NOT NULL, key TEXT NOT NULL, entity_id INTEGER NOT NULL, PRIMARY KEY(kind, key, entity_id))""",
         """CREATE TABLE IF NOT EXISTS football_pull_log(kind TEXT NOT NULL, key TEXT NOT NULL, at INTEGER NOT NULL, found INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(kind, key))""",
         """CREATE TABLE IF NOT EXISTS football_confederations(id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, continent TEXT, wikidata TEXT, source_id TEXT, updated_at INTEGER)""",
         """CREATE TABLE IF NOT EXISTS football_countries(id INTEGER PRIMARY KEY, iso2 TEXT UNIQUE, iso3 TEXT, fifa TEXT, name_en TEXT NOT NULL, name_pt TEXT, name_official TEXT, name_osm TEXT, name_key TEXT,

@@ -88,6 +88,12 @@ object CrestWeb {
         }
     }
 
+    /** Uma vez por versão: esquece os "não achei" (a enxurrada de consultas de 25/11 marcou escudos que existem como perdidos por 3 dias). */
+    fun resetMissesOnce(ctx: Context) {
+        if (Settings.get(ctx, "crest_miss_reset_v2", "0") == "1") return
+        runCatching { missFile(ctx.filesDir).delete() }; Settings.put(ctx, "crest_miss_reset_v2", "1")
+    }
+
     private fun missFile(filesDir: File) = File(dir(filesDir), "_miss.json")
     private fun missedRecently(filesDir: File, team: String): Boolean = runCatching {
         val f = missFile(filesDir); if (!f.exists()) return false
@@ -150,8 +156,8 @@ object CrestWeb {
     private fun fetchInner(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         if (fetchRepo(ctx, team)) return false
-        // o apelido dado à mão vale mais; senão, o NOME REAL do cadastro (o OCR errou letras: "Wyersar", "Uzimvsiri")
-        val queries = variants(team, aliasOf(fd, team) ?: WorldOcr.realClubName(ctx, team)).take(4)
+        // ordem de sempre (apelido manual, nome como o jogo mostra, variações); o NOME REAL do cadastro entra só como ÚLTIMA tentativa (o OCR errou letras: "Wyersar")
+        val queries = (variants(team, aliasOf(fd, team)) + listOfNotNull(WorldOcr.realClubName(ctx, team))).distinct().take(5)
         for (q in queries) {
             val (code, body) = get(SEARCH + java.net.URLEncoder.encode(q, "UTF-8"), true)
             if (code == 429) { Diag.log("Escudo da web: limite de consultas, tento depois"); return true }
@@ -224,7 +230,7 @@ object CrestWeb {
     private fun fetchRepo(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         val idx = loadIndex(fd)
-        val path = variants(team, aliasOf(fd, team) ?: WorldOcr.realClubName(ctx, team)).firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
+        val path = (variants(team, aliasOf(fd, team)) + listOfNotNull(WorldOcr.realClubName(ctx, team))).distinct().firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
         val url = RAW + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
         val (code, body) = get(url, true)
         if (code !in 200..299 || body == null || body.size > MAX_SVG) return false

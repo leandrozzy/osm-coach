@@ -15,7 +15,7 @@ object WorldIdentity {
     class Result<T>(val best: T?, val score: Int, val status: Status, val margin: Int, val reasons: List<String>, val runnerUp: T? = null)
 
     // ---------------------------------------------------------------- clubes
-    class ClubC(val id: Long, val name: String, val aliases: List<String> = emptyList(), val iso2: String? = null, val marker: String = "", val league: String? = null, val prominence: Int = 0)
+    class ClubC(val id: Long, val name: String, val aliases: List<String> = emptyList(), val iso2: String? = null, val marker: String = "", val league: String? = null, val prominence: Int = 0, val city: String? = null)
     class ClubObs(val name: String, val iso2: String? = null, val league: String? = null, val independent: Int = 1)
 
     fun matchClub(o: ClubObs, cands: List<ClubC>, cfg: Config = DEFAULT): Result<ClubC> {
@@ -31,7 +31,11 @@ object WorldIdentity {
             var best = 0
             for (k in keys) if (k.marker == ok.marker) best = maxOf(best, WorldNorm.nameSim(ok.core, k.core))
             val why = ArrayList<String>(); var sig = 0; var contra = false
-            if (best >= 98) why.add("nome igual") else why.add("nome parecido $best")
+            // o jogo costuma escrever "Clube + Cidade" ("EC Cruzeiro Belo Horizonte"): se o final do nome lido é a CIDADE do candidato, compara sem ela
+            val cityKey = c.city?.let { WorldNorm.fold(it) }?.takeIf { it.length >= 4 }
+            var withCity = false
+            if (best < 98 && cityKey != null && ok.core.endsWith(" $cityKey")) { val stripped = ok.core.removeSuffix(" $cityKey").trim(); for (k in keys) if (k.marker == ok.marker) { val sc = WorldNorm.nameSim(stripped, k.core); if (sc > best) { best = sc; withCity = true } } }
+            if (best >= 98) why.add(if (withCity) "nome + cidade" else "nome igual") else why.add("nome parecido $best")
             if (!sameMarker) { best = minOf(best, 55); why.add("categoria diferente (${ok.marker.ifEmpty { "principal" }} × ${c.marker.ifEmpty { "principal" }})"); contra = true }
             if (o.iso2 != null && c.iso2 != null) { if (o.iso2.equals(c.iso2, true)) { sig++; best = minOf(100, best + 2); why.add("mesmo país") } else { best = minOf(best, 55); why.add("país diferente"); contra = true } }
             if (o.league != null && c.league != null && WorldNorm.nameSim(WorldNorm.fold(o.league), WorldNorm.fold(c.league)) >= 85) { sig++; why.add("mesma liga") }
@@ -55,6 +59,10 @@ object WorldIdentity {
         }
         return Result(if (status == Status.UNRESOLVED) null else top.c, top.score, status, margin, why, scored.getOrNull(1)?.c)
     }
+
+    class Ranked<T>(val c: T, val score: Int, val reasons: List<String>)
+    /** Pontuação de CADA candidato isoladamente (mesma regra do motor), para o usuário escolher na lista: do mais parecido ao menos. */
+    fun rankClubs(o: ClubObs, cands: List<ClubC>): List<Ranked<ClubC>> = cands.map { c -> matchClub(o, listOf(c)).let { Ranked(c, it.score, it.reasons) } }.sortedWith(compareByDescending<Ranked<ClubC>> { it.score }.thenByDescending { it.c.prominence })
 
     // ---------------------------------------------------------------- jogadores
     class PlayerC(val id: Long, val name: String, val fullName: String? = null, val aliases: List<String> = emptyList(), val birthYear: Int? = null, val nationality: String? = null, val position: String? = null)
@@ -115,4 +123,6 @@ object WorldIdentity {
         }
         return Result(if (status == Status.UNRESOLVED) null else top.c, top.score, status, margin, top.why, scored.getOrNull(1)?.c)
     }
+
+    fun rankPlayers(o: PlayerObs, cands: List<PlayerC>): List<Ranked<PlayerC>> = cands.map { c -> matchPlayer(o, listOf(c)).let { Ranked(c, it.score, it.reasons) } }.sortedByDescending { it.score }
 }

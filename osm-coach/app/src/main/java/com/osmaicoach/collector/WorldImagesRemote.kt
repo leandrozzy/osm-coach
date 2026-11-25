@@ -57,7 +57,8 @@ object WorldImagesRemote {
         }
         db.query("SELECT iso2 FROM football_countries WHERE osm_seen>0") { it.getString(0) }.forEach { iso -> fetch("flag", iso.lowercase(), File(fd, "flags/${iso.lowercase()}.png")) }
         val crestDir = CrestWeb.dir(fd)
-        db.query("SELECT name FROM football_clubs WHERE osm_seen>0 ORDER BY osm_seen DESC LIMIT 400") { it.getString(0) }.forEach { name ->
+        // escudos pelo NOME COMO O JOGO MOSTRA (é a chave que o app usa em todo lugar), nunca pelo nome real do cadastro
+        db.query("SELECT DISTINCT raw FROM football_ocr_observations WHERE kind='club' ORDER BY raw LIMIT 600") { it.getString(0) }.forEach { name ->
             val t = CrestAdmin.snap(fd, name) ?: name
             if (!CrestAdmin.isBlocked(fd, t) && CrestWeb.find(fd, t) == null) { val k = Txt.key(t); fetch("crest", k, File(crestDir, "$k.png")) }
         }

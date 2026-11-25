@@ -59,6 +59,7 @@ object WorldSync {
 
     /** Chamado pelo monitor a cada minuto: barato (só consulta a hora do próximo ciclo). */
     fun tick(ctx: Context) {
+        runCatching { CrestWeb.resetMissesOnce(ctx) }
         if (running != null || pause.get()) return
         val app = ctx.applicationContext
         val last = Settings.get(app, "world_last_tick", "0").toLongOrNull() ?: 0L

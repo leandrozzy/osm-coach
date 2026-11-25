@@ -141,6 +141,14 @@ object WorldRemote {
     }
     private fun logPull(db: WorldSql, kind: String, key: String, found: Boolean) { db.exec("INSERT OR REPLACE INTO football_pull_log(kind,key,at,found) VALUES(?,?,?,?)", arrayOf(kind, key, System.currentTimeMillis(), if (found) 1 else 0)) }
 
+    /** Lembra QUAIS linhas locais vieram da busca deste nome: a identificação compara com elas (antes só achava por prefixo e perdia "5C Fortuna Köln" → "SC Fortuna Köln"). */
+    internal fun recordHits(db: WorldSql, kind: String, key: String, arr: JSONArray) {
+        val table = if (kind == "club") "football_clubs" else "football_players"
+        db.begin()
+        try { for (i in 0 until arr.length()) arr.getJSONObject(i).let { o -> i(o, "id")?.let { rid -> db.exec("INSERT OR IGNORE INTO football_pull_hits(kind,key,entity_id) SELECT ?,?,id FROM $table WHERE remote_id=?", arrayOf(kind, key, rid)) } }; db.commit() }
+        catch (e: Exception) { runCatching { db.rollback() }; throw e }
+    }
+
     /** Pede ao Supabase os clubes parecidos com o nome lido e guarda na cópia local. `false` = sem conexão/erro (tenta de novo depois). */
     fun pullClub(ctx: Context, db: WorldSql, raw: String, force: Boolean = false): Boolean {
         val q = WorldNorm.fold(raw); if (q.length < 3 || cfg(ctx) == null || (!force && !due(db, "club", q))) return true
@@ -148,6 +156,7 @@ object WorldRemote {
         if (code !in 200..299 || body == null) return false
         val arr = JSONArray(body)
         upsertClubs(db, arr) { key -> competition(ctx, key) }
+        recordHits(db, "club", q, arr)
         logPull(db, "club", q, arr.length() > 0); return true
     }
 
@@ -158,6 +167,7 @@ object WorldRemote {
         if (code !in 200..299 || body == null) return false
         val arr = JSONArray(body)
         upsertPlayers(db, arr)
+        recordHits(db, "player", pk.full, arr)
         logPull(db, "player", pk.full, arr.length() > 0); return true
     }
 

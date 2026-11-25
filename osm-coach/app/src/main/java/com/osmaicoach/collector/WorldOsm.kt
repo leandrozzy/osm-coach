@@ -36,11 +36,22 @@ object WorldOsm {
             for (o in list) {
                 val r = o.raw?.trim()?.takeIf { it.length >= 2 && WorldClean.nameOk(it) } ?: continue
                 val norm = WorldNorm.fold(r).takeIf { it.isNotEmpty() } ?: continue
-                n += db.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at) VALUES(?,?,?,?,?,?,?,?)", arrayOf(o.slot, o.screen, o.kind, r, norm, o.ctx.toString(), "backfill:${o.slot}", now))
+                if (WorldCatalog.isIgnored(db, o.kind, norm)) continue
+                n += db.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at,league) VALUES(?,?,?,?,?,?,?,?,?)", arrayOf(o.slot, o.screen, o.kind, r, norm, o.ctx.toString(), "backfill:${o.slot}", now, o.ctx.optString("league").takeIf { it.isNotBlank() && it != "null" }))
             }
             db.commit()
         } catch (e: Exception) { runCatching { db.rollback() }; throw e }
         return n
+    }
+
+    /** Observações antigas guardavam a liga só dentro do JSON do contexto (o SQLite do Android não tem JSON1): copia para a coluna `league` (uma vez; idempotente). */
+    internal fun migrateLeague(db: WorldSql) {
+        while (true) {
+            val rows = db.rows("SELECT id,context FROM football_ocr_observations WHERE league IS NULL AND context LIKE '%\"league\":\"%' LIMIT 500")
+            if (rows.isEmpty()) return
+            db.begin()
+            try { for (r in rows) { val lg = runCatching { JSONObject(r[1] ?: "{}").optString("league") }.getOrDefault("").takeIf { it.isNotBlank() && it != "null" } ?: "-"; db.exec("UPDATE football_ocr_observations SET league=? WHERE id=?", arrayOf(lg, r[0]!!.toLong())) }; db.commit() } catch (e: Exception) { runCatching { db.rollback() }; throw e }
+        }
     }
 
     /** Marca países (bandeiras dos jogadores + liga do slot + atlas de ligas "País, 2ª Divisão") e competições do OSM. */
@@ -88,6 +99,7 @@ object WorldOsm {
                 runCatching { wdb.w.execSQL("VACUUM") }; Diag.log("Base: compactação concluída em ${System.currentTimeMillis() - t0} ms")
             }
             Live.on("osm", "Base: lendo o que o OSM mostrou")
+            migrateLeague(sql)
             val obs = backfill(ctx)
             Live.on("osm", "Base: identificando nomes lidos")
             var resolved = 0
@@ -130,7 +142,6 @@ object WorldOsm {
     fun prefetchImages(ctx: Context, photoBudget: Int = 8): Int {
         val db = WorldDb.get(ctx)
         db.query("SELECT iso2 FROM football_countries WHERE osm_seen>0") { it.getString(0) }.forEach { FlagWeb.request(ctx, it) }
-        db.query("SELECT name FROM football_clubs WHERE osm_seen>0 ORDER BY osm_seen DESC LIMIT 30") { it.getString(0) }.filter { CrestWeb.find(ctx.filesDir, it) == null }.forEach { CrestWeb.request(ctx, it) }
         var got = 0
         val ids = db.query("SELECT id FROM football_players WHERE osm_seen>0 AND wikidata IS NOT NULL ORDER BY osm_seen DESC LIMIT 200") { it.getLong(0) }
         for (id in ids) {

@@ -6,7 +6,7 @@ import org.junit.Test
 
 class WorldCatalogTest {
     private fun obs(sql: JdbcSql, slot: Int, kind: String, raw: String, ctx: String, cap: String) =
-        sql.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at) VALUES(?,?,?,?,?,?,?,?)", arrayOf(slot, "X", kind, raw, WorldNorm.fold(raw), ctx, cap, 1L))
+        sql.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at,league) VALUES(?,?,?,?,?,?,?,?,?)", arrayOf(slot, "X", kind, raw, WorldNorm.fold(raw), ctx, cap, 1L, runCatching { org.json.JSONObject(ctx).optString("league") }.getOrNull()?.takeIf { it.isNotBlank() }))
 
     @Test fun catalogStartsFromTheGameAndAttachesRealDataWhenIdentified() {
         val sql = JdbcSql.fresh()

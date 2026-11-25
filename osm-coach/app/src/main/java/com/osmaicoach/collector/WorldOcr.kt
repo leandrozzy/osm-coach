@@ -24,7 +24,8 @@ object WorldOcr {
         fun obs(kind: String, raw: String?, ctxJson: JSONObject) {
             val r = raw?.trim()?.takeIf { it.length >= 2 } ?: return
             val norm = WorldNorm.fold(r).takeIf { it.isNotEmpty() } ?: return
-            db.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at) VALUES(?,?,?,?,?,?,?,?)", arrayOf(slot, ex.type.name, kind, r, norm, ctxJson.put("league", league).toString(), capture, now))
+            if (WorldCatalog.isIgnored(db, kind, norm)) return
+            db.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at,league) VALUES(?,?,?,?,?,?,?,?,?)", arrayOf(slot, ex.type.name, kind, r, norm, ctxJson.put("league", league).toString(), capture, now, league))
         }
         ex.fields[K.TEAM]?.value?.let { obs(KIND_CLUB, it, JSONObject().put("role", "meu")) }
         ex.fields[K.RIVAL_TEAM]?.value?.let { obs(KIND_CLUB, it, JSONObject().put("role", "rival")) }
@@ -38,20 +39,20 @@ object WorldOcr {
     internal fun clubCandidates(db: WorldSql, raw: String, key: WorldNorm.ClubKey): List<WorldIdentity.ClubC> {
         val first = key.core.substringBefore(' ')
         val rows = db.q(
-            """SELECT DISTINCT c.id,c.name,c.iso2,c.marker,c.prominence FROM football_clubs c LEFT JOIN football_entity_aliases a ON a.entity_type='club' AND a.entity_id=c.id
-               WHERE c.name_key=? OR a.alias_key=? OR (c.name_key LIKE ? AND length(c.name_key)<=?) LIMIT 60""", key.core, WorldNorm.fold(raw), "$first%", (key.core.length + 8).toString()
-        ) { arrayOf<Any?>(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getInt(4)) }
+            """SELECT DISTINCT c.id,c.name,c.iso2,c.marker,c.prominence,c.city FROM football_clubs c LEFT JOIN football_entity_aliases a ON a.entity_type='club' AND a.entity_id=c.id
+               WHERE c.name_key=? OR a.alias_key=? OR (c.name_key LIKE ? AND length(c.name_key)<=?) OR c.id IN (SELECT entity_id FROM football_pull_hits h WHERE h.kind='club' AND h.key=?) LIMIT 80""", key.core, WorldNorm.fold(raw), "$first%", (key.core.length + 8).toString(), WorldNorm.fold(raw)
+        ) { arrayOf<Any?>(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getInt(4), it.getString(5)) }
         return rows.map { r ->
             val id = r[0] as Long; val name = r[1] as String
             val aliases = db.q("SELECT alias FROM football_entity_aliases WHERE entity_type='club' AND entity_id=? LIMIT 8", id.toString()) { it.getString(0) }
             val league = db.q("SELECT comp.name FROM football_competition_clubs cc JOIN football_competitions comp ON comp.id=cc.competition_id WHERE cc.club_id=? LIMIT 1", id.toString()) { it.getString(0) }.firstOrNull()
-            WorldIdentity.ClubC(id, name, aliases, r[2] as String?, (r[3] as String?) ?: "", league, r[4] as Int)
+            WorldIdentity.ClubC(id, name, aliases, r[2] as String?, (r[3] as String?) ?: "", league, r[4] as Int, r[5] as String?)
         }
     }
 
     internal fun playerCandidates(db: WorldSql, pk: WorldNorm.PlayerKey): List<WorldIdentity.PlayerC> {
         if (pk.surname.isEmpty()) return emptyList()
-        val rows = db.q("SELECT id,name,full_name,birth_year,COALESCE(nationality,nationality_iso),position FROM football_players WHERE surname_key=? OR name_key=? LIMIT 250", pk.surname, pk.full) {
+        val rows = db.q("SELECT id,name,full_name,birth_year,COALESCE(nationality,nationality_iso),position FROM football_players WHERE surname_key=? OR name_key=? OR id IN (SELECT entity_id FROM football_pull_hits h WHERE h.kind='player' AND h.key=?) LIMIT 300", pk.surname, pk.full, pk.full) {
             WorldIdentity.PlayerC(it.getLong(0), it.getString(1), it.getString(2), emptyList(), if (it.isNull(3)) null else it.getInt(3), it.getString(4), it.getString(5))
         }
         return if (pk.initial.isNotEmpty() && pk.given.isNotEmpty()) rows.filter { WorldNorm.playerKey(it.name).initial.let { i -> i.isEmpty() || i == pk.initial } || WorldNorm.fold(it.fullName ?: "").startsWith(pk.initial) } else rows

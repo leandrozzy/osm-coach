@@ -24,7 +24,7 @@ object WorldNorm {
 
     // ---------------------------------------------------------------- clubes
     /** Palavras sem valor para identificar o clube (forma jurídica/prefixo): saem da chave, mas só se sobrar nome. */
-    private val CLUB_STOP = setOf("fc", "cf", "sc", "sk", "sv", "ac", "afc", "club", "clube", "football", "futbol", "futebol", "fk", "ks", "nk", "if", "bk", "cd", "ud", "sd", "ca", "cs", "de", "da", "do", "del", "der", "the", "ssc", "as", "cfc", "rcd", "ud", "gnk", "hnk", "kf", "fc.")
+    private val CLUB_STOP = setOf("fc", "cf", "sc", "sk", "sv", "ac", "afc", "club", "clube", "football", "futbol", "futebol", "fk", "ks", "nk", "if", "bk", "cd", "ud", "sd", "ca", "cs", "de", "da", "do", "del", "der", "the", "ssc", "as", "cfc", "rcd", "ud", "gnk", "hnk", "kf", "fc.", "ec", "esporte", "sociedade", "associacao", "regatas")
     private val CLUB_SYN = mapOf(
         "munchen" to "munich", "muenchen" to "munich", "man" to "manchester", "utd" to "united", "intl" to "international", "inter" to "inter",
         "internazionale" to "inter", "koln" to "cologne", "wien" to "vienna", "napoli" to "napoli", "lisboa" to "lisbon", "sevilla" to "seville"

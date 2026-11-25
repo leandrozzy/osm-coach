@@ -21,4 +21,11 @@ class WorldTransactionGuardTest {
             }
         }
     }
+
+    /** O SQLite do Android NÃO tem JSON1 (json_extract): em 25/11 a Visão Geral ficou carregando para sempre porque os testes (sqlite-jdbc) têm JSON1 e o aparelho não. */
+    @Test fun noJsonFunctionsInSqlSources() {
+        val dir = listOf(File("src/main/java/com/osmaicoach/collector"), File("app/src/main/java/com/osmaicoach/collector")).first { it.exists() }
+        for (f in dir.listFiles()!!.filter { it.name.endsWith(".kt") }) for ((i, l) in f.readLines().withIndex())
+            assertFalse("${f.name}:${i + 1} usa função JSON do SQLite (não existe no Android)", l.contains("json_extract(") || l.contains("json_each(") || l.contains("json_object("))
+    }
 }

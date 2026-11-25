@@ -2239,7 +2239,7 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
         val mineLeft = s.home != false
         val mineCol: @Composable (Modifier) -> Unit = { m ->
             Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { Crest(s.slot, 48.dp, s.title); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
+                Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) { Crest(s.slot, 48.dp, s.title); Box(Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = 2.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
                 Text(s.title, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.clip(RoundedCornerShape(50)).background(C.PRIMARY.copy(alpha = 0.25f)).border(1.dp, C.PRIMARY.copy(alpha = 0.7f), RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 1.dp)) {
@@ -2251,13 +2251,14 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
         }
         val rivalCol: @Composable (Modifier) -> Unit = { m ->
             Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
+                Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = 2.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
                 Text(s.rival ?: "rival não lido", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp), color = if (s.rival != null) Color.White else C.WARN)
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        // escudos NA MESMA LINHA: as colunas dos times alinham pelo topo (a do seu time é mais alta por causa da etiqueta VOCÊ); o centro (VS/contagem) fica centralizado
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.Top) {
             if (mineLeft) mineCol(Modifier.weight(1f)) else rivalCol(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.align(Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("VS", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = C.MUTED)
                 Column(
                     Modifier.padding(top = 4.dp).clip(RoundedCornerShape(14.dp)).background(countdownColor(at!!).copy(alpha = 0.14f)).border(1.dp, countdownColor(at).copy(alpha = 0.5f), RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 6.dp),
