@@ -219,7 +219,7 @@ def push(supa, fn, rows, size, label, stats):
     processed = 0
     batch = []
     def flush():
-        nonlocal batch
+        nonlocal batch, processed
         if not batch: return
         if supa:
             r = supa.rpc(fn, batch) or {}

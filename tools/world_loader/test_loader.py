@@ -31,4 +31,21 @@ class T(unittest.TestCase):
             self.assertTrue(all(L.name_ok(p["name"]) and p["tail1"] for p in pl))
         finally: shutil.rmtree(d)
 
+
+class FakeSupa:
+    """Imita o Supabase: devolve o que as funções wf_upsert_* devolvem (países só informam 'processed')."""
+    def __init__(self): self.calls = []
+    def rpc(self, fn, rows):
+        self.calls.append((fn, len(rows)))
+        return {"processed": len(rows)} if fn == "wf_upsert_countries" else {"inserted": len(rows) - 1, "updated": 0, "unchanged": 1}
+
+class TPush(unittest.TestCase):
+    def test_push_with_real_client_path(self):          # o caminho com Supabase (antes só era testado em --dry-run e estourava)
+        st = {"read": 0, "changed": 0, "skipped": 0}; fk = FakeSupa()
+        r = L.push(fk, "wf_upsert_countries", [{"a": i} for i in range(5)], 2, "países", st)
+        self.assertEqual(st["read"], 5)
+        r = L.push(fk, "wf_upsert_clubs", ({"a": i} for i in range(7)), 3, "clubes", st)
+        self.assertEqual(r["unchanged"], 3)
+        self.assertEqual(st["changed"], 7 - 3); self.assertEqual([c[0] for c in fk.calls].count("wf_upsert_clubs"), 3)
+
 if __name__ == "__main__": unittest.main()
