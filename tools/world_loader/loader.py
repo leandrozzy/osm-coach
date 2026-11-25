@@ -212,6 +212,7 @@ class Supa:
 
 def push(supa, fn, rows, size, label, stats):
     tot = {"inserted": 0, "updated": 0, "unchanged": 0}
+    processed = 0
     batch = []
     def flush():
         nonlocal batch
@@ -219,6 +220,7 @@ def push(supa, fn, rows, size, label, stats):
         if supa:
             r = supa.rpc(fn, batch) or {}
             for k in tot: tot[k] += int(r.get(k, 0))
+            processed += int(r.get("processed", 0))      # wf_upsert_countries só informa o total processado
         else: tot["inserted"] += len(batch)
         batch = []
     for i, row in enumerate(rows, 1):
@@ -227,8 +229,8 @@ def push(supa, fn, rows, size, label, stats):
             flush()
             if i % (size * 20) == 0: print(f"  {label}: {i} linhas…", flush=True)
     flush()
-    print(f"{label}: novos {tot['inserted']} • alterados {tot['updated']} • iguais {tot['unchanged']}", flush=True)
-    stats["read"] += sum(tot.values()); stats["changed"] += tot["inserted"] + tot["updated"]; stats["skipped"] += tot["unchanged"]
+    print(f"{label}: novos {tot['inserted']} • alterados {tot['updated']} • iguais {tot['unchanged']}" + (f" • processados {processed}" if processed else ""), flush=True)
+    stats["read"] += sum(tot.values()) + processed; stats["changed"] += tot["inserted"] + tot["updated"]; stats["skipped"] += tot["unchanged"]
     return tot
 
 def main():
