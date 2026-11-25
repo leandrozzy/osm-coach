@@ -263,9 +263,7 @@ internal fun TipCard(t: Playbook.Tip, onClick: () -> Unit) {
             .border(1.dp, c.copy(alpha = 0.45f), RoundedCornerShape(14.dp)).clickable { onClick() }.padding(12.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
-            Text(t.icon, fontSize = 17.sp)
-        }
+        DsTile(t.icon, c, 38.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(t.title, fontWeight = FontWeight.Bold, fontSize = 14.sp)

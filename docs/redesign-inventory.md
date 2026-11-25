@@ -59,3 +59,9 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Botões** (`DesignKit.kt`): `Button` e `OutlinedButton` do pacote substituem os do Material em todo o app (lima/contorno lima, 14–16 dp, mínimo 48 dp). `PanelTitle` nos títulos de painel; `SectionLabel` (Ajustes) com barra lima; `SwitchRow` com 48 dp e cores do sistema.
 - **Resultado**: placar com escudo dos dois times e fundo na cor do resultado (`dsHero`). **Batalha**: placar oficial em destaque. **Elenco**: filtros 44 dp.
 - Tática, Histórico, Aprendizado, Diretor, Artes, Ajustes: mesma estrutura de dados, agora com os componentes novos (cantos, botões, títulos, chips).
+
+## Quinta etapa — alinhamento com o protótipo v5 (comparado com o vídeo do app)
+- **Tipografia**: Barlow (texto) e Barlow Semi Condensed ExtraBold (títulos e números), embutidas em `res/font` (licença OFL; convertidas dos pacotes `@fontsource`). `AndroidFont.kt`.
+- **Ícones**: os 39 ícones de traço do protótipo (`DsIcons.kt`, `DsIcon`/`DsTile`); `iconFor` troca emojis de dicas/pendências por eles (sem equivalente, mantém o emoji). Usados na barra inferior, abas do slot, cabeçalhos, Prioridades, Agenda, Fold e dicas.
+- **Cabeçalho do app**: "OSM AI COACH / TÁTICO E ANALÍTICO". **Cabeçalho de página**: marca-d'água do título. **Barra dos 4 slots** no topo do slot (`SlotBar`, troca sem voltar à lista).
+- **Hoje**: próximo jogo com escudos de 84 dp, contagem de 46 sp e fundo em dois tons. **Agenda**: pendência atrasada compacta (tempo + caminho + Dispensar).

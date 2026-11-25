@@ -221,7 +221,7 @@ internal fun AgendaTab() {
                 e.human?.let { Text(if (it == "Sim") "👤 rival humano" else "🖥 rival CPU", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp)) }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(e.col.copy(alpha = 0.16f)).border(1.dp, e.col.copy(alpha = 0.5f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text(e.icon, fontSize = 20.sp) }
+                    DsTile(e.icon, e.col)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(e.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -231,9 +231,11 @@ internal fun AgendaTab() {
                 }
             }
             if (late) {
-                Text("👉 ${e.todo}", fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(top = 10.dp))
-                Text("Toque para abrir o OSM • ${e.path.substringAfter(": ")}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
-                TextButton(onClick = { scope.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { AgendaSkip.add(ctx, listOf("${e.slot}|${e.title}|${e.at}")) } } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("✕ Não vale mais (dispensar)", fontSize = 13.sp, color = C.MUTED) }
+                // compacto, como no protótipo: quanto tempo passou + caminho no OSM, e Dispensar na mesma linha
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("há ${durShort(now - e.at)} · ${e.path.substringAfter(": ")}", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.weight(1f), maxLines = 2)
+                    TextButton(onClick = { scope.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { AgendaSkip.add(ctx, listOf("${e.slot}|${e.title}|${e.at}")) } } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Dispensar", fontSize = 13.sp, color = C.MUTED) }
+                }
             }
         }
     }
@@ -271,7 +273,7 @@ internal fun AgendaTab() {
             val shape = RoundedCornerShape(DS.RADIUS_CARD + 4.dp)
             Column(Modifier.fillMaxWidth().padding(top = 4.dp).clip(shape).background(C.WARN.copy(alpha = 0.08f)).border(1.dp, C.WARN.copy(alpha = 0.6f), shape).padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(C.WARN.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) { Text("⏰", fontSize = 19.sp) }
+                    DsTile("⏰", C.WARN, 44.dp)
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text("${ov.size} passaram do horário", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)

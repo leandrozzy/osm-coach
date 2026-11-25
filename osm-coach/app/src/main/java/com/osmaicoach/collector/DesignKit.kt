@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Calendar
+import androidx.compose.ui.graphics.drawscope.scale
 import java.util.Locale
 import androidx.compose.foundation.layout.fillMaxHeight
 
@@ -41,15 +42,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 @Composable
 internal fun HeroHeader(icon: String, title: String, subtitle: String? = null, chip: String? = null, tint: Color = C.INFO) {
     val shape = RoundedCornerShape(24.dp)
-    Row(
+    Box(
         Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 12.dp).clip(shape)
             .background(Brush.linearGradient(listOf(tint.copy(alpha = 0.20f), DS.SURFACE, DS.SURFACE)))
-            .border(1.dp, tint.copy(alpha = 0.45f), shape).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .border(1.dp, tint.copy(alpha = 0.45f), shape)
     ) {
-        Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(tint.copy(alpha = 0.18f)).border(1.dp, tint.copy(alpha = 0.5f), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-            Text(icon, fontSize = 24.sp)
-        }
+    // marca-d'água do título (como no protótipo)
+    Text(title.uppercase(), Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 0.dp), fontSize = 72.sp, fontWeight = FontWeight.ExtraBold, color = Color.White.copy(alpha = 0.05f), maxLines = 1, softWrap = false)
+    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        DsTile(icon, tint, 56.dp)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, maxLines = 1)
@@ -58,6 +59,7 @@ internal fun HeroHeader(icon: String, title: String, subtitle: String? = null, c
         if (chip != null) Box(Modifier.clip(RoundedCornerShape(50)).background(DS.ELEVATED).border(1.dp, C.BORDER, RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp)) {
             Text(chip, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = C.TEXT)
         }
+    }
     }
 }
 
@@ -242,7 +244,7 @@ internal fun NextGameHero(slots: List<SlotSummary>, onOpen: (Int, Int) -> Unit) 
     val shape = RoundedCornerShape(24.dp)
     val mineLeft = s.home != false
     Column(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(shape).background(Brush.horizontalGradient(listOf(C.PRIMARY.copy(alpha = 0.16f), DS.SURFACE, C.INFO.copy(alpha = 0.14f))))
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(shape).background(Brush.horizontalGradient(listOf(C.BAD.copy(alpha = 0.30f), DS.SURFACE, C.INFO.copy(alpha = 0.26f))))
             .border(1.dp, col.copy(alpha = 0.5f), shape).clickable { onOpen(s.slot, 1) }.padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -251,12 +253,12 @@ internal fun NextGameHero(slots: List<SlotSummary>, onOpen: (Int, Int) -> Unit) 
             Text(java.text.SimpleDateFormat("EEE HH:mm", Locale("pt", "BR")).format(java.util.Date(at)), fontSize = 13.sp, color = C.MUTED)
         }
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            val mine: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { Crest(s.slot, 68.dp, s.title); Text(s.title, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) } }
-            val riv: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { RivalShield(s.rival, 68.dp, s.slot); Text(s.rival ?: "rival não lido", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp), color = if (s.rival != null) C.TEXT else C.WARN) } }
+            val mine: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { Crest(s.slot, 84.dp, s.title); Text(s.title, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) } }
+            val riv: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { RivalShield(s.rival, 84.dp, s.slot); Text(s.rival ?: "rival não lido", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp), color = if (s.rival != null) C.TEXT else C.WARN) } }
             if (mineLeft) mine(Modifier.weight(1f)) else riv(Modifier.weight(1f))
             Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("FALTAM", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = C.MUTED, letterSpacing = 1.5.sp)
-                Text(countdownShort(at), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = col, maxLines = 1)
+                Text(countdownShort(at), fontSize = 46.sp, fontWeight = FontWeight.ExtraBold, color = col, maxLines = 1)
             }
             if (mineLeft) riv(Modifier.weight(1f)) else mine(Modifier.weight(1f))
         }
@@ -365,4 +367,57 @@ internal fun OutlinedButton(
 @Composable
 internal fun PanelTitle(text: String) {
     Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, modifier = Modifier.padding(bottom = 2.dp))
+}
+
+/** Emoji usado nos dados/dicas → ícone de traço do sistema (null = mantém o emoji). */
+internal fun iconFor(e: String): String? = when (e.trim().trimEnd('️')) {
+    "🏠" -> "home"; "📅", "🗓" -> "cal"; "⚽" -> "ball"; "📚", "🧩" -> "slots"; "🧭", "🧳" -> "dir"; "🎨" -> "art"; "⚙" -> "gear"
+    "⏰", "⏱", "🕘", "🕒" -> "clock"; "✅", "✔", "✓" -> "check"; "⚠", "❗", "🔔" -> "warn"; "⚡" -> "bolt"; "📊" -> "chart"; "📈" -> "trend"
+    "👥", "👕", "👤" -> "users"; "🏋", "🏃" -> "whistle"; "⚔" -> "swords"; "🔑" -> "key"; "🧪" -> "flask"; "👁", "🔎", "🔍", "🕵", "🛰" -> "eye"
+    "🎯", "📋" -> "target"; "🏆", "🥇" -> "trophy"; "❤", "💪" -> "heart"; "💰", "💎", "🪙" -> "coin"; "🧤" -> "glove"; "🛡" -> "shieldc"; "ℹ" -> "info"
+    "🏟" -> "shield"; "🖼", "📷" -> "img"; "🧠", "🤖" -> "bolt"; "🌡" -> "info"; "🚀" -> "go"; "💬" -> "list"; "🎉" -> "trophy"; "🔮" -> "eye"
+    else -> null
+}
+
+/** Ícone de traço (24×24) desenhado pelo caminho do protótipo; `name` vem de [DsIcons.paths]. */
+@Composable
+internal fun DsIcon(name: String, size: androidx.compose.ui.unit.Dp, color: Color) {
+    val path = androidx.compose.runtime.remember(name) { DsIcons.paths[name]?.let { runCatching { androidx.compose.ui.graphics.vector.PathParser().parsePathString(it).toPath() }.getOrNull() } }
+    androidx.compose.foundation.Canvas(Modifier.size(size)) {
+        val p = path ?: return@Canvas
+        val s = this.size.width / 24f
+        scale(s, s, androidx.compose.ui.geometry.Offset.Zero) {
+            drawPath(p, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+    }
+}
+
+/** Ladrilho de ícone: cantos de 14 dp, fundo e borda no tom; mostra o ícone de traço (ou o emoji, se não houver equivalente). */
+@Composable
+internal fun DsTile(icon: String, tone: Color, size: androidx.compose.ui.unit.Dp = 44.dp) {
+    val shape = RoundedCornerShape(14.dp)
+    Box(Modifier.size(size).clip(shape).background(tone.copy(alpha = 0.16f)).border(1.dp, tone.copy(alpha = 0.5f), shape), contentAlignment = Alignment.Center) {
+        val n = iconFor(icon) ?: icon.takeIf { DsIcons.paths.containsKey(it) }
+        if (n != null) DsIcon(n, size * 0.52f, tone) else Text(icon, fontSize = (size.value * 0.45f).sp)
+    }
+}
+
+
+/** Barra dos 4 slots no topo da tela de um slot (como no protótipo): troca de slot sem voltar à lista. */
+@Composable
+internal fun SlotBar(current: Int, titles: Map<Int, String>, onPick: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (n in 1..4) {
+            val sel = n == current
+            val shape = RoundedCornerShape(DS.RADIUS_CONTROL)
+            Column(
+                Modifier.weight(1f).heightIn(min = 56.dp).clip(shape).background(if (sel) C.PRIMARY else DS.SURFACE).border(1.dp, if (sel) C.PRIMARY else C.BORDER, shape).clickable { onPick(n) }.padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                DsIcon("jersey", 20.dp, if (sel) DS.ON_LIME else C.TEXT)
+                Text("Slot $n", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = if (sel) DS.ON_LIME else C.TEXT, maxLines = 1)
+                Text(titles[n] ?: "", fontSize = 10.5.sp, color = if (sel) DS.ON_LIME.copy(alpha = 0.8f) else C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }

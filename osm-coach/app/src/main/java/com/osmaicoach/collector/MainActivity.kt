@@ -656,12 +656,7 @@ internal fun Fold(icon: String, title: String, badge: String? = null, startOpen:
                 Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { open = !open }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp))
-                        .background(C.SURFACE2)
-                        .border(1.dp, C.BORDER, RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center
-                ) { Text(icon, fontSize = 17.sp) }
+                DsTile(icon, C.INFO, 40.dp)
                 Spacer(Modifier.width(12.dp))
                 Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (badge != null) {
@@ -1768,8 +1763,7 @@ internal fun App() {
                         selected = tab == i,
                         onClick = { tab = i; openSlot = 0 },
                         icon = {
-                            val vec = when (i) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.DateRange; 2 -> Icons.Outlined.List; 3 -> Icons.Outlined.Person; 4 -> Icons.Outlined.Create; else -> Icons.Outlined.Settings }
-                            Icon(vec, contentDescription = name, modifier = Modifier.size(26.dp))
+                            DsIcon(listOf("home", "cal", "slots", "dir", "art", "gear")[i], 26.dp, if (tab == i) DS.ON_LIME else C.MUTED)
                         },
                         label = {
                             val newArts = if (i == 4) Arts.unseenCount(ctx).also { UiBus.version } else 0
@@ -1789,10 +1783,10 @@ internal fun App() {
                 0 -> TodayTab(onGoSettings = { tab = 5 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
                 1 -> AgendaTab()
                 2 -> if (openSlot > 0) {
-                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
+                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it; openTab = 0 }) { openSlot = 0 } }
                 } else SlotsTab { slot, t -> openSlot = slot; openTab = t }
                 3 -> if (openSlot > 0) {
-                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
+                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it; openTab = 0 }) { openSlot = 0 } }
                 } else DirectorTab { slot, t -> openSlot = slot; openTab = t }
                 4 -> ArtsTab()
                 else -> SettingsTab()
@@ -2050,13 +2044,13 @@ internal fun BrandBar() {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row {
-                    Text("OSM AI ", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("Coach", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY)
+                    Text("OSM AI ", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
+                    Text("COACH", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, letterSpacing = 0.5.sp)
                     // versão instalada (CI: 5.0.<nº da execução>): serve para conferir se o APK é o mais novo
                     val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty() }
-                    if (ver.isNotBlank()) Text("  v$ver", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.align(Alignment.Bottom).padding(bottom = 3.dp))
+                    if (ver.isNotBlank()) Text("  v$ver", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.align(Alignment.Bottom).padding(bottom = 3.dp))
                 }
-                Text("Assistente tático e analítico para o OSM", fontSize = 12.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("TÁTICO E ANALÍTICO", fontSize = 11.5.sp, color = C.PRIMARY, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, maxLines = 1)
             }
             Row(
                 Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.5f), RoundedCornerShape(50))
@@ -2130,7 +2124,7 @@ internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
         val shape = RoundedCornerShape(DS.RADIUS_CARD)
         Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(tone.copy(alpha = 0.08f)).border(1.dp, tone.copy(alpha = 0.45f), shape).clickable { onOpenSlot(t.slot, t.tab) }.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(tone.copy(alpha = 0.18f)).border(1.dp, tone.copy(alpha = 0.5f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text(t.icon, fontSize = 20.sp) }
+                DsTile(t.icon, tone)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(t.title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -2972,7 +2966,8 @@ internal fun SlotTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit
                     .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(icons.getOrElse(i) { "•" }, fontSize = 14.sp)
+                val tn = listOf("eye", "swords", "users", "cal", "target", "trophy", "clock", "dir", "chart").getOrNull(i)
+                if (tn != null) DsIcon(tn, 18.dp, if (on) DS.ON_LIME else C.MUTED) else Text(icons.getOrElse(i) { "•" }, fontSize = 14.sp)
                 Spacer(Modifier.width(6.dp))
                 Text(t, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) DS.ON_LIME else C.MUTED, maxLines = 1)
             }
@@ -2981,7 +2976,7 @@ internal fun SlotTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit
 }
 
 @Composable
-internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> Unit) {
+internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onSlot: (Int) -> Unit = {}, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val tick = rememberTick(6000L)
     val data = rememberLoaded(SlotData(), tick, Pair(slot, UiBus.version)) { loadSlot(ctx, slot) }
@@ -2991,6 +2986,7 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () ->
     val tab = if (idle != null) 0 else tab
     val title = if (idle != null) "Slot $slot" else known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
+        SlotBar(slot, TodayCache.last.slots.associate { it.slot to (if (it.compType == "Batalha") "Batalha" else it.title) }, onSlot)
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).clip(RoundedCornerShape(24.dp))
                 .background(Brush.linearGradient(listOf(C.INFO.copy(alpha = 0.18f), DS.SURFACE, DS.SURFACE)))
