@@ -1,6 +1,13 @@
 package com.osmaicoach.collector
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,7 +41,8 @@ internal suspend fun loadLeagueView(repo: Repo, slot: Int): LeagueView {
     val comp = LeagueResults.compKey(f)
     val games = if (comp != null) LeagueResults.games(lres, comp) else emptyList()
     val me = known(f, K.TEAM) ?: known(f, K.HUB_TITLE)
-    val cov = comp?.let { LeagueResults.coverage(lres, it, st.size.takeIf { n -> n >= 4 }) }
+    val played = known(f, K.ROUND_DONE)?.filter { it.isDigit() }?.toIntOrNull()
+    val cov = comp?.let { LeagueResults.coverage(lres, it, st.size.takeIf { n -> n >= 4 }, played) }
     val adj = if (st.isNotEmpty()) LeagueResults.adjust(st, games) else null
     val mv = LeagueResults.movement(lg?.optJSONArray("snaps"), me, games)
     val total = known(f, K.ROUND_TOTAL)?.filter { it.isDigit() }?.toIntOrNull()
@@ -44,45 +52,76 @@ internal suspend fun loadLeagueView(repo: Repo, slot: Int): LeagueView {
     return LeagueView(cov, adj, mv, proj, stAtL, stAll.size, radar, partial)
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun LeagueResultsCard(slot: Int) {
     val ctx = LocalContext.current
     val v = rememberLoaded<LeagueView?>(null, UiBus.version, "lv$slot") { runCatching { loadLeagueView(Repo(ctx), slot) }.getOrNull() } ?: return
     if (v.cov == null && v.stAt == null) return
-    Fold("📊", "Resultados da liga e projeção", v.cov?.let { "${it.games} jogos" }, startOpen = false) {
-        Hint("Lido sozinho das telas de resultados e da classificação do OSM enquanto a captura está ligada. Estimativa = cálculo do app; confirmado = lido da tela.")
-        val c = v.cov
-        if (c == null) Text("Nenhum resultado de outros jogos lido ainda: abra os resultados da jornada no OSM (e role).", fontSize = 13.sp, color = C.MUTED)
+    val c = v.cov
+    Fold("📊", "Sua posição na liga", c?.let { "${it.games} jogos lidos" }, startOpen = true) {
+        Text("O app lê sozinho os resultados de TODOS os clubes e a classificação quando você passa por essas telas no OSM (com a captura ligada) e usa isso para dizer onde você está e o que muda no próximo jogo.", fontSize = 12.5.sp, color = C.MUTED)
+
+        // 1) O que o app já viu
+        Text("1. O que o app já leu", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 10.dp))
+        if (c == null) Text("Nenhum resultado dos outros clubes ainda. No OSM: Competição → Resultados e role a lista de cada rodada.", fontSize = 13.sp)
         else {
-            Text("Cobertura: ${c.rounds} jornada(s), ${c.games} jogo(s)" + (c.expectedPerRound?.let { " (esperado ≈ $it por jornada)" } ?: "") + " • última leitura ${fmtAt(c.lastAt)}", fontSize = 13.sp)
-            Text(c.perRound.entries.joinToString("  ") { "J${it.key}: ${it.value}" }, fontSize = 12.sp, color = C.MUTED)
-        }
-        if (v.partial) Text("⚠ A classificação guardada mistura leituras feitas em horários diferentes. Abra a Classificação no OSM e role a tabela inteira de uma vez para a projeção voltar.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 4.dp))
-        v.stAt?.let { Text("Classificação lida em ${fmtAt(it)} (${v.clubs} clubes)", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)) }
-        v.adj?.let { a ->
-            val applied = a.rows.filter { it.applied.isNotEmpty() }
-            if (applied.isNotEmpty()) Text("Estimativa: ${applied.size} clube(s) com resultado lido que a tabela ainda não incluía (somado uma vez só).", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 4.dp))
-        }
-        v.movement?.let { m ->
-            Column(Modifier.padding(top = 8.dp)) {
-                Text("Desde a leitura anterior da tabela: ${m.rankFrom}º → ${m.rankTo}º" + (if (m.ptsGain != 0) " (+${m.ptsGain} pts)" else ""), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                if (m.passed.isNotEmpty()) Text("Ultrapassei: ${m.passed.joinToString()}", fontSize = 13.sp, color = C.OK)
-                if (m.closed.isNotEmpty()) Text("Encostaram (≤3 pts atrás): ${m.closed.joinToString()}", fontSize = 13.sp, color = C.WARN)
-                if (m.affecting.isNotEmpty()) Text("Resultados que mexeram: ${m.affecting.take(6).joinToString(" • ")}", fontSize = 12.5.sp, color = C.MUTED)
-                Text("(confirmado: duas tabelas lidas; o resultado de cada jogo é lido da tela de resultados)", fontSize = 11.5.sp, color = C.MUTED)
-            }
-        }
-        v.projection?.let { p ->
-            Column(Modifier.padding(top = 8.dp)) {
-                if (p.remaining >= 0) {
-                    Text("Faixa final CONFIRMADA (só aritmética, ${p.remaining} jogo(s) a disputar): ${p.confirmedBest}º a ${p.confirmedWorst}º", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                    p.estimateRank?.let { Text("ESTIMATIVA pelo ritmo de pontos: ≈ $it º com ≈ ${p.estimatePts} pts" + (if (p.tieNote) " (empate de pontos com outro clube: desempate desconhecido)" else ""), fontSize = 13.sp) }
+            Text("${c.games} jogos de ${c.rounds} rodada(s)" + (if (c.clubs >= 4) ", ${c.clubs} clubes" else "") + ". Última leitura: ${fmtAt(c.lastAt)}.", fontSize = 13.sp)
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                for ((r, n) in c.perRound) {
+                    val full = c.expectedPerRound != null && n == c.expectedPerRound
+                    val bad = c.expectedPerRound != null && n < c.expectedPerRound
+                    Pill("J$r " + (if (full) "✓" else if (bad) "$n/${c.expectedPerRound}" else "$n"), full)
                 }
-                if (p.ifWin != null) Text("Próximo jogo (estimativa): vitória → ${p.ifWin}º • empate → ${p.ifDraw}º • derrota → ${p.ifLoss}º", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                p.effectNote?.let { Text(it, fontSize = 11.5.sp, color = C.MUTED) }
-                for (l in p.limits) Text("⚠ $l", fontSize = 12.sp, color = C.WARN)
-                Text("Não é promessa de vaga, título ou permanência.", fontSize = 11.5.sp, color = C.MUTED)
+                for (r in c.missing) Pill("J$r sem leitura", false)
             }
+            if (c.missing.isNotEmpty() || c.partial.isNotEmpty()) Text(
+                "⚠ Para completar: abra os Resultados no OSM e role até o fim da rodada " + (c.missing + c.partial).distinct().sorted().joinToString(", ") { "J$it" } + ". Cada rodada só precisa ser aberta uma vez.",
+                fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp)
+            )
+            if (c.over.isNotEmpty()) Text("ℹ " + c.over.joinToString(", ") { "J$it" } + " tem mais jogos que o normal: o nome de algum clube foi lido de formas diferentes. Não afeta sua posição.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+        }
+
+        // 2) Classificação
+        Text("2. Classificação", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 12.dp))
+        if (v.stAt == null) Text("Ainda não li a tabela. No OSM: Competição → Classificação, e role a tabela inteira de uma vez. Sem ela eu não sei seus pontos nem sua posição, então não consigo projetar.", fontSize = 13.sp, color = C.WARN)
+        else {
+            Text("Lida em ${fmtAt(v.stAt)} (${v.clubs} clubes).", fontSize = 13.sp)
+            if (v.partial) Text("⚠ A tabela guardada mistura leituras de horas diferentes. Abra a Classificação e role tudo de uma vez para eu recalcular.", fontSize = 12.5.sp, color = C.WARN)
+            v.adj?.let { a ->
+                val applied = a.rows.filter { it.applied.isNotEmpty() }
+                if (applied.isNotEmpty()) Text("Somei os resultados lidos que a tabela ainda não tinha (${applied.size} clubes), uma vez só.", fontSize = 12.sp, color = C.MUTED)
+            }
+        }
+
+        // 3) O que mudou
+        v.movement?.let { m ->
+            Text("3. O que mudou desde a leitura anterior", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 12.dp))
+            Text(if (m.rankTo < m.rankFrom) "⬆ Você subiu: ${m.rankFrom}º → ${m.rankTo}º" else if (m.rankTo > m.rankFrom) "⬇ Você desceu: ${m.rankFrom}º → ${m.rankTo}º" else "➡ Você continua em ${m.rankTo}º", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (m.rankTo < m.rankFrom) C.OK else if (m.rankTo > m.rankFrom) C.WARN else androidx.compose.ui.graphics.Color.White)
+            if (m.passed.isNotEmpty()) Text("Passou: ${m.passed.joinToString()}", fontSize = 13.sp, color = C.OK)
+            if (m.closed.isNotEmpty()) Text("Chegaram perto (até 3 pontos atrás): ${m.closed.joinToString()}", fontSize = 13.sp, color = C.WARN)
+            if (m.affecting.isNotEmpty()) Text("Jogos que causaram isso: ${m.affecting.take(6).joinToString(" • ")}", fontSize = 12.sp, color = C.MUTED)
+        }
+
+        // 4) Projeção em linguagem simples
+        v.projection?.let { p ->
+            Text("4. O que pode acontecer", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 12.dp))
+            if (p.ifWin != null) {
+                Text("No próximo jogo:", fontSize = 13.sp)
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((lab, pos, col) in listOf(Triple("Vitória", p.ifWin, C.OK), Triple("Empate", p.ifDraw, C.GOLD), Triple("Derrota", p.ifLoss, C.WARN))) Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(C.SURFACE2).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally
+                    ) { Text("${pos}º", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = col); Text(lab, fontSize = 11.5.sp, color = C.MUTED) }
+                }
+                Text("Posição que você teria na tabela de hoje (os outros jogos da rodada não entram).", fontSize = 11.5.sp, color = C.MUTED)
+            }
+            if (p.remaining >= 0) {
+                Text("No fim do campeonato (faltam ${p.remaining} jogos):", fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Text("• Certeza matemática: você termina entre ${p.confirmedBest}º e ${p.confirmedWorst}º.", fontSize = 13.sp)
+                p.estimateRank?.let { Text("• Palpite pelo seu ritmo atual: por volta do ${it}º (≈ ${p.estimatePts} pontos)." + (if (p.tieNote) " Pode empatar em pontos com outro clube; o desempate eu não sei." else ""), fontSize = 13.sp) }
+            }
+            for (l in p.limits) Text("⚠ $l", fontSize = 12.sp, color = C.WARN, modifier = Modifier.padding(top = 2.dp))
+            Text("É uma conta, não uma promessa de vaga, título ou permanência.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
         }
     }
 }

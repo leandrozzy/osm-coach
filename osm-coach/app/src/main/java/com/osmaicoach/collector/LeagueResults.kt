@@ -102,16 +102,61 @@ object LeagueResults {
             val r = c.optJSONObject(rk) ?: continue
             for (k in r.keys()) { val e = r.optJSONObject(k) ?: continue; out.add(Stored(rn, e.optString("h"), e.optString("a"), e.optInt("gh"), e.optInt("ga"), e.optInt("n", 1), e.optLong("at"))) }
         }
-        return out.sortedWith(compareBy({ it.round }, { it.home }))
+        return canonicalize(out).first
     }
 
-    /** Cobertura: jornadas lidas, jogos por jornada e o total esperado (clubes/2) quando se sabe quantos clubes a liga tem. */
-    class Coverage(val rounds: Int, val games: Int, val perRound: Map<Int, Int>, val expectedPerRound: Int?, val lastAt: Long)
-    fun coverage(j: JSONObject?, comp: String, clubs: Int?): Coverage? {
-        val g = games(j, comp)
+    /**
+     * Junta variações do nome do mesmo clube ("Athletico-PR"/"Atletico PR": o OCR lê diferente em cada passada) e tira o jogo repetido da mesma jornada.
+     * Devolve os jogos já com o nome canônico e a quantidade de clubes distintos.
+     */
+    fun canonicalize(all: List<Stored>): Pair<List<Stored>, Int> {
+        val count = HashMap<String, Int>()
+        for (g in all) { count[g.home] = (count[g.home] ?: 0) + g.n; count[g.away] = (count[g.away] ?: 0) + g.n }
+        val reps = ArrayList<String>(); val map = HashMap<String, String>()
+        for (name in count.keys.sortedByDescending { count[it] }) {
+            val k = Txt.key(name)
+            val rep = reps.firstOrNull { r -> Txt.key(r) == k || Txt.sim(Txt.key(r), k) >= 0.82 }
+            if (rep == null) { reps.add(name); map[name] = name } else map[name] = rep
+        }
+        val seen = HashSet<String>(); val out = ArrayList<Stored>()
+        for (g in all.sortedWith(compareBy({ it.round }, { -it.n }))) {
+            val h = map[g.home] ?: g.home; val a = map[g.away] ?: g.away
+            if (h == a || !seen.add("${g.round}|${Txt.key(h)}|${Txt.key(a)}")) continue
+            out.add(Stored(g.round, h, a, g.gh, g.ga, g.n, g.at))
+        }
+        return Pair(out.sortedWith(compareBy({ it.round }, { it.home })), reps.size)
+    }
+
+    /**
+     * Cobertura: jornadas lidas, jogos por jornada, quantos clubes a liga tem (pelos nomes lidos, ou pela classificação) e o que falta:
+     * jornadas jogadas sem nenhuma leitura (missing), com menos jogos que o esperado (partial) ou com MAIS (over: nome lido de dois jeitos).
+     */
+    class Coverage(
+        val rounds: Int, val games: Int, val perRound: Map<Int, Int>, val expectedPerRound: Int?, val lastAt: Long,
+        val clubs: Int = 0, val missing: List<Int> = emptyList(), val partial: List<Int> = emptyList(), val over: List<Int> = emptyList()
+    )
+    fun coverage(j: JSONObject?, comp: String, clubs: Int?, played: Int? = null): Coverage? {
+        val (g, nClubs) = canonicalize(games0(j, comp))
         if (g.isEmpty()) return null
         val per = g.groupBy { it.round }.mapValues { it.value.size }.toSortedMap()
-        return Coverage(per.size, g.size, per, clubs?.takeIf { it >= 4 }?.div(2), g.maxOf { it.at })
+        val n = (clubs?.takeIf { it >= 4 } ?: nClubs).takeIf { it in 4..40 }
+        val exp = n?.div(2)
+        val last = played?.takeIf { it > 0 } ?: per.keys.max()
+        val missing = (1..last).filter { it !in per }
+        val partial = if (exp != null) per.filter { it.value < exp }.keys.toList() else emptyList()
+        val over = if (exp != null) per.filter { it.value > exp }.keys.toList() else emptyList()
+        return Coverage(per.size, g.size, per, exp, g.maxOf { it.at }, nClubs, missing, partial, over)
+    }
+
+    private fun games0(j: JSONObject?, comp: String): List<Stored> {
+        val c = j?.optJSONObject(comp) ?: return emptyList()
+        val out = ArrayList<Stored>()
+        for (rk in c.keys()) {
+            val rn = rk.toIntOrNull() ?: continue
+            val r = c.optJSONObject(rk) ?: continue
+            for (k in r.keys()) { val e = r.optJSONObject(k) ?: continue; out.add(Stored(rn, e.optString("h"), e.optString("a"), e.optInt("gh"), e.optInt("ga"), e.optInt("n", 1), e.optLong("at"))) }
+        }
+        return out
     }
 
     // ------------------------------------------------------------------ classificação ajustada (sem somar duas vezes)

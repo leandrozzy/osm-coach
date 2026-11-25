@@ -283,4 +283,20 @@ class LigaBatalhaTest {
         assertTrue(r.short.contains("pronta e montada"))                    // conferida no OSM: a diferença antiga não vale mais
         assertEquals(106, r.strMe); assertEquals("J38/43", r.round); assertEquals(true, r.home); assertEquals("VVVEV", r.formMe)
     }
+
+    @Test fun nameVariantsAreMergedAndCoverageSaysWhatIsMissing() {
+        // 4 clubes; J1 lida duas vezes com grafias diferentes (23 jogos no print do usuário vinha disso); J3 sem leitura; J2 incompleta
+        val g = listOf(
+            LeagueResults.Stored(1, "Atlético Paranaense", "Bahia", 1, 0, 2, 1L), LeagueResults.Stored(1, "Atletico Paranaense", "Bahia", 1, 0, 1, 1L),
+            LeagueResults.Stored(1, "Santos", "Palmeiras", 2, 2, 1, 1L), LeagueResults.Stored(1, "Santos", "Palmeiras ", 2, 2, 1, 1L),
+            LeagueResults.Stored(2, "Bahia", "Santos", 0, 1, 1, 1L), LeagueResults.Stored(4, "Palmeiras", "Atlético Paranaense", 3, 1, 1, 1L), LeagueResults.Stored(4, "Bahia", "Santos", 1, 1, 1, 1L)
+        )
+        val (c, clubs) = LeagueResults.canonicalize(g)
+        assertEquals(4, clubs); assertEquals(5, c.size); assertEquals(2, c.count { it.round == 1 })
+        val comp = "liga|6"
+        var root: JSONObject? = null
+        for (x in g) root = LeagueResults.store(root, comp, x.round, listOf(LeagueResults.Game(x.home, x.away, x.gh, x.ga)), emptyList(), 1L).first
+        val cov = LeagueResults.coverage(root, comp, null, played = 4)!!
+        assertEquals(2, cov.expectedPerRound); assertEquals(listOf(3), cov.missing); assertEquals(listOf(2), cov.partial); assertTrue(cov.over.isEmpty())
+    }
 }
