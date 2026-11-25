@@ -2109,12 +2109,12 @@ internal fun priorityPerSlot(items: List<TodoItem>): List<TodoItem> =
     items.groupBy { it.slot }.values.map { it.first() }.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenBy { it.slot })
 
 @Composable
-internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
+internal fun TodoCard(data: TodayData, only: Int? = null, onOpenSlot: (Int, Int) -> Unit) {
     val now = System.currentTimeMillis()
-    val all = todoItems(data, now)
+    val all = todoItems(data, now).filter { only == null || it.slot == only }
     val sorted = priorityPerSlot(all)
     val readySlots = data.slots.filter { !it.ended && it.state == null && sorted.none { t -> t.slot == it.slot } }.map { it.slot }
-    DsSection("Prioridades do dia", if (sorted.isNotEmpty()) "${sorted.size}" else null)
+    DsSection(if (only != null) "Prioridades do S$only" else "Prioridades do dia", if (sorted.isNotEmpty()) "${sorted.size}" else null)
     if (sorted.isEmpty()) {
         Text("✅ Todos os slots em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(C.OK.copy(alpha = 0.1f)).border(1.dp, C.OK.copy(alpha = 0.4f), RoundedCornerShape(DS.RADIUS_CARD)).padding(14.dp))
     }
@@ -2398,6 +2398,7 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
     // dados a cada 5 s (ou na hora, com dado novo); o relógio da tela continua a cada 1 s
     val data = rememberLoaded(TodayCache.last, tick / 5, UiBus.version) { loadToday(ctx) }
     var msg by remember { mutableStateOf("") }
+    var selSlot by rememberSaveable { mutableStateOf<Int?>(null) }
     val enabled = serviceEnabled(ctx)
     val connected = Diag.serviceConnected
     val ready = enabled && connected
@@ -2410,7 +2411,7 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
         KilledBanner(ctx, enabled, connected, batteryOk)
         if (!ready || !batteryOk || !hasKey) SetupBanner(ctx, enabled, connected, batteryOk, hasKey, onGoSettings)
 
-        NextGameHero(data.slots, onOpenSlot)
+        NextGameHero(data.slots, selSlot, onOpenSlot)
         if (data.active) {
             Button(
                 onClick = {
@@ -2456,12 +2457,13 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
         val sortedSlots = data.slots.sortedBy { sl -> sl.slot }
         val soonest = sortedSlots.filter { it.nextAt != null && !it.ended && it.state == null }.minByOrNull { it.nextAt!! }?.slot
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (s in sortedSlots) SlotTile(s, s.slot == soonest, Modifier.weight(1f)) { onOpenSlot(s.slot, 0) }
+            // toque no slot = escolhe o que o Hoje mostra (jogo e prioridades dele); toque de novo volta ao geral. Abrir o slot: toque no card do jogo ou em "Detalhe dos slots".
+            for (s in sortedSlots) SlotTile(s, if (selSlot != null) s.slot == selSlot else s.slot == soonest, Modifier.weight(1f)) { selSlot = if (selSlot == s.slot) null else s.slot }
         }
-        TodoCard(data, onOpenSlot)
+        TodoCard(data, selSlot, onOpenSlot)
         NewsCard()
         DsSection("Detalhe dos slots")
-        for (s in sortedSlots) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
+        for (s in sortedSlots.filter { selSlot == null || it.slot == selSlot }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
         data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }

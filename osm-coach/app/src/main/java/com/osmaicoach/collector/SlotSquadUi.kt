@@ -518,15 +518,25 @@ internal fun CalendarOverview(slot: Int, d: SlotData, sorted: List<MatchEntity>)
     val curAt = fv(d, K.MATCH_AT).toLongOrNull()
     val next = Fixtures.next(sorted, now, curRound, curAt)
     val cal = java.util.Calendar.getInstance().apply { timeInMillis = now }
-    val year = cal.get(java.util.Calendar.YEAR); val month = cal.get(java.util.Calendar.MONTH); val today = cal.get(java.util.Calendar.DAY_OF_MONTH)
+    val curYear = cal.get(java.util.Calendar.YEAR); val curMonth = cal.get(java.util.Calendar.MONTH); val today = cal.get(java.util.Calendar.DAY_OF_MONTH)
+    // mês em exibição (setas) e dia escolhido (toque); começa no mês de hoje com o dia do próximo jogo (ou hoje)
+    var viewYm by rememberSaveable { mutableIntStateOf(curYear * 12 + curMonth) }
+    var selDay by rememberSaveable { mutableIntStateOf(0) }   // 0 = nenhum dia escolhido
+    val year = viewYm / 12; val month = viewYm % 12
+    fun ymOf(m: MatchEntity): Int? = parseDm(m.date)?.let { (it.third ?: curYear) * 12 + it.second }
     // pontos do mês: cor pelo resultado (V verde, E âmbar, D vermelho), lima = a jogar, ciano = copa a jogar
     val dots = HashMap<Int, MutableList<Color>>()
+    val byDay = HashMap<Int, MutableList<MatchEntity>>()
     for (m in sorted) {
         val dm = parseDm(m.date) ?: continue
-        if (dm.second != month || (dm.third != null && dm.third != year)) continue
+        if (ymOf(m) != viewYm) continue
         val col = when (m.result) { "V" -> C.WIN; "E" -> C.DRAW; "D" -> C.LOSS; else -> if (Fixtures.isCup(m)) C.INFO else C.PRIMARY }
         dots.getOrPut(dm.first) { ArrayList() }.add(col)
+        byDay.getOrPut(dm.first) { ArrayList() }.add(m)
     }
+    // limites das setas: do primeiro ao último mês com jogo (e o mês de hoje)
+    val allYm = sorted.mapNotNull { ymOf(it) } + (curYear * 12 + curMonth)
+    val minYm = allYm.min(); val maxYm = allYm.max()
     if (next != null) {
         val at = if (next.round == curRound && curAt != null) curAt else null
         val opp = Fixtures.opponent(next)
@@ -551,11 +561,39 @@ internal fun CalendarOverview(slot: Int, d: SlotData, sorted: List<MatchEntity>)
             Text("J${next.round}" + (hm?.let { " • $it" } ?: "") + (next.date?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), textAlign = TextAlign.Center)
         }
     }
-    DsSection("${monthName(month).replaceFirstChar { it.uppercase() }} de $year", "hoje $today")
+    // cabeçalho do mês com setas (48 dp) e atalho "hoje"
+    Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(5.dp).height(22.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
+        Spacer(Modifier.width(10.dp))
+        Text("${monthName(month).replaceFirstChar { it.uppercase() }} de $year", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f), maxLines = 1)
+        if (viewYm != curYear * 12 + curMonth) Box(Modifier.padding(end = 6.dp).heightIn(min = 40.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(DS.ELEVATED).border(1.dp, C.PRIMARY.copy(alpha = 0.6f), RoundedCornerShape(DS.RADIUS_CONTROL)).clickable { viewYm = curYear * 12 + curMonth; selDay = 0 }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text("hoje", fontWeight = FontWeight.Bold, color = C.PRIMARY, fontSize = 13.sp) }
+        for ((lab, delta) in listOf("‹" to -1, "›" to 1)) {
+            val ok = viewYm + delta in minYm..maxYm
+            Box(Modifier.padding(start = 4.dp).size(48.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(DS.ELEVATED).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CONTROL)).clickable(enabled = ok) { viewYm += delta; selDay = 0 }, contentAlignment = Alignment.Center) {
+                Text(lab, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = if (ok) C.TEXT else C.MUTED.copy(alpha = 0.35f))
+            }
+        }
+    }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(12.dp)) {
-        MonthGrid(year, month, dots, today)
+        MonthGrid(year, month, dots, if (viewYm == curYear * 12 + curMonth) today else null, selDay.takeIf { it > 0 }) { d -> selDay = if (selDay == d) 0 else d }
         androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 10.dp)) {
             DsLegend(C.WIN, "vitória"); DsLegend(C.DRAW, "empate"); DsLegend(C.LOSS, "derrota"); DsLegend(C.PRIMARY, "a jogar"); DsLegend(C.INFO, "copa")
+        }
+    }
+    // dia escolhido: mostra o(s) jogo(s) daquela data (o card "Próximo jogo" acima continua sendo o próximo de verdade)
+    if (selDay > 0) {
+        val dayMs = byDay[selDay].orEmpty()
+        DsSection("Dia $selDay de ${monthName(month)}")
+        if (dayMs.isEmpty()) Text("Nenhum jogo lido neste dia.", fontSize = 14.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(14.dp))
+        else Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.PRIMARY.copy(alpha = 0.45f), RoundedCornerShape(DS.RADIUS_CARD)).padding(horizontal = 8.dp)) {
+            for (m in dayMs) {
+                val opp = Fixtures.opponent(m)
+                if (opp == null) { Text("${m.label}${Fixtures.stage(m)?.let { " • $it" } ?: ""}", fontSize = 14.sp, modifier = Modifier.padding(12.dp)); continue }
+                val mineLeft = m.home != false
+                val played = m.scoreMine != null && m.scoreOpp != null
+                val center = if (played) (if (mineLeft) "${m.scoreMine} – ${m.scoreOpp}" else "${m.scoreOpp} – ${m.scoreMine}") else (m.time ?: "–")
+                MatchLine(slot, my, if (mineLeft) (my ?: "Seu time") else opp, if (mineLeft) opp else (my ?: "Seu time"), center, { if (m.result != null) ResultBadge(m.result) else DsChip(if (m.home == true) "casa" else if (m.home == false) "fora" else "", C.MUTED) }, m.round?.let { "J$it" } ?: "", mineLeft)
+            }
         }
     }
     val upcoming = sorted.filter { it.round != null && it.result == null && !Fixtures.void(it, sorted) && Fixtures.opponent(it) != null }.filter { (it.round ?: 0) >= (next?.round ?: 0) }.take(3)

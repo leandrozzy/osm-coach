@@ -149,7 +149,7 @@ internal fun parseDm(s: String?): Triple<Int, Int, Int?>? {
  * `dots`: dia do mês → cores. Só desenha; não decide nada.
  */
 @Composable
-internal fun MonthGrid(year: Int, month: Int, dots: Map<Int, List<Color>>, today: Int?) {
+internal fun MonthGrid(year: Int, month: Int, dots: Map<Int, List<Color>>, today: Int?, selected: Int? = null, onPick: ((Int) -> Unit)? = null) {
     val cal = Calendar.getInstance().apply { clear(); set(year, month, 1) }
     val lead = cal.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY
     val days = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
@@ -167,13 +167,15 @@ internal fun MonthGrid(year: Int, month: Int, dots: Map<Int, List<Color>>, today
                     val shape = RoundedCornerShape(12.dp)
                     if (d == null) { Spacer(Modifier.weight(1f).aspectRatio(1f)); continue }
                     val isToday = d == today
+                    val isSel = d == selected
                     Column(
-                        Modifier.weight(1f).aspectRatio(1f).clip(shape).background(DS.ELEVATED).border(if (isToday) 2.dp else 1.dp, if (isToday) C.PRIMARY else Color.Transparent, shape),
+                        Modifier.weight(1f).aspectRatio(1f).clip(shape).background(if (isSel) C.PRIMARY else DS.ELEVATED)
+                            .border(if (isToday) 2.dp else 1.dp, if (isToday) C.PRIMARY else Color.Transparent, shape).then(if (onPick != null) Modifier.clickable { onPick(d) } else Modifier),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
                     ) {
-                        Text("$d", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = if (isToday) C.PRIMARY else C.TEXT)
+                        Text("$d", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = if (isSel) DS.ON_LIME else if (isToday) C.PRIMARY else C.TEXT)
                         Row(Modifier.height(8.dp).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            for (c in (dots[d] ?: emptyList()).take(3)) Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(c))
+                            for (c in (dots[d] ?: emptyList()).take(3)) Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(if (isSel) DS.ON_LIME else c))
                         }
                     }
                 }
@@ -236,9 +238,30 @@ internal fun ptDow(c: Calendar): String = listOf("dom", "seg", "ter", "qua", "qu
 
 /** Próximo jogo entre todos os slots: faixa grande com os dois escudos e a contagem regressiva (só leitura de `SlotSummary`). */
 @Composable
-internal fun NextGameHero(slots: List<SlotSummary>, onOpen: (Int, Int) -> Unit) {
+internal fun NextGameHero(slots: List<SlotSummary>, selected: Int?, onOpen: (Int, Int) -> Unit) {
     val now = System.currentTimeMillis()
-    val s = slots.filter { it.nextAt != null && it.nextAt > now && !it.ended && it.state == null }.minByOrNull { it.nextAt!! } ?: return
+    val chosen = selected?.let { n -> slots.firstOrNull { it.slot == n } }
+    // slot escolhido sem jogo marcado (batalha, livre, encerrado, sem leitura): mostra o estado dele e o atalho para abrir
+    if (chosen != null && !(chosen.nextAt != null && chosen.nextAt > now && !chosen.ended && chosen.state == null)) {
+        val shape = RoundedCornerShape(24.dp)
+        Column(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(shape).background(DS.SURFACE).border(1.dp, C.BORDER, shape).padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DsChip("S${chosen.slot}", C.GOLD); Spacer(Modifier.width(8.dp)); Text(chosen.title, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(when {
+                chosen.compType == "Batalha" && chosen.state != null -> "Batalha: a recrutar membros. O app acompanha sozinho quando começar."
+                chosen.state == "vazio" -> "Sem liga ou batalha. Comece uma no OSM."
+                chosen.state != null -> "Procurando adversário."
+                chosen.ended -> "Competição encerrada. Aguardando a próxima."
+                else -> "Sem próximo jogo lido. Leia o Pré-jogo e o Calendário no OSM."
+            }, fontSize = 14.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+            Box(Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 48.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(DS.ELEVATED).border(1.dp, C.PRIMARY.copy(alpha = 0.6f), RoundedCornerShape(DS.RADIUS_CONTROL)).clickable { onOpen(chosen.slot, 0) }, contentAlignment = Alignment.Center) {
+                Text("Abrir o slot →", fontWeight = FontWeight.Bold, color = C.PRIMARY)
+            }
+        }
+        return
+    }
+    val s = chosen ?: slots.filter { it.nextAt != null && it.nextAt > now && !it.ended && it.state == null }.minByOrNull { it.nextAt!! } ?: return
     val at = s.nextAt!!
     val col = countdownColor(at)
     val shape = RoundedCornerShape(24.dp)
@@ -271,6 +294,7 @@ internal fun NextGameHero(slots: List<SlotSummary>, onOpen: (Int, Int) -> Unit) 
             }
             DsChip(tac.first, tac.second)
         }
+        Text("Toque para abrir o Pré-jogo do slot", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), textAlign = TextAlign.Center)
     }
 }
 

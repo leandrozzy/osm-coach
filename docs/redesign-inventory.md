@@ -65,3 +65,7 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Ícones**: os 39 ícones de traço do protótipo (`DsIcons.kt`, `DsIcon`/`DsTile`); `iconFor` troca emojis de dicas/pendências por eles (sem equivalente, mantém o emoji). Usados na barra inferior, abas do slot, cabeçalhos, Prioridades, Agenda, Fold e dicas.
 - **Cabeçalho do app**: "OSM AI COACH / TÁTICO E ANALÍTICO". **Cabeçalho de página**: marca-d'água do título. **Barra dos 4 slots** no topo do slot (`SlotBar`, troca sem voltar à lista).
 - **Hoje**: próximo jogo com escudos de 84 dp, contagem de 46 sp e fundo em dois tons. **Agenda**: pendência atrasada compacta (tempo + caminho + Dispensar).
+
+## Sexta etapa — interação (pedido do usuário)
+- **Hoje**: tocar num slot da grade o ESCOLHE (o card do jogo, as prioridades e o detalhe passam a mostrar só aquele slot; tocar de novo volta ao geral). Abrir o slot: tocar no card do jogo ou no "Detalhe dos slots". Slot sem jogo (batalha, livre, encerrado) mostra o estado e o botão "Abrir o slot".
+- **Calendário do slot**: tocar num dia mostra os jogos daquela data (com escudos e placar/hora); setas ‹ › trocam o mês (limitadas ao primeiro e ao último mês com jogo lido) e "hoje" volta ao mês atual.
