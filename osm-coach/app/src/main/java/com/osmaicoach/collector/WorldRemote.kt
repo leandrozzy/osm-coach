@@ -141,7 +141,7 @@ object WorldRemote {
     fun pullPlayer(ctx: Context, db: WorldSql, raw: String): Boolean {
         val pk = WorldNorm.playerKey(raw); if (pk.surname.length < 2 || cfg(ctx) == null || !due(db, "player", pk.full)) return true
         val last = pk.full.substringAfterLast(' ')
-        val (code, body) = get(ctx, "/rest/v1/rpc/wf_match_players?full=${enc(pk.full)}&surname=${enc(pk.surname)}&last=${enc(last)}&lim=120")
+        val (code, body) = get(ctx, "/rest/v1/rpc/wf_match_players?p_full=${enc(pk.full)}&p_surname=${enc(pk.surname)}&p_last=${enc(last)}&lim=120")
         if (code !in 200..299 || body == null) return false
         val arr = JSONArray(body)
         upsertPlayers(db, arr)

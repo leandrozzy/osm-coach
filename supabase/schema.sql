@@ -55,11 +55,11 @@ create or replace function wf_match_clubs(q text, lim int default 40) returns se
    limit least(lim, 80);
 $$;
 
--- full = nome inteiro dobrado; surname = sobrenome (pode ter partículas); last = última palavra
-create or replace function wf_match_players(full text, surname text, last text, lim int default 120) returns setof wf_players language sql stable as $$
+-- p_full = nome inteiro dobrado; p_surname = sobrenome (pode ter partículas); p_last = última palavra
+create or replace function wf_match_players(p_full text, p_surname text, p_last text, lim int default 120) returns setof wf_players language sql stable as $$
   select * from wf_players
-   where name_fold = full or tail2 = surname or tail1 = last or tail1 = surname
-   order by (name_fold = full) desc, similarity(name_fold, full) desc
+   where name_fold = p_full or tail2 = p_surname or tail1 = p_last or tail1 = p_surname
+   order by (name_fold = p_full) desc, similarity(name_fold, p_full) desc
    limit least(lim, 250);
 $$;
 
