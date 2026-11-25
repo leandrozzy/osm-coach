@@ -238,7 +238,13 @@ internal fun BattleCard(slot: Int, d: SlotData) {
         val me = if (mineA) st.teamA else st.teamB; val opp = if (mineA) st.teamB else st.teamA
         val ma = if (mineA) st.aggA else st.aggB; val oa = if (mineA) st.aggB else st.aggA
         if (st.mine == null) Text("Não achei sua equipe pelo nome (Ajustes → Minha equipe de batalha). Mostrando o placar real.", fontSize = 12.5.sp, color = C.WARN)
-        Text("$me ${if (st.mine != null) ma else st.aggA} × ${if (st.mine != null) oa else st.aggB} $opp", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).dsHero(C.INFO).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(me, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Box(Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(16.dp)).background(C.INFO.copy(alpha = 0.2f)).padding(horizontal = 14.dp, vertical = 6.dp)) {
+                Text("${if (st.mine != null) ma else st.aggA} × ${if (st.mine != null) oa else st.aggB}", fontWeight = FontWeight.ExtraBold, fontSize = 28.sp, color = C.INFO)
+            }
+            Text(opp, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
         Text("Placar oficial acumulado${st.aggRound?.let { " (J$it)" } ?: ""} • lido ${fmtAt(st.aggAt)}. As linhas não são somadas de novo.", fontSize = 12.sp, color = C.MUTED)
         if (st.contribA != null) {
             val ca = if (mineA) st.contribA else st.contribB; val cb = if (mineA) st.contribB else st.contribA

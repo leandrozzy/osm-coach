@@ -41,7 +41,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -60,7 +59,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -541,9 +539,13 @@ internal fun <T> rememberLoaded(initial: T, tick: Int, key: Any?, loader: suspen
 /** Título pequeno de grupo (AVISOS, PREFERÊNCIAS…): separa o que é de cada assunto numa lista longa. */
 @Composable
 internal fun SectionLabel(text: String, hint: String? = null) {
-    Column(Modifier.padding(top = 18.dp, bottom = 2.dp, start = 4.dp)) {
-        Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY, letterSpacing = 1.2.sp)
-        if (hint != null) Text(hint, fontSize = 12.5.sp, color = C.MUTED)
+    Column(Modifier.padding(top = 22.dp, bottom = 4.dp, start = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(5.dp).height(18.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
+            Spacer(Modifier.width(10.dp))
+            Text(text.uppercase(), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, letterSpacing = 1.2.sp)
+        }
+        if (hint != null) Text(hint, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(start = 15.dp, top = 2.dp))
     }
 }
 
@@ -3384,7 +3386,7 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
             }
         }
         Panel {
-            Text("💪 Força do seu time hoje", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            PanelTitle("💪 Força do seu time hoje")
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((lab, k) in listOf("Geral" to K.MY_STRENGTH, "GOL" to K.MY_GOL, "DEF" to K.MY_DEF, "MEI" to K.MY_MID, "ATA" to K.MY_ATK)) {
                     Column(
@@ -3424,7 +3426,7 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
     }
     SectorDuels(d)
     Panel {
-        Text("🕵 Como o rival joga", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        PanelTitle("🕵 Como o rival joga")
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SettingChip("Formação", known(d.fields, K.RIVAL_FORMATION) ?: "?", Modifier.weight(1f))
             SettingChip("Estilo", known(d.fields, K.RIVAL_PLAN) ?: "?", Modifier.weight(1f))
@@ -3728,7 +3730,7 @@ internal fun SlotDirector(slot: Int, d: SlotData) {
     GenPanel("market_ai", slot, "🤖 Pedir a opinião da IA sobre este plano") { startGeneration(ctx, "market_ai", slot) }
     if (d.marketNote != null) {
         Panel {
-            Text("🤖 Opinião da IA", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            PanelTitle("🤖 Opinião da IA")
             Text(d.marketNote, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
         }
     }

@@ -54,3 +54,8 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Visão geral** (`MatchupHero`): fundo de destaque `dsHero`. **Pré-jogo**: `DuelBanner` no topo (escudos, FALTAM, forma) e botão ciano da análise com IA.
 - **Tema**: `Shapes` do Material em 12–28 dp (nenhum canto reto); `OsmTitle` com barra lima.
 - Diretor, Artes, Ajustes, Elenco, Resultado, Histórico, Aprendizado herdam cabeçalho, títulos, cartões, chips e botões novos; o conteúdo e as regras não mudaram.
+
+## Quarta etapa — todas as telas restantes
+- **Botões** (`DesignKit.kt`): `Button` e `OutlinedButton` do pacote substituem os do Material em todo o app (lima/contorno lima, 14–16 dp, mínimo 48 dp). `PanelTitle` nos títulos de painel; `SectionLabel` (Ajustes) com barra lima; `SwitchRow` com 48 dp e cores do sistema.
+- **Resultado**: placar com escudo dos dois times e fundo na cor do resultado (`dsHero`). **Batalha**: placar oficial em destaque. **Elenco**: filtros 44 dp.
+- Tática, Histórico, Aprendizado, Diretor, Artes, Ajustes: mesma estrutura de dados, agora com os componentes novos (cantos, botões, títulos, chips).

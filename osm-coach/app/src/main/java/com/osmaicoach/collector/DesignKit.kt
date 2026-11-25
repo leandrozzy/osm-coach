@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -331,4 +332,37 @@ internal fun DuelBanner(slot: Int, d: SlotData) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) fr else fm) }
         }
     }
+}
+
+/** Botão preenchido do sistema: lima (ação), cantos de 16 dp, altura mínima de 48 dp. Mesma assinatura do `Button` do Material. */
+@Composable
+internal fun Button(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(DS.RADIUS_CARD),
+    colors: androidx.compose.material3.ButtonColors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = C.PRIMARY, contentColor = DS.ON_LIME, disabledContainerColor = DS.ELEVATED, disabledContentColor = C.MUTED),
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.material3.ButtonDefaults.ContentPadding,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
+) = androidx.compose.material3.Button(onClick, modifier.heightIn(min = 48.dp), enabled, shape, colors, contentPadding = contentPadding, content = content)
+
+/** Botão de contorno do sistema: borda fina, cantos de 14 dp, altura mínima de 48 dp. */
+@Composable
+internal fun OutlinedButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(DS.RADIUS_CONTROL),
+    colors: androidx.compose.material3.ButtonColors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = C.TEXT),
+    contentPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.material3.ButtonDefaults.ContentPadding,
+    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit
+) = androidx.compose.material3.OutlinedButton(
+    onClick, modifier.heightIn(min = 48.dp), enabled, shape, colors,
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (enabled) C.PRIMARY.copy(alpha = 0.6f) else C.BORDER), contentPadding = contentPadding, content = content
+)
+
+/** Título de painel: ladrilho com o ícone (primeiro caractere/emoji) e o texto em destaque. */
+@Composable
+internal fun PanelTitle(text: String) {
+    Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, modifier = Modifier.padding(bottom = 2.dp))
 }
