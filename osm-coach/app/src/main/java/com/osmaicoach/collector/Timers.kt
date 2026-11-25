@@ -86,6 +86,20 @@ object Work {
     private val ROLES = listOf("UNI", "ATA", "MEI", "DEF", "GOL")
     private val CARDS = listOf(Triple("Capacidade", K.MY_STAD_CAP, "🏟"), Triple("Relvado", K.MY_STAD_PITCH, "🌱"), Triple("Treino", K.MY_STAD_TRAIN, "🎯"))
 
+    /**
+     * Regra do OSM: uma obra do estádio por vez. Com mais de um fim lido, descarta os que têm o MESMO horário (±90 s) de outro card (duração fixa do melhoramento,
+     * não contagem real); se sobrar mais de um, fica o que termina primeiro; se todos forem iguais, nenhum vale (não dá para saber qual roda).
+     */
+    fun onlyRunning(ends: List<Pair<String, Long?>>): Map<String, Long?> {
+        val with = ends.filter { it.second != null }
+        val out = HashMap<String, Long?>()
+        for (e in ends) out[e.first] = null
+        if (with.size <= 1) { with.forEach { out[it.first] = it.second }; return out }
+        val unique = with.filter { a -> with.none { b -> b.first != a.first && Math.abs(b.second!! - a.second!!) <= 90_000L } }
+        unique.minByOrNull { it.second!! }?.let { out[it.first] = it.second }
+        return out
+    }
+
     fun icon(label: String): String = CARDS.firstOrNull { it.first == label }?.third ?: "🏟"
 
     fun of(slot: Int, team: String, screen: JSONObject?, timers: List<Timers.Entry>, f: Map<String, StoredField>): SlotWork {
@@ -102,8 +116,10 @@ object Work {
             val i = p.indexOf(": ")
             if (i <= 0) null else Pair(p.substring(0, i), p.substring(i + 2))
         }.toMap()
+        // o estádio só constrói UMA obra por vez: os outros cards mostram só a duração do próximo melhoramento (igual em vários cards), não uma obra em andamento
+        val running = Work.onlyRunning(CARDS.map { Pair(it.first, byKey["stad_${it.first}"]?.at) })
         val cards = CARDS.map { (label, key, _) ->
-            WorkCard(label, f[key]?.value?.toIntOrNull(), byKey["stad_$label"]?.at, status[label])
+            WorkCard(label, f[key]?.value?.toIntOrNull(), running[label], status[label])
         }
         return SlotWork(slot, team, seats, cards)
     }

@@ -834,6 +834,9 @@ object Parsers {
             if (secs != null) timers[label] = now + secs * 1000L
             else if (text.contains("comecar") || text.contains("concluir") || text.contains("maximo")) timers[label] = null
         }
+        // uma obra por vez: horários iguais em vários cards são a duração do próximo melhoramento, não obra em andamento
+        val run = Work.onlyRunning(timers.map { Pair(it.key, it.value) })
+        for (k in timers.keys.toList()) if (timers[k] != null && run[k] == null) timers[k] = null
         return timers
     }
 

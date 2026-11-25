@@ -308,4 +308,70 @@ class LigaBatalhaTest {
         val s4 = cards.firstOrNull { it.slot == 4 }
         assertNotNull(s4); assertEquals("procurando", s4!!.state)
     }
+
+    // ---- layout real do jogo (prints de 24/11): nome em cima, apelido do treinador embaixo, placar no meio; copa em cartões
+    @Test fun leagueRowWithLongNickPicksClubNameNotNick() {
+        val o = Fx.ocr(
+            Fx.line("Casa", 0.03f, 0.13f), Fx.line("Jornada 12", 0.5f, 0.13f, 0.1f), Fx.line("Fora", 0.97f, 0.13f),
+            Fx.line("Red Bull Bragantino", 0.15f, 0.248f, 0.15f), Fx.line("leandrozzy", 0.12f, 0.288f, 0.08f), Fx.line("0 - 1", 0.5f, 0.266f, 0.06f), Fx.line("Atlético Paranaense", 0.88f, 0.248f, 0.15f), Fx.line("Treinador pebas", 0.9f, 0.288f, 0.12f),
+            Fx.line("São Paulo", 0.12f, 0.58f, 0.09f), Fx.line("José Reginaldo 04 da Silva", 0.18f, 0.62f, 0.22f), Fx.line("2 - 1", 0.5f, 0.60f, 0.06f), Fx.line("Esporte Clube Vitória", 0.86f, 0.58f, 0.15f), Fx.line("Professor Jean Souza dos Santos", 0.83f, 0.62f, 0.2f)
+        )
+        val p = LeagueResults.parse(o)!!
+        assertEquals(12, p.round)
+        assertTrue(p.games.any { it.home == "Red Bull Bragantino" && it.away == "Atlético Paranaense" && it.gh == 0 && it.ga == 1 })
+        assertTrue(p.games.any { it.home == "São Paulo" && it.away == "Esporte Clube Vitória" })       // nunca o apelido do treinador
+    }
+
+    @Test fun cupScreenIsParsedByPhaseAndNeverAsLeagueRound() {
+        val o = Fx.ocr(
+            Fx.line("Fase preliminar", 0.5f, 0.16f, 0.12f), Fx.line("18-11-26", 0.5f, 0.205f, 0.06f),
+            Fx.line("1 - 0", 0.128f, 0.355f, 0.04f), Fx.line("Mirassol FC (SP)", 0.058f, 0.475f, 0.09f), Fx.line("Chapecoense", 0.196f, 0.475f, 0.07f), Fx.line("UzM Raro", 0.058f, 0.51f, 0.05f),
+            Fx.line("3 - 1", 0.62f, 0.355f, 0.04f), Fx.line("Grêmio", 0.555f, 0.475f, 0.06f), Fx.line("Atlético Paranaense", 0.69f, 0.475f, 0.09f), Fx.line("renato gaúcho_718", 0.555f, 0.51f, 0.08f),
+            Fx.line("Oitavos-de-final", 0.5f, 0.70f, 0.12f), Fx.line("VS", 0.128f, 0.9f, 0.03f), Fx.line("VS", 0.38f, 0.9f, 0.03f)
+        )
+        assertNull(LeagueResults.parse(o))                                                    // não é rodada da liga
+        val c = LeagueResults.parseCup(o)!!
+        assertEquals(2, c.games.size)
+        assertTrue(c.games.all { it.first == 1 })                                             // fase preliminar
+        assertTrue(c.games.any { it.second.home == "Mirassol FC (SP)" && it.second.away == "Chapecoense" && it.second.gh == 1 })
+        assertTrue(c.games.any { it.second.home == "Grêmio" && it.second.away == "Atlético Paranaense" && it.second.gh == 3 })   // "VS" (a definir) fica de fora
+        assertEquals(ScreenType.OTHER_OSM, ScreenClassifier.classify(o, true))
+    }
+
+    @Test fun tableFromCompleteResultsAndNothingWhenARoundIsMissing() {
+        fun g(r: Int, h: String, a: String, x: Int, y: Int) = LeagueResults.Stored(r, h, a, x, y, 1, 1L)
+        val full = listOf(g(1, "A", "B", 2, 0), g(1, "C", "D", 1, 1), g(2, "A", "C", 0, 0), g(2, "B", "D", 3, 1))
+        val d = LeagueResults.tableFromResults(full)!!
+        assertEquals(2, d.rounds)
+        val a = d.rows.first { it.club == "A" }; assertEquals(4, a.pts); assertEquals(1, a.rank)
+        assertEquals(2, d.rows.first { it.club == "B" }.rank.let { if (it == 2 || it == 3) 2 else it })
+        assertNull(LeagueResults.tableFromResults(full.filter { it.round == 1 || it.home != "B" }))      // J2 incompleta: não calcula
+        assertNull(LeagueResults.tableFromResults(listOf(g(1, "A", "B", 1, 0), g(3, "A", "C", 1, 0))))   // J2 sem leitura
+    }
+
+    @Test fun onlyOneStadiumWorkAtATime() {
+        val now = 1_000_000L; val h = 3_600_000L
+        val r = Work.onlyRunning(listOf(Pair("Treino", now + 2 * h + 58 * 60_000L), Pair("Capacidade", now + 3 * h + 10 * 60_000L), Pair("Relvado", now + 3 * h + 10 * 60_000L)))
+        assertNotNull(r["Treino"]); assertNull(r["Capacidade"]); assertNull(r["Relvado"])            // duas obras com a mesma duração fixa não são obras em andamento
+        assertNull(Work.onlyRunning(listOf(Pair("A", now + h), Pair("B", now + h)))["A"])           // todos iguais: nenhum roda
+        assertNotNull(Work.onlyRunning(listOf(Pair("A", now + h), Pair("B", null)))["A"])           // um só: vale
+    }
+
+    @Test fun splitSeasonArchivesJoinTheCurrentOneOnlyWhenRoundsContinue() {
+        fun gs(vararg r: Int) = r.map { Pair("tlog_R$it", JSONObject()) }
+        fun ar(tag: String, vararg r: Int) = r.map { Pair("tlog_${tag}_R$it", JSONObject()) }
+        val g = mapOf("ATUAL" to gs(12), "X1763000000" to ar("X1763000000", 10, 11), "X1762900000" to ar("X1762900000", 1, 2, 3, 4, 5, 6, 7, 8, 9), "X1762000000" to ar("X1762000000", 1, 2, 3))
+        val m = mergeSplitSeasons(g)
+        assertEquals(1 + 2 + 9, m["ATUAL"]!!.size)                                                   // J1–J12 de uma temporada só
+        assertTrue("X1762000000" in m.keys && m.size == 2)                                            // a temporada que recomeça na J1 continua separada
+        val real = mergeSplitSeasons(mapOf("ATUAL" to gs(3), "X1763000000" to ar("X1763000000", 1, 2, 3, 4, 5)))
+        assertEquals(1, real["ATUAL"]!!.size)                                                         // rodadas sobrepostas = outra temporada
+    }
+
+    @Test fun recruitingAndWaitingBattleHidesTipsLikeFreeSlot() {
+        fun sf(v: String) = StoredField(v, 0.9, 1L)
+        assertTrue(Hints.slotFree(mapOf(K.SLOT_STATE to sf("procurando"))))
+        assertTrue(Hints.slotFree(mapOf(K.SLOT_STATE to sf("vazio"))))
+        assertFalse(Hints.slotFree(mapOf(K.SLOT_STATE to sf("ativo"))))
+    }
 }

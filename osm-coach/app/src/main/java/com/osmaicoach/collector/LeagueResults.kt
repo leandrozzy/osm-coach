@@ -40,9 +40,10 @@ object LeagueResults {
             }
             val sc = RX_SCORE.find(tx) ?: continue
             if (ln.xc !in 0.30f..0.70f || ln.yc < 0.12f || sc.groupValues[1].toInt() > 15 || sc.groupValues[2].toInt() > 15) continue
-            val same = o.lines.filter { it !== ln && abs(it.yc - ln.yc) <= 0.030f && Txt.letters(it.text) >= 2 }
-            val left = same.filter { it.r <= ln.l + 0.03f }.maxByOrNull { it.r }
-            val right = same.filter { it.l >= ln.r - 0.03f }.minByOrNull { it.l }
+            // cada lado tem 2 linhas: NOME (em cima) e apelido do treinador (embaixo, mais fraco); o placar fica entre as duas. Vale a de cima.
+            val same = o.lines.filter { it !== ln && abs(it.yc - ln.yc) <= 0.050f && Txt.letters(it.text) >= 2 }
+            val left = same.filter { it.r <= ln.l + 0.03f }.minByOrNull { it.yc }
+            val right = same.filter { it.l >= ln.r - 0.03f }.minByOrNull { it.yc }
             if (left == null || right == null) continue
             games.add(Game(left.text.trim(), right.text.trim(), sc.groupValues[1].toInt(), sc.groupValues[2].toInt()))
         }
@@ -50,6 +51,35 @@ object LeagueResults {
         val minRows = if (rounds.isNotEmpty()) 2 else 3
         if (uniq.size < minRows) return null
         return Parsed(rounds.firstOrNull(), uniq)
+    }
+
+    // ------------------------------------------------------------------ copa (fases: cartões com escudos, placar no meio e nomes embaixo)
+    val PHASES = listOf("fase preliminar" to 1, "oitavos" to 2, "quartos" to 3, "meias" to 4, "final" to 5)
+    fun phaseOf(text: String): Int? {
+        val n = Txt.norm(text).trim()
+        if (n.length > 30 || n.contains("jornada")) return null
+        return PHASES.firstOrNull { (k, _) -> if (k == "final") n == "final" else n.startsWith(k) }?.second
+    }
+
+    /** Fase da copa (1 preliminar … 5 final) e os jogos JÁ JOGADOS dela (placar lido); "VS" = a definir/ainda não jogado, fica de fora. */
+    class CupParsed(val games: List<Pair<Int, Game>>)
+    fun parseCup(o: OcrResult): CupParsed? {
+        val heads = o.lines.filter { it.xc in 0.35f..0.65f && it.yc < 0.97f }.mapNotNull { l -> phaseOf(l.text)?.let { Pair(l, it) } }.sortedBy { it.first.yc }
+        if (heads.isEmpty()) return null
+        val out = ArrayList<Pair<Int, Game>>()
+        for (ln in o.lines) {
+            val sc = RX_SCORE.find(ln.text.trim()) ?: continue
+            if (sc.groupValues[1].toInt() > 15 || sc.groupValues[2].toInt() > 15) continue
+            val head = heads.lastOrNull { it.first.yc < ln.yc } ?: continue
+            if (ln.yc - head.first.yc > 0.45f) continue
+            val cardW = 0.25f; val idx = (ln.xc / cardW).toInt().coerceIn(0, 3); val l0 = idx * cardW; val r0 = l0 + cardW
+            val below = o.lines.filter { it.yc in (ln.yc + 0.05f)..(ln.yc + 0.22f) && it.xc in l0..r0 && Txt.letters(it.text) >= 2 && Txt.norm(it.text) != "vs" }
+            val left = below.filter { it.xc < ln.xc }.minByOrNull { it.yc }
+            val right = below.filter { it.xc > ln.xc }.minByOrNull { it.yc }
+            if (left == null || right == null) continue
+            out.add(Pair(head.second, Game(left.text.trim(), right.text.trim(), sc.groupValues[1].toInt(), sc.groupValues[2].toInt())))
+        }
+        return if (out.isEmpty()) null else CupParsed(out.distinctBy { it.first.toString() + Txt.key(it.second.home) + Txt.key(it.second.away) })
     }
 
     /** Define a jornada da leitura: do cabeçalho, ou herdada da MESMA tela/sessão (mesmo slot, até 40 s, cadeia contínua). Senão null = não salva. */
@@ -157,6 +187,32 @@ object LeagueResults {
             for (k in r.keys()) { val e = r.optJSONObject(k) ?: continue; out.add(Stored(rn, e.optString("h"), e.optString("a"), e.optInt("gh"), e.optInt("ga"), e.optInt("n", 1), e.optLong("at"))) }
         }
         return out
+    }
+
+    // ------------------------------------------------------------------ classificação feita só com os resultados lidos
+    class Derived(val rows: List<League.Row>, val rounds: Int, val tieAmbiguous: Boolean)
+
+    /**
+     * Monta a tabela SÓ dos resultados lidos, e só quando eles estão COMPLETOS: todas as jornadas de 1 até a última lida com exatamente clubes/2 jogos
+     * (senão qualquer jornada faltando mudaria os pontos). Ordem: pontos, saldo, gols pró (o desempate real do OSM é desconhecido: `tieAmbiguous`).
+     */
+    fun tableFromResults(all: List<Stored>): Derived? {
+        val (g, clubs) = canonicalize(all)
+        if (g.isEmpty() || clubs < 4 || clubs % 2 != 0) return null
+        val per = g.groupBy { it.round }
+        val last = per.keys.max()
+        if ((1..last).any { (per[it]?.size ?: 0) != clubs / 2 }) return null
+        val pts = HashMap<String, IntArray>()   // j, v, e, d, pts, gf, ga
+        fun row(n: String) = pts.getOrPut(n) { IntArray(7) }
+        for (x in g) {
+            val h = row(x.home); val a = row(x.away)
+            h[0]++; a[0]++; h[5] += x.gh; h[6] += x.ga; a[5] += x.ga; a[6] += x.gh
+            if (x.gh > x.ga) { h[1]++; h[4] += 3; a[3]++ } else if (x.gh < x.ga) { a[1]++; a[4] += 3; h[3]++ } else { h[2]++; a[2]++; h[4]++; a[4]++ }
+        }
+        val sorted = pts.entries.sortedWith(compareByDescending<Map.Entry<String, IntArray>> { it.value[4] }.thenByDescending { it.value[5] - it.value[6] }.thenByDescending { it.value[5] })
+        val rows = sorted.mapIndexed { i, e -> val v = e.value; League.Row(e.key, null, i + 1, v[0], v[1], v[2], v[3], v[4], v[5], v[6]) }
+        val tie = sorted.zipWithNext().any { (a, b) -> a.value[4] == b.value[4] && a.value[5] - a.value[6] == b.value[5] - b.value[6] && a.value[5] == b.value[5] }
+        return Derived(rows, last, tie)
     }
 
     // ------------------------------------------------------------------ classificação ajustada (sem somar duas vezes)

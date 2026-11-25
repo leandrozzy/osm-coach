@@ -109,8 +109,9 @@ internal fun SlotHistory(slot: Int, d: SlotData) {
 
     Title("Jogo a jogo, por temporada")
     // um dropdown por temporada (a atual abre sozinha; as encerradas ficam fechadas)
-    val groups = d.logsAll.mapNotNull { p -> runCatching { JSONObject(p.json) }.getOrNull()?.let { p.kind to it } }
+    val groups0 = d.logsAll.mapNotNull { p -> runCatching { JSONObject(p.json) }.getOrNull()?.let { p.kind to it } }
         .groupBy { (k, _) -> if (k.startsWith("tlog_R")) "ATUAL" else k.removePrefix("tlog_").substringBefore("_R") }
+    val groups = mergeSplitSeasons(groups0)
     val order = groups.keys.sortedWith(compareBy({ it != "ATUAL" }, { it.removePrefix("X").toLongOrNull()?.let { t -> -t } ?: 0L }))
     for (g in order) {
         val gr = postRows(groups[g].orEmpty().map { it.second })
@@ -147,4 +148,28 @@ internal fun SlotHistory(slot: Int, d: SlotData) {
             }
         }
     }
+}
+
+/**
+ * Arquivos "encerrados" que na verdade são pedaços da MESMA temporada (o app arquivou por engano ao ler telas parecidas com outra competição): os jogos de um arquivo
+ * entram na temporada atual quando as rodadas continuam logo antes dela (a maior rodada do arquivo < a menor rodada atual, com folga de até 2) e o arquivo é de
+ * ≤3 dias antes do anterior. Uma temporada realmente nova recomeça numa rodada baixa/sobreposta e fica separada.
+ */
+internal fun mergeSplitSeasons(groups: Map<String, List<Pair<String, JSONObject>>>): Map<String, List<Pair<String, JSONObject>>> {
+    fun roundOf(kind: String) = kind.substringAfterLast("_R").toIntOrNull() ?: kind.removePrefix("tlog_R").toIntOrNull()
+    val cur = groups["ATUAL"] ?: return groups
+    var minR = cur.mapNotNull { roundOf(it.first) }.minOrNull() ?: return groups
+    val merged = ArrayList(cur)
+    val rest = groups.filterKeys { it != "ATUAL" }.toMutableMap()
+    var prevAt = Long.MAX_VALUE
+    for (tag in rest.keys.sortedByDescending { it.removePrefix("X").toLongOrNull() ?: 0L }) {
+        val rs = rest[tag].orEmpty().mapNotNull { roundOf(it.first) }
+        val at = tag.removePrefix("X").toLongOrNull() ?: break
+        if (rs.isEmpty() || rs.max() >= minR || minR - rs.max() > 2 || (prevAt != Long.MAX_VALUE && prevAt - at > 3 * 86400L)) break
+        merged.addAll(rest.remove(tag).orEmpty()); minR = rs.min(); prevAt = at
+    }
+    val out = LinkedHashMap<String, List<Pair<String, JSONObject>>>()
+    out["ATUAL"] = merged
+    out.putAll(rest)
+    return out
 }

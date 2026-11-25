@@ -13,6 +13,9 @@ object ScreenClassifier {
         val hubHits = hubRound.findAll(t).count()
         if (hubHits >= 2 || (hubHits >= 1 && t.contains("espacos de treinador"))) return ScreenType.HUB
         if (ocr.tokens.size < 4) return ScreenType.NOISE
+        // Resultados de TODOS os jogos da liga (Casa | Jornada N | Fora) e fases da copa: não são o calendário/resultado do seu clube; nunca podem trocar a competição do slot.
+        if (t.contains("casa") && t.contains("fora") && LeagueResults.parse(ocr) != null) return ScreenType.OTHER_OSM
+        if (!t.contains("jornada") && (LeagueResults.parseCup(ocr)?.games?.size ?: 0) >= 2) return ScreenType.OTHER_OSM
         // Análise do rival (nota do analista à esquerda): tela cheia, SEM a barra do OSM.
         if (Parsers.isAnalysis(ocr)) return ScreenType.REPORT
         // Análise do jogo (resultado): placar, estatísticas, zonas de ação e notas dos jogadores.

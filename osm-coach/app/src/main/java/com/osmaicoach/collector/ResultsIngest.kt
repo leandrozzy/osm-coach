@@ -24,8 +24,23 @@ object ResultsIngest {
                 if (target != null) { battle(repo, target, bp, now); return }
                 if (isBattleSlot || mine) { Diag.log("Batalha: tela lida mas o slot não é certo, nada salvo"); return }
             }
-            if (!isBattleSlot) league(repo, slot, f, ocr, now)
+            if (!isBattleSlot) {
+                val cup = LeagueResults.parseCup(ocr)
+                if (cup != null) cupStore(repo, slot, f, cup, now) else league(repo, slot, f, ocr, now)
+            }
         } finally { lock.unlock() }
+    }
+
+    /** Copa: guardada à parte (chave "copa|…", "jornada" = fase 1..5), nunca misturada com as rodadas da liga. */
+    private suspend fun cupStore(repo: Repo, slot: Int, f: Map<String, StoredField>, cup: LeagueResults.CupParsed, now: Long) {
+        val comp = LeagueResults.compKey(f) ?: return
+        var root = plan(repo, slot, "lres2"); var added = 0
+        for ((phase, games) in cup.games.groupBy({ it.first }, { it.second })) {
+            val (j, n) = LeagueResults.store(root, "copa|$comp", phase, games, emptyList(), now); root = j; added += n
+        }
+        repo.dao.putPlan(PlanEntity(slot, "lres2", root!!.toString(), now))
+        Diag.log("Copa S$slot: ${cup.games.size} jogos jogados lidos, $added novos")
+        if (added > 0) UiBus.bump()
     }
 
     private suspend fun league(repo: Repo, slot: Int, f: Map<String, StoredField>, ocr: OcrResult, now: Long) {
@@ -35,8 +50,8 @@ object ResultsIngest {
         val round = LeagueResults.resolveRound(p, slot, now, session)
         if (round == null) { Diag.log("Resultados da liga S$slot: ${p.games.size} jogos sem cabeçalho de jornada (sem continuidade), nada salvo"); return }
         val st = League.table(plan(repo, slot, "league"), "st").map { it.club }
-        val (j, added) = LeagueResults.store(plan(repo, slot, "lres"), comp, round, p.games, st, now)
-        repo.dao.putPlan(PlanEntity(slot, "lres", j.toString(), now))
+        val (j, added) = LeagueResults.store(plan(repo, slot, "lres2"), comp, round, p.games, st, now)
+        repo.dao.putPlan(PlanEntity(slot, "lres2", j.toString(), now))
         Diag.log("Resultados da liga S$slot J$round: ${p.games.size} jogos lidos, $added novos")
         if (added > 0) UiBus.bump()
     }

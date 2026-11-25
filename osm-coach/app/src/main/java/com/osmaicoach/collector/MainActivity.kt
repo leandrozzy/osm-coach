@@ -2817,7 +2817,8 @@ internal fun DirectorTab(onOpen: (Int, Int) -> Unit) {
     val ctx = LocalContext.current
     // recarga pesada (4 slots): a cada 20 s ou na hora em que chega dado novo (UiBus)
     val tick = rememberTick(20000L)
-    val list = rememberLoaded(emptyList<DirSlot>(), tick, UiBus.version) { loadDirector(ctx) }
+    // slot sem competição rodando (livre, recrutando/procurando adversário): não tem o que gerir, fica fora do Diretor
+    val list = rememberLoaded(emptyList<DirSlot>(), tick, UiBus.version) { loadDirector(ctx).filter { it.s.state != "vazio" && it.s.state != "procurando" } }
     val now = System.currentTimeMillis()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
         PageTitle("🧭", "Diretor", "gestão do clube")
