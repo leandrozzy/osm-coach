@@ -104,14 +104,19 @@ object WorldSync {
         if (code in 200..299 && body != null) { WorldImport.importCountries(AndroidSql(db.w), body); WorldSources.status(db, WorldSources.FLAGS, "operacional") }
     }
 
-    /** Teste REAL do Supabase (contagens vindas do banco) e atualização do status da fonte. */
-    fun checkSupabase(ctx: Context, db: WorldDb): Result<WorldRemote.Stats> {
-        if (WorldRemote.cfg(ctx) == null) { WorldSources.status(db, WorldSources.SUPABASE, "aguardando configuração", "Cole a URL e a chave em Fontes de Dados → Configurar."); return Result.failure(IllegalStateException("não configurado")) }
-        val r = WorldRemote.stats(ctx)
+    /** Grava o resultado do teste no banco local (pode esperar se o banco estiver ocupado: por isso NUNCA é chamado de dentro de um botão). */
+    fun recordSupabase(ctx: Context, r: Result<WorldRemote.Stats>) {
+        val db = WorldDb.get(ctx)
         r.fold(
             { st -> WorldSources.status(db, WorldSources.SUPABASE, if (st.players + st.clubs > 0) "atualizada" else "aguardando sincronização", "Conectado: ${st.countries} países • ${st.competitions} competições • ${st.clubs} clubes • ${st.players} jogadores • ${st.images} imagens" + (st.lastRun?.let { " • última carga: $it" } ?: "")); db.w.execSQL("UPDATE football_sources SET verified_at=? WHERE id=?", arrayOf(System.currentTimeMillis(), WorldSources.SUPABASE)) },
-            { e -> WorldSources.status(db, WorldSources.SUPABASE, "indisponível", e.message) })
+            { e -> WorldSources.status(db, WorldSources.SUPABASE, if (WorldRemote.cfg(ctx) == null) "aguardando configuração" else "indisponível", e.message) })
         UiBus.bump()
+    }
+
+    /** Teste REAL do Supabase + registro do status (uso em segundo plano). */
+    fun checkSupabase(ctx: Context, db: WorldDb): Result<WorldRemote.Stats> {
+        val r = if (WorldRemote.cfg(ctx) == null) Result.failure(IllegalStateException("não configurado")) else WorldRemote.stats(ctx)
+        recordSupabase(ctx, r)
         return r
     }
 

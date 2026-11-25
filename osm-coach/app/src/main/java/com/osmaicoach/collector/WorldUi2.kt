@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -260,7 +261,21 @@ internal fun WorldSourcesView() {
             OutlinedTextField(url, { url = it; Settings.put(ctx, WorldRemote.K_URL, it.trim()) }, singleLine = true, label = { Text("URL do projeto (https://xxxx.supabase.co)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             OutlinedTextField(sbKey, { sbKey = it; Settings.put(ctx, WorldRemote.K_KEY, it.trim()) }, singleLine = true, label = { Text("Chave anon (somente leitura)") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { testing = true; scope.launch(Dispatchers.IO) { msg = WorldSync.checkSupabase(ctx, WorldDb.get(ctx)).fold({ "✅ Conectado: ${fmtN(it.countries)} países • ${fmtN(it.competitions)} competições • ${fmtN(it.clubs)} clubes • ${fmtN(it.players)} jogadores" + (it.lastRun?.let { r -> " • última carga: $r" } ?: "") }, { "❌ ${it.message}" }); testing = false } }, enabled = !testing, modifier = Modifier.weight(1f)) { Text(if (testing) "Testando…" else "Testar conexão", fontWeight = FontWeight.ExtraBold) }
+                Button(onClick = {
+                    testing = true; msg = "Testando a conexão…"
+                    scope.launch {
+                        val job = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).async { runCatching { WorldRemote.stats(ctx).getOrThrow() } }
+                        val r = kotlinx.coroutines.withTimeoutOrNull(25_000L) { job.await() }
+                        msg = when {
+                            r == null -> "⏱ Sem resposta em 25 s. Confira a internet e se a URL está certa (https://xxxx.supabase.co)."
+                            r.isSuccess -> r.getOrThrow().let { "✅ Conectado: ${fmtN(it.countries)} países • ${fmtN(it.competitions)} competições • ${fmtN(it.clubs)} clubes • ${fmtN(it.players)} jogadores • ${fmtN(it.images)} imagens" + (it.lastRun?.let { x -> " • última carga: $x" } ?: "") }
+                            else -> "❌ ${r.exceptionOrNull()?.message ?: r.exceptionOrNull()?.javaClass?.simpleName}"
+                        }
+                        testing = false
+                        // o registro no banco local roda à parte: se o banco estiver ocupado, a tela não espera
+                        if (r != null) AppScope.scope.launch(Dispatchers.IO) { runCatching { WorldSync.recordSupabase(ctx, r) } }
+                    }
+                }, enabled = !testing, modifier = Modifier.weight(1f)) { Text(if (testing) "Testando…" else "Testar conexão", fontWeight = FontWeight.ExtraBold) }
                 OutlinedButton(onClick = { reading = true; scope.launch { msg = runCatching { WorldOsm.refresh(ctx, force = true) }.getOrElse { "Falhou: ${it.message}" }; reading = false } }, enabled = !reading, modifier = Modifier.weight(1f)) { Text(if (reading) "Lendo…" else "Ler o que o app já viu", fontSize = 13.sp) }
             }
             if (msg.isNotEmpty()) Text(msg, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))

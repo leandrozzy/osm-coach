@@ -59,8 +59,8 @@ object WorldHttp {
     }
 
     /** Resposta pequena em texto (JSON de API), com teto de tamanho. */
-    fun text(url: String, headers: Map<String, String> = emptyMap(), maxBytes: Int = 4_000_000): Pair<Int, String?> {
-        get(url, headers = headers).use { r ->
+    fun text(url: String, headers: Map<String, String> = emptyMap(), maxBytes: Int = 4_000_000, timeoutMs: Int = 30_000): Pair<Int, String?> {
+        get(url, headers = headers, timeoutMs = timeoutMs).use { r ->
             val s = r.stream ?: return Pair(r.code, null)
             val out = java.io.ByteArrayOutputStream()
             val buf = ByteArray(8192); var n: Int; var total = 0

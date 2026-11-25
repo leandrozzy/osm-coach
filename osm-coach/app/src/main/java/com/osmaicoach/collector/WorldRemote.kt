@@ -33,15 +33,17 @@ object WorldRemote {
     internal fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     /** GET JSON. (código HTTP, corpo). Lança só em falha de rede. */
-    fun get(ctx: Context, path: String): Pair<Int, String?> {
+    fun get(ctx: Context, path: String, timeoutMs: Int = 20_000): Pair<Int, String?> {
         val c = cfg(ctx) ?: return Pair(-1, null)
-        return WorldHttp.text(c.url + path, headers(c), 6_000_000)
+        val t0 = System.currentTimeMillis()
+        return try { WorldHttp.text(c.url + path, headers(c), 6_000_000, timeoutMs).also { Diag.log("Base/Supabase GET ${path.substringBefore('?').take(40)} → HTTP ${it.first} em ${System.currentTimeMillis() - t0} ms") } }
+        catch (e: Exception) { Diag.log("Base/Supabase GET ${path.substringBefore('?').take(40)} FALHOU em ${System.currentTimeMillis() - t0} ms: ${e.javaClass.simpleName} ${e.message?.take(80)}"); throw e }
     }
 
     class Stats(val countries: Long, val competitions: Long, val clubs: Long, val players: Long, val lastRun: String?, val images: Long = 0)
     /** Testa a conexão e devolve as contagens REAIS do Supabase (nada de número inventado). */
     fun stats(ctx: Context): Result<Stats> = runCatching {
-        val (code, body) = get(ctx, "/rest/v1/rpc/wf_stats")
+        val (code, body) = get(ctx, "/rest/v1/rpc/wf_stats", 15_000)
         if (code == -1) error("URL/chave não configuradas")
         if (code !in 200..299 || body == null) error(when (code) { 401, 403 -> "chave recusada (use a chave anon)"; 404 -> "banco ainda sem as tabelas: rode supabase/schema.sql"; else -> "HTTP $code" })
         val o = JSONObject(body)
@@ -56,6 +58,9 @@ object WorldRemote {
     /** Grava (ou atualiza) clubes vindos do Supabase na cópia local. Devolve quantos. `comp` busca a competição (JSON) por chave; pode ser null. Nunca toca em `osm_seen`/`name_osm`. */
     fun upsertClubs(db: WorldSql, arr: JSONArray, comp: ((String) -> JSONObject?)? = null): Int {
         var n = 0; val now = System.currentTimeMillis()
+        // rede ANTES da transação: nunca segurar o banco enquanto espera a internet
+        val compCache = HashMap<String, JSONObject?>()
+        if (comp != null) for (idx in 0 until arr.length()) arr.getJSONObject(idx).let { o -> s(o, "comp_key")?.let { k -> if (k !in compCache) compCache[k] = runCatching { comp(k) }.getOrNull() } }
         db.begin()
         try {
             for (idx in 0 until arr.length()) {
@@ -76,7 +81,7 @@ object WorldRemote {
                     if (ak.isNotEmpty() && WorldClean.nameOk(txt)) db.exec("INSERT OR IGNORE INTO football_entity_aliases(entity_type,entity_id,alias,alias_key,kind,source_id) VALUES('club',?,?,?,?,?)", arrayOf(id, txt, ak, "remoto", "supabase"))
                 }
                 val ck = s(o, "comp_key")
-                if (ck != null && comp != null) comp(ck)?.let { co ->
+                if (ck != null && comp != null) compCache[ck]?.let { co ->
                     val cid = upsertCompetition(db, co)
                     if (cid != null) db.exec("INSERT OR IGNORE INTO football_competition_clubs(competition_id,club_id,season,division,source_id) VALUES(?,?,?,?,?)", arrayOf(cid, id, "atual", s(o, "division"), "supabase"))
                 }

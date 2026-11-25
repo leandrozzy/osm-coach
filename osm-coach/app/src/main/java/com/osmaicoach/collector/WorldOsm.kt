@@ -16,24 +16,27 @@ object WorldOsm {
     @Volatile var lastReport: String = ""; private set
     @Volatile var lastAt: Long = 0L; private set
 
-    /** Lê elencos, adversários e ligas já gravados e cria observações (idempotente: mesma chave de captura). */
+    /** Lê elencos, adversários e ligas já gravados e cria observações (idempotente: mesma chave de captura).
+     *  ATENÇÃO: transação do SQLite pertence a UMA thread. Por isso TODA leitura do Room (suspend) acontece ANTES de abrir a transação da Base; dentro dela só SQL síncrono. */
     suspend fun backfill(ctx: Context): Int {
         val repo = Repo(ctx); val db: WorldSql = AndroidSql(WorldDb.get(ctx).w); val now = System.currentTimeMillis()
+        class Obs(val slot: Int, val screen: String, val kind: String, val raw: String?, val ctx: JSONObject)
+        val list = ArrayList<Obs>()
+        for (slot in 1..4) {
+            val fields = repo.dao.fieldsOf(slot).associate { it.fkey to it.fvalue }
+            val league = fields[K.COMPETITION]
+            fields[K.TEAM]?.let { list.add(Obs(slot, "FIELDS", "club", it, JSONObject().put("role", "meu").put("league", league))) }
+            fields[K.RIVAL_TEAM]?.let { list.add(Obs(slot, "FIELDS", "club", it, JSONObject().put("role", "rival").put("league", league))) }
+            for (m in repo.dao.matchesOf(slot)) m.opponent?.takeIf { !Fixtures.notAClub(it) }?.let { list.add(Obs(slot, "MATCHES", "club", it, JSONObject().put("role", "adversario").put("league", league))) }
+            for (p in repo.dao.playersOf(slot)) list.add(Obs(slot, "SQUAD", "player", p.name, JSONObject().put("age", p.age).put("pos", p.posCode).put("cat", p.cat).put("owner", p.owner).put("nameKey", p.nameKey)))
+        }
         var n = 0
         db.begin()
         try {
-            fun obs(slot: Int, screen: String, kind: String, raw: String?, ctxJson: JSONObject) {
-                val r = raw?.trim()?.takeIf { it.length >= 2 && WorldClean.nameOk(it) } ?: return
-                val norm = WorldNorm.fold(r).takeIf { it.isNotEmpty() } ?: return
-                n += db.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at) VALUES(?,?,?,?,?,?,?,?)", arrayOf(slot, screen, kind, r, norm, ctxJson.toString(), "backfill:$slot", now))
-            }
-            for (slot in 1..4) {
-                val fields = repo.dao.fieldsOf(slot).associate { it.fkey to it.fvalue }
-                val league = fields[K.COMPETITION]
-                fields[K.TEAM]?.let { obs(slot, "FIELDS", "club", it, JSONObject().put("role", "meu").put("league", league)) }
-                fields[K.RIVAL_TEAM]?.let { obs(slot, "FIELDS", "club", it, JSONObject().put("role", "rival").put("league", league)) }
-                for (m in repo.dao.matchesOf(slot)) m.opponent?.takeIf { !Fixtures.notAClub(it) }?.let { obs(slot, "MATCHES", "club", it, JSONObject().put("role", "adversario").put("league", league)) }
-                for (p in repo.dao.playersOf(slot)) obs(slot, "SQUAD", "player", p.name, JSONObject().put("age", p.age).put("pos", p.posCode).put("cat", p.cat).put("owner", p.owner).put("nameKey", p.nameKey))
+            for (o in list) {
+                val r = o.raw?.trim()?.takeIf { it.length >= 2 && WorldClean.nameOk(it) } ?: continue
+                val norm = WorldNorm.fold(r).takeIf { it.isNotEmpty() } ?: continue
+                n += db.exec("INSERT OR IGNORE INTO football_ocr_observations(slot,screen,kind,raw,norm,context,capture_key,at) VALUES(?,?,?,?,?,?,?,?)", arrayOf(o.slot, o.screen, o.kind, r, norm, o.ctx.toString(), "backfill:${o.slot}", now))
             }
             db.commit()
         } catch (e: Exception) { runCatching { db.rollback() }; throw e }
@@ -78,7 +81,11 @@ object WorldOsm {
             val wdb = WorldDb.get(ctx); val sql: WorldSql = AndroidSql(wdb.w)
             var purged = 0L
             if (Settings.get(ctx, "world_slim_v1", "0") != "1") {
-                if (wdb.count("football_players") + wdb.count("football_clubs") > 0) { purged = WorldClean.slim(sql); runCatching { wdb.w.execSQL("VACUUM") } }
+                if (wdb.count("football_players") + wdb.count("football_clubs") > 0) {
+                    val t0 = System.currentTimeMillis(); Diag.log("Base: enxugando a cópia local (${wdb.count("football_players")} jogadores, ${wdb.count("football_clubs")} clubes)…")
+                    purged = WorldClean.slim(sql); Diag.log("Base: cópia enxugada em ${System.currentTimeMillis() - t0} ms; compactando…")
+                    runCatching { wdb.w.execSQL("VACUUM") }; Diag.log("Base: compactação concluída em ${System.currentTimeMillis() - t0} ms")
+                }
                 Settings.put(ctx, "world_slim_v1", "1")
             }
             val obs = backfill(ctx)
