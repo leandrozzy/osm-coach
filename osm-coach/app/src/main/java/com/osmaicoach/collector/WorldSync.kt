@@ -47,7 +47,11 @@ object WorldSync {
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
-    private fun allowedNet(ctx: Context) = unmetered(ctx) || Settings.get(ctx, "world_mobile_data", "0") == "1"
+    /** Sem importação em massa, as consultas são pequenas (nomes lidos): qualquer rede com internet serve. */
+    private fun allowedNet(ctx: Context): Boolean {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        return cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }
 
     fun requestRun(ctx: Context) { val app = ctx.applicationContext; AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = true) } } }
     fun requestSource(ctx: Context, sourceId: String) { val app = ctx.applicationContext; AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = true, only = sourceId) } } }
@@ -74,9 +78,12 @@ object WorldSync {
             steps = 4; step = 0; progress = null
             running = "Lendo o que o OSM já mostrou"; UiBus.bump()
             runCatching { WorldOsm.refresh(ctx, force = true) }                           // local + Supabase (só os nomes lidos)
+            if (pause.get()) { lastMessage = "Pausada."; return }
             if (!allowedNet(ctx)) { lastMessage = "Sem rede liberada (Wi‑Fi). O que já está no aparelho continua valendo."; return }
             step = 1; running = "Países"; UiBus.bump()
             runCatching { ensureCountries(ctx, db) }
+            if (pause.get()) { lastMessage = "Pausada."; return }
+            runCatching { checkSupabase(ctx, db) }
             step = 2; running = "Atualizando o que mudou no Supabase"; UiBus.bump()
             val changed = runCatching { WorldRemote.refreshCache(ctx, AndroidSql(db.w)) }.getOrDefault(0)
             step = 3; running = "Bandeiras, escudos e fotos do OSM"; progress = null; UiBus.bump()
@@ -93,14 +100,21 @@ object WorldSync {
         if (code in 200..299 && body != null) { WorldImport.importCountries(AndroidSql(db.w), body); WorldSources.status(db, WorldSources.FLAGS, "operacional") }
     }
 
+    /** Teste REAL do Supabase (contagens vindas do banco) e atualização do status da fonte. */
+    fun checkSupabase(ctx: Context, db: WorldDb): Result<WorldRemote.Stats> {
+        if (WorldRemote.cfg(ctx) == null) { WorldSources.status(db, WorldSources.SUPABASE, "aguardando configuração", "Cole a URL e a chave em Fontes de Dados → Configurar."); return Result.failure(IllegalStateException("não configurado")) }
+        val r = WorldRemote.stats(ctx)
+        r.fold(
+            { st -> WorldSources.status(db, WorldSources.SUPABASE, if (st.players + st.clubs > 0) "atualizada" else "aguardando sincronização", "Conectado: ${st.countries} países • ${st.competitions} competições • ${st.clubs} clubes • ${st.players} jogadores" + (st.lastRun?.let { " • última carga: $it" } ?: "")); db.w.execSQL("UPDATE football_sources SET verified_at=? WHERE id=?", arrayOf(System.currentTimeMillis(), WorldSources.SUPABASE)) },
+            { e -> WorldSources.status(db, WorldSources.SUPABASE, "indisponível", e.message) })
+        UiBus.bump()
+        return r
+    }
+
     // ------------------------------------------------------------------ verificação REAL das fontes (requisição de teste)
     suspend fun verify(ctx: Context) = withContext(Dispatchers.IO) {
         val db = WorldDb.get(ctx); WorldSources.seed(db)
-        // Supabase: teste REAL (contagens vindas do banco)
-        if (WorldRemote.cfg(ctx) == null) WorldSources.status(db, WorldSources.SUPABASE, "aguardando configuração")
-        else WorldRemote.stats(ctx).fold(
-            { st -> WorldSources.status(db, WorldSources.SUPABASE, if (st.players + st.clubs > 0) "atualizada" else "aguardando sincronização", "Conectado: ${st.countries} países • ${st.competitions} competições • ${st.clubs} clubes • ${st.players} jogadores" + (st.lastRun?.let { " • última carga: $it" } ?: "")); db.w.execSQL("UPDATE football_sources SET verified_at=? WHERE id=?", arrayOf(System.currentTimeMillis(), WorldSources.SUPABASE)) },
-            { e -> WorldSources.status(db, WorldSources.SUPABASE, "indisponível", e.message) })
+        checkSupabase(ctx, db)
         for (s in WorldSources.ALL) {
             val url = s.probe ?: continue
             if (!WorldHttp.allowed(url)) { db.w.execSQL("UPDATE football_sources SET notes=COALESCE(notes,'') WHERE id=?", arrayOf(s.id)); continue }

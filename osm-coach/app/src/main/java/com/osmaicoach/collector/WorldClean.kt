@@ -44,18 +44,31 @@ object WorldClean {
     }
 
     /**
-     * Migração única para o modelo "base no Supabase": apaga da cópia local TUDO que veio da importação em massa antiga e o OSM nunca mostrou
-     * (jogadores/clubes/competições sem leitura e sem vínculo), em blocos de 5 000 com pausa, e depois compacta o arquivo (VACUUM). Observações e mapeamentos do OCR ficam.
+     * Migração única para o modelo "base no Supabase": mantém na cópia local SÓ o que o OSM mostrou (ou veio do Supabase) e descarta o resto da importação em massa antiga.
+     * Rápido e atômico: copia o que fica para uma tabela temporária, esvazia a tabela com `DELETE` sem filtro (o SQLite "trunca" sem mexer índice por índice) e devolve o que ficou.
+     * Antes (linha a linha, 388 mil jogadores) levava muitos minutos no celular. Em caso de falha tudo volta atrás e tenta de novo depois. Observações e mapeamentos do OCR ficam.
      */
     fun slim(db: WorldSql): Long {
-        var n = 0L
-        fun chunked(sql: String) { while (true) { val k = db.exec(sql, emptyArray()); n += k; if (k < 1) break; Thread.sleep(20) } }
-        chunked("DELETE FROM football_players WHERE id IN (SELECT id FROM football_players WHERE osm_seen=0 AND remote_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE entity_type='player' AND entity_id IS NOT NULL) LIMIT 5000)")
-        chunked("DELETE FROM football_clubs WHERE id IN (SELECT id FROM football_clubs WHERE osm_seen=0 AND remote_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE entity_type='club' AND entity_id IS NOT NULL) LIMIT 5000)")
-        n += db.exec("DELETE FROM football_competition_clubs WHERE club_id NOT IN (SELECT id FROM football_clubs)", emptyArray())
-        chunked("DELETE FROM football_competitions WHERE id IN (SELECT id FROM football_competitions WHERE osm_seen=0 AND remote_id IS NULL AND id NOT IN (SELECT competition_id FROM football_competition_clubs) LIMIT 5000)")
-        chunked("DELETE FROM football_entity_aliases WHERE id IN (SELECT id FROM football_entity_aliases WHERE (entity_type='club' AND entity_id NOT IN (SELECT id FROM football_clubs)) OR (entity_type='player' AND entity_id NOT IN (SELECT id FROM football_players)) LIMIT 5000)")
-        n += db.exec("DELETE FROM football_sync_checkpoints", emptyArray())
-        return n
+        var removed = 0L
+        db.begin()
+        try {
+            fun keepOnly(table: String, keep: String) {
+                val before = db.long("SELECT COUNT(*) FROM $table") ?: 0L
+                db.exec("DROP TABLE IF EXISTS temp._keep", emptyArray())
+                db.exec("CREATE TEMP TABLE _keep AS SELECT * FROM $table WHERE $keep", emptyArray())
+                db.exec("DELETE FROM $table", emptyArray())
+                db.exec("INSERT INTO $table SELECT * FROM temp._keep", emptyArray())
+                db.exec("DROP TABLE temp._keep", emptyArray())
+                removed += before - (db.long("SELECT COUNT(*) FROM $table") ?: 0L)
+            }
+            keepOnly("football_players", "osm_seen>0 OR remote_id IS NOT NULL OR id IN (SELECT entity_id FROM football_osm_entity_mappings WHERE entity_type='player' AND entity_id IS NOT NULL)")
+            keepOnly("football_clubs", "osm_seen>0 OR remote_id IS NOT NULL OR id IN (SELECT entity_id FROM football_osm_entity_mappings WHERE entity_type='club' AND entity_id IS NOT NULL)")
+            db.exec("DELETE FROM football_competition_clubs WHERE club_id NOT IN (SELECT id FROM football_clubs)", emptyArray())
+            keepOnly("football_competitions", "osm_seen>0 OR remote_id IS NOT NULL OR id IN (SELECT competition_id FROM football_competition_clubs)")
+            keepOnly("football_entity_aliases", "(entity_type='club' AND entity_id IN (SELECT id FROM football_clubs)) OR (entity_type='player' AND entity_id IN (SELECT id FROM football_players))")
+            db.exec("DELETE FROM football_sync_checkpoints", emptyArray())
+            db.commit()
+        } catch (e: Exception) { runCatching { db.rollback() }; throw e }
+        return removed
     }
 }
