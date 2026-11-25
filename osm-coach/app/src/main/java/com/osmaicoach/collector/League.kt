@@ -27,13 +27,14 @@ object League {
 
     private fun intOf(s: String): Int? = s.trim().takeIf { it.isNotEmpty() && it.all { c -> c.isDigit() } }?.toIntOrNull()
 
-    private val RX_GOALS = Regex("^(\\d{1,3})\\s*[-–]\\s*(\\d{1,3})$")
+    private val RX_GOALS = Regex("^(\\d{1,3})\\s*[-–—]\\s*(\\d{1,3})$")
 
     /** Linhas da tela (rolagem parcial): cada uma começa pelo número da posição à esquerda. */
     fun read(o: OcrResult): Pair<String, List<Row>>? {
         val standings = isStandings(o.fullText)
         val values = !standings && isValues(o.fullText)
         if (!standings && !values) return null
+        if (standings) return readStandings(o)?.let { Pair("st", it) }
         val ranks = o.tokens.filter { it.xc < 0.06f && it.yc > 0.25f && (intOf(it.text) ?: 0) in 1..40 }.sortedBy { it.yc }
         val out = ArrayList<Row>()
         for (r in ranks) {
@@ -59,6 +60,70 @@ object League {
             }
         }
         return if (out.isEmpty()) null else Pair(if (standings) "st" else "va", out)
+    }
+
+
+    /**
+     * Classificação (layout real conferido em 25/11/26 com prints de 20 clubes): cada clube ocupa ~0,099 da altura; o NOME (branco) fica em cima e o apelido do treinador (cinza)
+     * logo abaixo; J V E D Pts ficam à direita na altura do meio, e Gm-Gs no fim. A posição é um número à esquerda (nas 3 primeiras fica sobre a taça dourada e o OCR
+     * costuma falhar): quando falta, vale a ordem na tela (posição anterior + linhas puladas). Números conferidos entre si (J = V+E+D, Pts = 3V+E): erro de OCR de um
+     * dígito é corrigido pelo que fecha; o que não fecha é descartado (nunca gravado errado).
+     */
+    class RawRow(val name: OcrLine, val nick: OcrLine?, val rankTok: Int?, val ints: List<Int>, val gl: MatchResult?)
+
+    fun repairStats(ints: List<Int>): List<Int>? {
+        if (ints.size < 5) return null
+        val a = if (ints.size > 5) ints.takeLast(5) else ints
+        val (j, v, e, d, p) = a
+        if (j == v + e + d) return listOf(j, v, e, d, 3 * v + e)          // pontos conferidos pelas vitórias/empates
+        if (p == 3 * v + e && j - v - e >= 0) return listOf(j, v, e, j - v - e, p)
+        if (p == 3 * v + e) return listOf(v + e + d, v, e, d, p)
+        return null
+    }
+
+    fun readStandings(o: OcrResult): List<Row>? {
+        val cand = o.lines.filter { it.l in 0.04f..0.40f && it.yc > 0.25f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
+        val heads = ArrayList<OcrLine>(); val nicks = HashMap<OcrLine, OcrLine>()
+        for (ln in cand) {
+            val h = heads.lastOrNull()
+            if (h != null && ln.yc - h.yc <= 0.062f) { if (!nicks.containsKey(h)) nicks[h] = ln } else heads.add(ln)
+        }
+        if (heads.isEmpty()) return null
+        val raws = heads.map { h ->
+            val win = o.tokens.filter { abs(it.yc - h.yc) <= 0.045f }
+            val rk = win.filter { it.xc < 0.07f }.mapNotNull { t -> intOf(t.text)?.takeIf { it in 1..40 }?.let { Pair(t, it) } }.minByOrNull { abs(it.first.yc - h.yc) }?.second
+            val ints = win.filter { it.xc > 0.72f && it.xc < 0.94f }.sortedBy { it.xc }.mapNotNull { intOf(it.text) }
+            val gl = win.filter { it.xc > 0.90f }.firstNotNullOfOrNull { RX_GOALS.find(it.text.trim()) }
+            RawRow(h, nicks[h], rk, ints, gl)
+        }
+        // posição de cada linha: o número lido quando bate com a sequência; senão a ordem na tela (anterior + linhas puladas pela altura)
+        val gaps = heads.zipWithNext { a, b -> b.yc - a.yc }.filter { it > 0.05f && it < 0.15f }.sorted()
+        val spacing = gaps.getOrNull(gaps.size / 2) ?: 0.099f
+        val ranks = arrayOfNulls<Int>(raws.size)
+        var prev: Int? = null
+        for (i in raws.indices) {
+            val tok = raws[i].rankTok
+            val expected = prev?.let { p -> p + maxOf(1, Math.round((heads[i].yc - heads[i - 1].yc) / spacing)) }
+            ranks[i] = when {
+                tok != null && (prev == null || tok > prev) && (expected == null || abs(tok - expected) <= 1) -> tok
+                expected != null -> expected
+                else -> null
+            }
+            prev = ranks[i] ?: prev
+        }
+        // primeiras linhas sem posição: contam para trás a partir da primeira conhecida
+        val first = ranks.indexOfFirst { it != null }
+        if (first > 0) for (i in first - 1 downTo 0) ranks[i] = (ranks[i + 1] ?: break) - 1
+        val out = ArrayList<Row>()
+        for (i in raws.indices) {
+            val r = raws[i]; val rank = ranks[i]?.takeIf { it in 1..40 } ?: continue
+            val club = r.name.text.trim().takeIf { it.length >= 3 } ?: continue
+            val st = repairStats(r.ints)
+            if (st == null) { runCatching { Diag.log("Classificação: linha de '$club' descartada (números lidos: ${r.ints}, posição $rank)") }; continue }
+            val (j, v, e, d, pts) = st
+            out.add(Row(club, r.nick?.text?.trim()?.takeIf { it.length >= 3 }, rank, j, v, e, d, pts, r.gl?.groupValues?.get(1)?.toIntOrNull(), r.gl?.groupValues?.get(2)?.toIntOrNull()))
+        }
+        return out.ifEmpty { null }
     }
 
     fun key(club: String): String = Txt.key(club)

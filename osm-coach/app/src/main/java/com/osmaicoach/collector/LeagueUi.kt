@@ -222,7 +222,7 @@ internal fun StandingsCard(slot: Int, d: SlotData) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${me.rank}º", fontSize = 44.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
                 Column(Modifier.padding(start = 14.dp)) {
-                    Text("de ${v.rows.maxOf { it.rank ?: 0 }} clubes", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(if (v.complete) "de ${v.rows.size} clubes" else "${v.rows.size} clubes lidos", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                     Text("${me.pts} pontos em ${me.j} jogos", fontSize = 14.sp, color = C.MUTED)
                     if (me.v != null) Text("${me.v}V ${me.e}E ${me.d}D • gols ${me.gf}-${me.ga}", fontSize = 13.sp, color = C.MUTED)
                 }
@@ -230,6 +230,8 @@ internal fun StandingsCard(slot: Int, d: SlotData) {
         } else Text("Não achei o seu clube na tabela lida. Confira o nome do time no slot.", fontSize = 14.sp, color = C.WARN)
         if (v.stale) Text("⚠ Você já jogou mais depois desta leitura: abra a Classificação no OSM para atualizar.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
         if (v.missingRanks.isNotEmpty()) Text("⚠ Faltam as posições ${v.missingRanks.joinToString(", ") { "${it}º" }}: role a Classificação até o fim.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
+        else if (!v.complete) Text("⚠ A tabela lida não fecha as contas (vitórias ≠ derrotas): falta algum clube, em geral o fim da lista. Role a Classificação até o último clube.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
+        else Text("✓ Tabela completa (as contas fecham).", fontSize = 12.5.sp, color = C.OK, modifier = Modifier.padding(top = 6.dp))
     }
     if (v.ifWin != null && v.ifDraw != null && v.ifLoss != null) {
         Text("Se no próximo jogo você…", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))

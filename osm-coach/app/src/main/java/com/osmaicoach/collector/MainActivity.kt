@@ -3268,6 +3268,7 @@ internal fun SlotSummaryTab(slot: Int, d: SlotData) {
         if (d.eve.isNotEmpty()) EveCard(d.eve)
         BattleCard(slot, d)
         StrengthsAttention(d)
+        RivalRadarCard(slot, d)
         CompareCard(d)
         DirectorChat(slot, d)
         Panel { WinCard(d.win) }

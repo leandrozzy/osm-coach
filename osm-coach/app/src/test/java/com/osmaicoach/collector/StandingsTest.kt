@@ -54,9 +54,9 @@ class RealLayoutTest {
             Fx.line(j, 0.786f, y, 0.02f), Fx.line(v, 0.814f, y, 0.02f), Fx.line(e, 0.841f, y, 0.02f), Fx.line(d, 0.869f, y, 0.02f), Fx.line(pts, 0.910f, y, 0.02f), Fx.line(gl, 0.965f, y, 0.04f)
         )
         val lines = listOf(Fx.line("Clube", 0.07f, 0.23f), Fx.line("Jog", 0.786f, 0.23f), Fx.line("Pts", 0.91f, 0.23f), Fx.line("Gm-Gs", 0.965f, 0.23f)) +
-            row(0.325f, "1", "Botafogo", "UzM wLn7", "11", "11", "0", "0", "33", "29-5") +
-            row(0.424f, "2", "Internacional", "Uzmtgb", "11", "9", "1", "1", "28", "19-6") +
-            row(0.743f, "12", "Red Bull Bragantino", "leandrozzy", "11", "2", "5", "4", "11", "13-19")
+            row(0.325f, "10", "Corinthians", "Nathy Bianque 3", "11", "6", "1", "4", "19", "19-12") +
+            row(0.424f, "11", "São Paulo", "José Reginaldo 04", "11", "4", "2", "5", "14", "12-13") +
+            row(0.523f, "12", "Red Bull Bragantino", "leandrozzy", "11", "2", "5", "4", "11", "13-19")
         val r = League.read(Fx.ocr(*lines.toTypedArray()))
         assertNotNull(r)
         assertEquals("st", r!!.first)
@@ -79,5 +79,62 @@ class RealLayoutTest {
         assertEquals(1, p!!.round)
         assertEquals(3, p.games.size)
         assertEquals("Fluminense", p.games[0].home); assertEquals("Red Bull Bragantino", p.games[0].away)
+    }
+}
+
+class StandingsReadingTest {
+    // tabela REAL do print de 25/11 (S3, 20 clubes): nome, J, V, E, D, Pts, GM, GS
+    private val real = listOf(
+        listOf("Botafogo", 11, 11, 0, 0, 33, 29, 5), listOf("Internacional", 11, 9, 1, 1, 28, 19, 6), listOf("Grêmio", 11, 8, 3, 0, 27, 26, 4), listOf("Atlético Mineiro", 11, 8, 3, 0, 27, 25, 5),
+        listOf("Fluminense", 11, 8, 1, 2, 25, 28, 7), listOf("Vasco da Gama", 11, 7, 2, 2, 23, 19, 7), listOf("EC Cruzeiro Belo Horizonte", 11, 6, 3, 2, 21, 28, 11), listOf("Santos", 11, 6, 2, 3, 20, 17, 12),
+        listOf("Esporte Clube Bahia", 11, 5, 4, 2, 19, 20, 7), listOf("Corinthians", 11, 6, 1, 4, 19, 19, 12), listOf("São Paulo", 11, 4, 2, 5, 14, 12, 13), listOf("Red Bull Bragantino", 11, 2, 5, 4, 11, 13, 19),
+        listOf("Coritiba", 11, 2, 3, 6, 9, 8, 30), listOf("Mirassol FC (SP)", 11, 2, 2, 7, 8, 6, 15), listOf("Atlético Paranaense", 11, 2, 2, 7, 8, 10, 21), listOf("Palmeiras", 11, 2, 1, 8, 7, 7, 23),
+        listOf("Esporte Clube Vitória", 11, 2, 0, 9, 6, 8, 30), listOf("Flamengo", 11, 1, 0, 10, 3, 3, 23), listOf("Clube do Remo (PA)", 11, 1, 0, 10, 3, 8, 29), listOf("Chapecoense", 11, 0, 1, 10, 1, 4, 30)
+    )
+
+    /** Uma tela com 7 linhas a partir da posição `from` (1..); `noRank` = posições sem número lido (taça dourada); `badPts` = pontos lidos errado por posição. */
+    private fun screen(from: Int, noRank: Set<Int> = emptySet(), badPts: Map<Int, String> = emptyMap(), skipNick: Set<Int> = emptySet()): OcrResult {
+        val lines = ArrayList<OcrLine>()
+        lines.add(Fx.line("Clube", 0.07f, 0.23f)); lines.add(Fx.line("Jog", 0.786f, 0.23f)); lines.add(Fx.line("Pts", 0.91f, 0.23f)); lines.add(Fx.line("Gm-Gs", 0.965f, 0.23f))
+        for (k in 0 until 7) {
+            val pos = from + k; val r = real[pos - 1]; val y = 0.325f + 0.099f * k
+            if (pos !in noRank) lines.add(Fx.line("$pos", 0.022f, y, 0.02f))
+            lines.add(Fx.line(r[0] as String, 0.15f, y - 0.018f, 0.12f))
+            if (pos !in skipNick) lines.add(Fx.line("UzM Treinador$pos", 0.15f, y + 0.018f, 0.12f))
+            lines.add(Fx.line("UZM", 0.74f, y, 0.04f))
+            lines.add(Fx.line("${r[1]}", 0.786f, y, 0.02f)); lines.add(Fx.line("${r[2]}", 0.814f, y, 0.02f)); lines.add(Fx.line("${r[3]}", 0.841f, y, 0.02f)); lines.add(Fx.line("${r[4]}", 0.869f, y, 0.02f))
+            lines.add(Fx.line(badPts[pos] ?: "${r[5]}", 0.910f, y, 0.02f)); lines.add(Fx.line("${r[6]}-${r[7]}", 0.965f, y, 0.04f))
+        }
+        return Fx.ocr(*lines.toTypedArray())
+    }
+
+    @Test fun topRowsWithoutRankNumberKeepTheirPosition() {
+        val rows = League.readStandings(screen(1, noRank = setOf(1, 2, 3)))!!
+        assertEquals(7, rows.size)
+        assertEquals(listOf(1, 2, 3, 4, 5, 6, 7), rows.map { it.rank })
+        assertEquals("Botafogo", rows[0].club)
+        assertEquals(27, rows[2].pts)
+    }
+
+    @Test fun misreadPointsAreRepairedFromWinsAndDraws() {
+        val rows = League.readStandings(screen(1, badPts = mapOf(3 to "2", 4 to "7")))!!      // 27 lido como "2" e "7"
+        assertEquals(27, rows.first { it.rank == 3 }.pts)
+        assertEquals(27, rows.first { it.rank == 4 }.pts)
+    }
+
+    @Test fun rowWithoutCoachNicknameStillReads() {
+        val rows = League.readStandings(screen(8, skipNick = setOf(11)))!!
+        assertEquals(listOf(8, 9, 9 + 1, 11, 12, 13, 14), rows.map { it.rank })
+        assertEquals("São Paulo", rows.first { it.rank == 11 }.club)
+    }
+
+    @Test fun fullRealTableBalancesAndAMissingClubDoesNot() {
+        fun rowsOf(skip: Int?) = real.mapIndexedNotNull { i, r -> if (i + 1 == skip) null else League.Row(r[0] as String, null, i + 1, r[1] as Int, r[2] as Int, r[3] as Int, r[4] as Int, r[5] as Int, r[6] as Int, r[7] as Int, at = 1L) }
+        val ok = Standings.build(rowsOf(null), 1L, "Red Bull Bragantino", 11, true)!!
+        assertTrue(ok.complete); assertEquals(20, ok.rows.size)
+        val missingLast = Standings.build(rowsOf(20), 1L, "Red Bull Bragantino", 11, true)!!
+        assertTrue("sem o 20º a tabela não pode fechar", !missingLast.complete)
+        val missingMid = Standings.build(rowsOf(9), 1L, "Red Bull Bragantino", 11, true)!!
+        assertEquals(listOf(9), missingMid.missingRanks); assertTrue(!missingMid.complete)
     }
 }

@@ -532,7 +532,7 @@ internal fun CalendarOverview(slot: Int, d: SlotData, sorted: List<MatchEntity>)
     for (m in sorted) {
         val dm = parseDm(m.date) ?: continue
         if (ymOf(m) != viewYm) continue
-        val col = when (m.result) { "V" -> C.WIN; "E" -> C.DRAW; "D" -> C.LOSS; else -> if (Fixtures.isCup(m)) C.INFO else C.PRIMARY }
+        val col = when (m.result) { "V" -> C.WIN; "E" -> C.DRAW; "D" -> C.LOSS; else -> if (Fixtures.isCup(m)) C.INFO else C.MUTED }
         dots.getOrPut(dm.first) { ArrayList() }.add(col)
         byDay.getOrPut(dm.first) { ArrayList() }.add(m)
     }
@@ -579,7 +579,7 @@ internal fun CalendarOverview(slot: Int, d: SlotData, sorted: List<MatchEntity>)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(12.dp)) {
         MonthGrid(year, month, dots, if (viewYm == curYear * 12 + curMonth) today else null, selDay.takeIf { it > 0 }) { d -> selDay = if (selDay == d) 0 else d }
         androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 10.dp)) {
-            DsLegend(C.WIN, "vitória"); DsLegend(C.DRAW, "empate"); DsLegend(C.LOSS, "derrota"); DsLegend(C.PRIMARY, "a jogar"); DsLegend(C.INFO, "copa")
+            DsLegend(C.WIN, "vitória"); DsLegend(C.DRAW, "empate"); DsLegend(C.LOSS, "derrota"); DsLegend(C.MUTED, "a jogar"); DsLegend(C.INFO, "copa")
         }
     }
     // dia escolhido: mostra o(s) jogo(s) daquela data (o card "Próximo jogo" acima continua sendo o próximo de verdade)
