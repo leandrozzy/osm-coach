@@ -70,7 +70,7 @@ object GptGuide {
             if (mine.isNotEmpty()) {
                 sb.append("\n### Meu elenco (${mine.size})\n")
                 for (p in mine) {
-                    val iso = FlagManual.all(repo)[p.nameKey] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                    val iso = FlagManual.all(repo)[p.nameKey] ?: repo.dao.plan(slot, "natiso3")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
                     sb.append("- ${p.name}" + (p.posCode?.let { " | $it" } ?: "") + (p.age?.let { " | $it anos" } ?: "") + (p.strength?.let { " | força $it" } ?: "") + (Flags.countryName(iso)?.let { " | $it" } ?: "") + "\n")
                     players++
                 }

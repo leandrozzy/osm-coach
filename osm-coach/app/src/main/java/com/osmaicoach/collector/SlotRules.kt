@@ -85,7 +85,7 @@ object SlotRules {
     suspend fun playerCountries(repo: Repo, slot: Int, filesDir: java.io.File? = null): Map<String, String?> {
         val rich = repo.dao.plan(slot, "natrich")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val imgs = repo.dao.plan(slot, "natimg3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val isos = repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val isos = repo.dao.plan(slot, "natiso3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
         val atlas = Atlas.load(repo, Atlas.Kind.NAT)
         val manual = FlagManual.all(repo)
         val out = HashMap<String, String?>()
@@ -103,7 +103,7 @@ object SlotRules {
             val shown = iso ?: FlagIdent.identifyAtlasOnly(imgs.optString(k), atlas)
             out[k] = shown?.let { atlasNameOf(atlas, it) ?: Flags.countryName(it) } ?: Atlas.nameOfThumb(repo, imgs.optString(k))
         }
-        if (changed) repo.dao.putPlan(PlanEntity(slot, "natiso2", isos.toString(), System.currentTimeMillis()))
+        if (changed) repo.dao.putPlan(PlanEntity(slot, "natiso3", isos.toString(), System.currentTimeMillis()))
         if (rich != null) for (k in rich.keys()) if (out[k] == null && k !in manual) out[k] = Atlas.nameOf(repo, rich.optString(k))
         return out
     }

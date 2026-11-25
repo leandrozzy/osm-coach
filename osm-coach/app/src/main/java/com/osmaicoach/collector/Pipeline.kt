@@ -1048,9 +1048,9 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
     }
 
-    /** Banco global de bandeiras (plano `natbank`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
+    /** Banco global de bandeiras (plano `natbank2`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
     private suspend fun updateFlagBank(imgs: JSONObject) {
-        val bank = repo.dao.plan(0, "natbank")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val bank = repo.dao.plan(0, "natbank2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
         val atlas = Atlas.load(repo, Atlas.Kind.NAT)
         var ch = 0
         for (k in imgs.keys()) {
@@ -1060,7 +1060,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             val q = Flags.imgQuality(v) ?: 0f
             if (old == null || q > old * 1.08f + 1f) { bank.put(c, v); ch++ }
         }
-        if (ch > 0) repo.dao.putPlan(PlanEntity(0, "natbank", bank.toString(), System.currentTimeMillis()))
+        if (ch > 0) repo.dao.putPlan(PlanEntity(0, "natbank2", bank.toString(), System.currentTimeMillis()))
     }
 
     /** Faixa de clubes do topo do Calendário: escudo + nome de cada clube da liga (um por clube; só grava o que ainda não existe). */

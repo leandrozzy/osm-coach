@@ -191,6 +191,7 @@ object CrestCut {
 
     /** Arquivo do escudo do clube: nome exato ou, se faltar, o mais parecido (OCR: "SC"/"5C", acento perdido) com similaridade ≥0,85. */
     fun find(filesDir: File, team: String?): File? {
+        if (CrestAdmin.isBlocked(filesDir, team)) return null
         val exact = file(filesDir, team) ?: return null
         if (exact.exists()) return exact
         val k = Txt.key(team ?: "")
@@ -213,6 +214,7 @@ object CrestCut {
      */
     fun save(filesDir: File, bmp: Bitmap, team: String?, cx: Float, cy: Float, w: Float, h: Float, overwrite: Boolean = false, expW: Float = 0f, expH: Float = 0f): Boolean {
         val f = file(filesDir, team) ?: return false
+        if (CrestAdmin.isBlocked(filesDir, team)) return false
         if (f.exists() && !overwrite) return false
         return try {
             val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)

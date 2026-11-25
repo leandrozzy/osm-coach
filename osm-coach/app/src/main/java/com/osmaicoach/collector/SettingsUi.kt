@@ -574,6 +574,7 @@ internal fun SettingsTab() {
         GptGuideFold()
         SectionLabel("Imagens", "Fotos dos jogadores, escudos dos clubes e bandeiras")
         ImageManagerFold()
+        CrestManagerFold()
         var photoOn by remember { mutableStateOf(Settings.get(ctx, "web_photos", "1") == "1") }
         var pKey by remember { mutableStateOf(Settings.get(ctx, PhotoWeb.KEY, "")) }
         val pTick = rememberTick(3000L)

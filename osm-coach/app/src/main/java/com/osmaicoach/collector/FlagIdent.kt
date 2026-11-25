@@ -65,7 +65,7 @@ object FlagIdent {
         return cells(px, 8, 0, 0, 8, 5, 8, 5)
     }
 
-    private class Ref(val iso: String, val c16: Cells)
+    internal class Ref(val iso: String, val c16: Cells, val c85: Cells)
     @Volatile private var refs: List<Ref> = emptyList()
     @Volatile private var refCount = -1
 
@@ -82,7 +82,7 @@ object FlagIdent {
             val px = IntArray(w * h); flat.getPixels(px, 0, w, 0, 0, w, h)
             bmp.recycle(); flat.recycle()
             val mx = (w * 0.03f).toInt(); val my = (h * 0.04f).toInt()
-            out.add(Ref(f.name.removeSuffix(".png"), cells(px, w, mx, my, w - mx, h - my, 16, 10)))
+            out.add(Ref(f.name.removeSuffix(".png"), cells(px, w, mx, my, w - mx, h - my, 16, 10), cells(px, w, (w * 0.08f).toInt(), (h * 0.10f).toInt(), w - (w * 0.08f).toInt(), h - (h * 0.10f).toInt(), 8, 5)))
         }
         refs = out; refCount = files.size
         return out
@@ -119,8 +119,28 @@ object FlagIdent {
         // Atlas por ISO (um país pode ter mais de um nome lido, com erros do OCR: vale o mais parecido)
         val atlasBy = HashMap<String, MutableList<Cells>>()
         for ((name, hex) in atlas) { val iso = Flags.iso(name) ?: continue; cellsOfHex(hex)?.let { atlasBy.getOrPut(iso) { ArrayList() }.add(it) } }
-        // 1º o Atlas sozinho, quando é CLARO (parecido ≤0,16 e 0,01 à frente do 2º país): é o nome que o próprio OSM deu à bandeira. Medido: nos 36
-        // conhecidos acertou todos os que passaram por esse critério (EUA incluído, que a soma com a web trocava por Taiwan).
+        return pick(t16, t85, rs, atlasBy)
+    }
+
+    /**
+     * Decisão (pura, testada com a bandeira real da Albânia do OSM, 25/11/26): as bandeiras do Flagpedia mandam; o Atlas (nome lido dos filtros do OSM) só ajuda a desempatar
+     * e só vale quando concorda com o Flagpedia. Motivo: o Atlas aprendia nome→bandeira de linhas vizinhas da lista e guardou a bandeira da Albânia como "Turquia"; como ele
+     * tinha prioridade, todos os albaneses viravam turcos. Agora (1) o Flagpedia sozinho decide quando é claro; (2) uma assinatura do Atlas só entra se o país dela está entre
+     * os 2 mais parecidos do Flagpedia para a própria assinatura.
+     */
+    internal fun pick(t16: Cells, t85: Cells, rs: List<Ref>, atlasRaw: Map<String, List<Cells>>): String? {
+        if (rs.isEmpty()) return null
+        val web = rs.map { Pair(it.iso, dist(t16, it.c16)) }.sortedBy { it.second }
+        if (web.size >= 2 && web[0].second <= 0.10f && web[1].second - web[0].second >= 0.05f) return web[0].first
+        // Atlas validado pelo Flagpedia
+        val atlasBy = HashMap<String, List<Cells>>()
+        for ((iso, cs) in atlasRaw) {
+            val ok = cs.filter { sig ->
+                val near = rs.map { Pair(it.iso, dist(sig, it.c85)) }.sortedBy { it.second }.take(2).map { it.first }
+                iso in near
+            }
+            if (ok.isNotEmpty()) atlasBy[iso] = ok
+        }
         run {
             var a1 = Float.MAX_VALUE; var a2 = Float.MAX_VALUE; var ai: String? = null
             for ((iso, cs) in atlasBy) {
@@ -152,13 +172,14 @@ object FlagIdent {
             val px = IntArray(w * h); bmp.getPixels(px, 0, w, 0, 0, w, h); bmp.recycle()
             val x0 = (w * 0.08f).toInt(); val y0 = (h * 0.10f).toInt()
             val t85 = cells(px, w, x0, y0, w - x0, h - y0, 8, 5)
-            var best = Float.MAX_VALUE; var bi: String? = null
+            var best = Float.MAX_VALUE; var second = Float.MAX_VALUE; var bi: String? = null
             for ((name, hex) in atlas) {
                 val iso = Flags.iso(name) ?: continue
                 val d = dist(t85, cellsOfHex(hex) ?: continue)
-                if (d < best) { best = d; bi = iso }
+                if (d < best) { if (iso != bi) second = best; best = d; bi = iso } else if (d < second && iso != bi) second = d
             }
-            if (best <= 0.22f) bi else null
+            // sem o Flagpedia para conferir, só vale parecido de verdade e sem empate (coarse 8×5 confunde bandeiras de fundo vermelho)
+            if (best <= 0.12f && second - best >= 0.03f) bi else null
         }.getOrNull()
     }
 }

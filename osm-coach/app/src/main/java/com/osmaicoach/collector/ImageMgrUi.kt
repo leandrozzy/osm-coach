@@ -118,3 +118,82 @@ internal fun ImageManagerFold() {
         )
     }
 }
+
+
+/** Ajustes → Imagens → "Escudos dos clubes": excluir escudo errado/inventado (e bloquear o nome) e adicionar/trocar à mão, como nas fotos dos jogadores. */
+@Composable
+internal fun CrestManagerFold() {
+    val ctx = LocalContext.current.applicationContext
+    val tick = rememberTick(4000L)
+    val entries = rememberLoaded(emptyList<CrestAdmin.Entry>(), tick, UiBus.version) { CrestAdmin.entries(ctx.filesDir, CrestAdmin.knownNames(Repo(ctx))) }
+    var filter by remember { mutableStateOf("all") }
+    var q by remember { mutableStateOf("") }
+    var shown by remember { mutableStateOf(25) }
+    var pickFor by remember { mutableStateOf<String?>(null) }
+    var delete by remember { mutableStateOf<CrestAdmin.Entry?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val name = pickFor; pickFor = null
+        if (uri != null && name != null) {
+            AppScope.scope.launch(Dispatchers.IO) {
+                val bmp = PhotoWeb.decodeUri(ctx, uri)
+                val ok = bmp != null && CrestAdmin.setManual(ctx, name, bmp)
+                withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, if (ok) "Escudo de $name salvo." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+    val count = { s: String -> entries.count { it.source == s } }
+    Fold("🛡", "Escudos dos clubes", "${entries.count { it.source in listOf("manual", "web", "recorte") }} de ${entries.size}") {
+        Text("Escudo errado ou clube inventado pela leitura (ex.: \"25 anniversary\")? Exclua: o nome fica bloqueado e o app não recria. Para um clube sem escudo ou com escudo errado, escolha a imagem à mão.", fontSize = 13.sp, color = C.MUTED)
+        Panel {
+            KV("✋ Manuais", "${count("manual")}")
+            KV("🌐 Da web", "${count("web")}")
+            KV("✂ Recorte do jogo", "${count("recorte")}")
+            KV("▫ Sem escudo", "${count("nenhum")}")
+            KV("⛔ Excluídos (bloqueados)", "${count("bloqueado")}")
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((id, label) in listOf("all" to "Todos", "nenhum" to "Sem escudo", "manual" to "Manual", "web" to "Web", "recorte" to "Recorte", "bloqueado" to "Excluídos"))
+                FilterPill(label, filter == id) { filter = id; shown = 25 }
+        }
+        OutlinedTextField(q, { q = it; shown = 25 }, singleLine = true, label = { Text("Buscar clube") }, modifier = Modifier.fillMaxWidth())
+        Button(onClick = { adding = true; newName = "" }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("＋ Adicionar escudo de um clube", fontWeight = FontWeight.ExtraBold) }
+        val list = entries.filter { (filter == "all" || it.source == filter) && (q.isBlank() || Txt.norm(it.name).contains(Txt.norm(q))) }
+        Text("${list.size} clube(s)", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+        for (e in list.take(shown)) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (e.source == "bloqueado") Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Text("⛔", fontSize = 24.sp) } else RivalShield(e.name, 44.dp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(e.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(when (e.source) { "manual" -> "✋ escolhido à mão"; "web" -> "🌐 da web"; "recorte" -> "✂ recorte do jogo"; "bloqueado" -> "⛔ excluído (não será recriado)"; else -> "▫ sem escudo" }, fontSize = 12.sp, color = C.MUTED)
+                }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { pickFor = e.name; pick.launch("image/*") }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(if (e.source == "nenhum" || e.source == "bloqueado") "📷 Adicionar" else "📷 Trocar", fontSize = 12.sp) }
+                if (e.source == "bloqueado") OutlinedButton(onClick = { CrestAdmin.unblock(ctx, e.name) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("↩ Desbloquear", fontSize = 12.sp) }
+                else OutlinedButton(onClick = { delete = e }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)) { Text("🗑 Excluir", fontSize = 12.sp) }
+            }
+        }
+        if (list.size > shown) GhostButton("Mostrar mais (${list.size - shown})") { shown += 25 }
+    }
+    delete?.let { e ->
+        AlertDialog(
+            onDismissRequest = { delete = null },
+            title = { Text("Excluir o escudo de ${e.name}?") },
+            text = { Text("O escudo é apagado e o nome fica bloqueado: o app não busca nem recorta escudo para ele de novo. Dá para desbloquear ou adicionar à mão depois, na lista de Excluídos.") },
+            confirmButton = { TextButton(onClick = { delete = null; AppScope.scope.launch(Dispatchers.IO) { CrestAdmin.delete(ctx, e.name) } }) { Text("Excluir") } },
+            dismissButton = { TextButton(onClick = { delete = null }) { Text("Cancelar") } }
+        )
+    }
+    if (adding) {
+        AlertDialog(
+            onDismissRequest = { adding = false },
+            title = { Text("Adicionar escudo") },
+            text = { OutlinedTextField(newName, { newName = it }, singleLine = true, label = { Text("Nome do clube (como aparece no jogo)") }, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = { TextButton(enabled = Txt.key(newName).length >= 3, onClick = { adding = false; pickFor = newName.trim(); pick.launch("image/*") }) { Text("Escolher imagem") } },
+            dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancelar") } }
+        )
+    }
+}

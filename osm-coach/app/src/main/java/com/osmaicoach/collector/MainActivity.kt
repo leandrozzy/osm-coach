@@ -1459,9 +1459,9 @@ internal suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     val imgMap = runCatching { repo.dao.plan(slot, "natimg3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     FlagWeb.ensureAll(ctx)
     val countriesMap = runCatching { SlotRules.playerCountries(repo, slot, ctx.filesDir) }.getOrDefault(emptyMap())
-    val isoMap = (runCatching { repo.dao.plan(slot, "natiso2")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()) +
+    val isoMap = (runCatching { repo.dao.plan(slot, "natiso3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()) +
         runCatching { FlagManual.all(repo) }.getOrDefault(emptyMap())   // bandeira escolhida à mão vale mais
-    val bankMap = runCatching { repo.dao.plan(0, "natbank")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
+    val bankMap = runCatching { repo.dao.plan(0, "natbank2")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
     val eveList = runCatching { buildEve(repo, slot, f, tplan) }.getOrDefault(emptyList())
@@ -3861,7 +3861,7 @@ internal fun NoFlagFold() {
             val st = known(f, K.SLOT_STATE)
             if (st == "vazio" || st == "procurando" || st == "preepoca" || Hints.competitionOver(r, s, f, now)) return@flatMap emptyList<Pair<Int, PlayerEntity>>()
             runCatching { SlotRules.playerCountries(r, s, ctx.filesDir) }   // preenche os países já identificáveis (antes só ao abrir o slot)
-            val iso = r.dao.plan(s, "natiso2")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
+            val iso = r.dao.plan(s, "natiso3")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
             r.playersOf(s).filter { it.owner == "MY" && it.nameKey !in manual && (iso == null || iso.optString(it.nameKey).isBlank()) }.map { s to it }
         }
     }
