@@ -17,6 +17,8 @@ create table if not exists wf_clubs(
   category text, logo_url text, comp_key text, division text, aliases text[] not null default '{}', alias_fold text[] not null default '{}',
   row_hash text, updated_at timestamptz not null default now());
 
+alter table wf_clubs add column if not exists prominence int not null default 0;
+
 create table if not exists wf_players(
   id bigint generated always as identity primary key, reep_id text unique not null, wikidata text,
   name text not null, full_name text, name_fold text not null, tail1 text not null, tail2 text not null,
@@ -65,7 +67,7 @@ create or replace function wf_match_clubs(q text, lim int default 40) returns se
   select * from wf_clubs
    where name_fold = q or alias_fold @> array[q] or name_fold % q or q = any(alias_fold)
       or (length(q) >= 4 and name_fold like q || '%')
-   order by (name_fold = q or alias_fold @> array[q]) desc, similarity(name_fold, q) desc
+   order by (name_fold = q or alias_fold @> array[q]) desc, similarity(name_fold, q) + least(prominence, 10) * 0.02 desc
    limit least(lim, 80);
 $$;
 
@@ -95,12 +97,12 @@ begin
   for r in select * from jsonb_array_elements(rows) loop
     select row_hash, id into ex, found_id from wf_clubs where key = r->>'key';
     if found_id is null then
-      insert into wf_clubs(key,wikidata,reep_id,name,short_name,name_fold,marker,iso2,city,founded,stadium,category,logo_url,comp_key,division,aliases,alias_fold,row_hash)
-      values (r->>'key', r->>'wikidata', r->>'reep_id', r->>'name', r->>'short_name', r->>'name_fold', coalesce(r->>'marker',''), r->>'iso2', r->>'city', r->>'founded', r->>'stadium', r->>'category', r->>'logo_url', r->>'comp_key', r->>'division',
+      insert into wf_clubs(key,wikidata,reep_id,name,short_name,name_fold,marker,iso2,city,founded,stadium,category,logo_url,comp_key,division,prominence,aliases,alias_fold,row_hash)
+      values (r->>'key', r->>'wikidata', r->>'reep_id', r->>'name', r->>'short_name', r->>'name_fold', coalesce(r->>'marker',''), r->>'iso2', r->>'city', r->>'founded', r->>'stadium', r->>'category', r->>'logo_url', r->>'comp_key', r->>'division', coalesce(nullif(r->>'prominence','')::int, 0),
         coalesce(array(select jsonb_array_elements_text(r->'aliases')), '{}'), coalesce(array(select jsonb_array_elements_text(r->'alias_fold')), '{}'), r->>'row_hash');
       ins := ins + 1;
     elsif ex is distinct from r->>'row_hash' then
-      update wf_clubs set wikidata=r->>'wikidata', reep_id=r->>'reep_id', name=r->>'name', short_name=r->>'short_name', name_fold=r->>'name_fold', marker=coalesce(r->>'marker',''), iso2=r->>'iso2', city=r->>'city', founded=r->>'founded', stadium=r->>'stadium', category=r->>'category', logo_url=r->>'logo_url', comp_key=r->>'comp_key', division=r->>'division',
+      update wf_clubs set wikidata=r->>'wikidata', reep_id=r->>'reep_id', name=r->>'name', short_name=r->>'short_name', name_fold=r->>'name_fold', marker=coalesce(r->>'marker',''), iso2=r->>'iso2', city=r->>'city', founded=r->>'founded', stadium=r->>'stadium', category=r->>'category', logo_url=r->>'logo_url', comp_key=r->>'comp_key', division=r->>'division', prominence=coalesce(nullif(r->>'prominence','')::int, 0),
         aliases=coalesce(array(select jsonb_array_elements_text(r->'aliases')), '{}'), alias_fold=coalesce(array(select jsonb_array_elements_text(r->'alias_fold')), '{}'), row_hash=r->>'row_hash', updated_at=now() where id = found_id;
       upd := upd + 1;
     else skip := skip + 1; end if;

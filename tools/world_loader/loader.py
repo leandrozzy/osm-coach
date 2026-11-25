@@ -111,8 +111,9 @@ def build_clubs_and_comps(src_dir, iso_of, limit=None):
     def put_club(key, d):
         cur = clubs.get(key)
         if cur is None: clubs[key] = d; return
-        for k, v in d.items():   # completa só o que está vazio; aliases se somam
+        for k, v in d.items():   # completa só o que está vazio; aliases e provedores de ID se somam
             if k == "aliases": cur["aliases"] = list(dict.fromkeys(cur["aliases"] + v))
+            elif k == "provs": cur["provs"] = cur["provs"] | v
             elif cur.get(k) in (None, "") and v not in (None, ""): cur[k] = v
     n = 0
     for r in read_csv("clubs_football.csv", src_dir):
@@ -133,7 +134,8 @@ def build_clubs_and_comps(src_dir, iso_of, limit=None):
             comps.setdefault(f"wd:{lq}", {"key": f"wd:{lq}", "wikidata": lq, "reep_id": None, "name": ln, "name_fold": fold(ln), "iso2": iso, "level": lvl, "kind": "liga"})
         al = [a for a in dict.fromkeys(x for x in (local, en, g(r, "surnom")) if x and name_ok(x))]
         put_club(key, {"key": key, "wikidata": wd, "reep_id": None, "name": name, "short_name": g(r, "surnom"), "name_fold": fold(name), "marker": marker, "iso2": iso, "city": g(r, "ville"), "founded": g(r, "date_creation"),
-                       "stadium": g(r, "stade"), "category": cat, "logo_url": g(r, "url_logo"), "comp_key": f"wd:{lq}" if lq and f"wd:{lq}" in comps else None, "division": g(r, "division_actuel"), "aliases": al})
+                       "stadium": g(r, "stade"), "category": cat, "logo_url": g(r, "url_logo"), "comp_key": f"wd:{lq}" if lq and f"wd:{lq}" in comps else None, "division": g(r, "division_actuel"), "aliases": al,
+                       "provs": {p for p, col in (("wikidata", "wikidata"), ("transfermarkt", "transfermarkt_id"), ("fbref", "fbref_id"), ("soccerway", "soccerway_id")) if (qid(g(r, col)) if p == "wikidata" else g(r, col))}})
     n = 0
     for r in read_csv("teams.csv", src_dir):
         n += 1
@@ -144,7 +146,8 @@ def build_clubs_and_comps(src_dir, iso_of, limit=None):
         iso = iso_of(g(r, "country")); marker = club_marker(name)
         key = f"wd:{wd}" if wd else f"rp:{rp}"
         put_club(key, {"key": key, "wikidata": wd, "reep_id": rp, "name": name, "short_name": None, "name_fold": fold(name), "marker": marker, "iso2": iso, "city": None, "founded": g(r, "founded"), "stadium": g(r, "stadium"),
-                       "category": None, "logo_url": None, "comp_key": None, "division": None, "aliases": [name]})
+                       "category": None, "logo_url": None, "comp_key": None, "division": None, "aliases": [name],
+                       "provs": ({"wikidata"} if wd else set()) | {p for p in ("transfermarkt", "fbref", "soccerway", "opta", "sofifa", "thesportsdb", "api_football", "flashscore", "sofascore", "uefa") if g(r, "key_" + p)}})
     for r in read_csv("competitions.csv", src_dir):
         name = g(r, "name")
         if not name_ok(name) or is_women(name): continue
@@ -160,7 +163,8 @@ def build_clubs_and_comps(src_dir, iso_of, limit=None):
     for c in clubs.values():
         c["aliases"] = [a for a in dict.fromkeys(c["aliases"]) if a]
         c["alias_fold"] = sorted({fold(a) for a in c["aliases"] if fold(a)} | {c["name_fold"]})
-        c["row_hash"] = h([c[k] for k in ("key", "wikidata", "reep_id", "name", "short_name", "marker", "iso2", "city", "founded", "stadium", "category", "logo_url", "comp_key", "division")] + [c["aliases"]])
+        c["prominence"] = len(c.pop("provs", set()))     # quantos cadastros conhecem o clube (Wikidata, Transfermarkt, FBref…): clube grande tem muitos; serve de desempate entre homônimos
+        c["row_hash"] = h([c[k] for k in ("key", "wikidata", "reep_id", "name", "short_name", "marker", "iso2", "city", "founded", "stadium", "category", "logo_url", "comp_key", "division", "prominence")] + [c["aliases"]])
         out_clubs.append(c)
     out_comps = []
     for c in comps.values():

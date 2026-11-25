@@ -75,12 +75,12 @@ object WorldRemote {
                 val k = WorldNorm.clubKey(name); val wd = s(o, "wikidata"); val iso = s(o, "iso2")
                 var id = db.long("SELECT id FROM football_clubs WHERE remote_id=?", rid.toString()) ?: wd?.let { db.long("SELECT id FROM football_clubs WHERE wikidata=? AND remote_id IS NULL", it) }
                     ?: db.long("SELECT id FROM football_clubs WHERE name_key=? AND marker=? AND COALESCE(iso2,'')=? AND wikidata IS NULL AND remote_id IS NULL", k.core, k.marker, iso ?: "")
-                val vals = arrayOf<Any?>(name, s(o, "short_name"), k.core, k.marker, iso, s(o, "city"), s(o, "founded"), s(o, "stadium"), s(o, "category"), s(o, "logo_url"), "supabase", now, rid)
+                val vals = arrayOf<Any?>(name, s(o, "short_name"), k.core, k.marker, iso, s(o, "city"), s(o, "founded"), s(o, "stadium"), s(o, "category"), s(o, "logo_url"), "supabase", now, rid, i(o, "prominence") ?: 0L)
                 if (id == null) {
-                    db.exec("INSERT INTO football_clubs(name,short_name,name_key,marker,iso2,city,founded,stadium,category,logo_url,source_id,updated_at,remote_id,wikidata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf<Any?>(*vals, wd))
+                    db.exec("INSERT INTO football_clubs(name,short_name,name_key,marker,iso2,city,founded,stadium,category,logo_url,source_id,updated_at,remote_id,prominence,wikidata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf<Any?>(*vals, wd))
                     id = db.long("SELECT last_insert_rowid()")!!
                 } else {
-                    db.exec("UPDATE football_clubs SET name=?,short_name=?,name_key=?,marker=?,iso2=?,city=?,founded=?,stadium=?,category=?,logo_url=?,source_id=?,updated_at=?,remote_id=?,wikidata=COALESCE(wikidata,?) WHERE id=?", arrayOf<Any?>(*vals, wd, id))
+                    db.exec("UPDATE football_clubs SET name=?,short_name=?,name_key=?,marker=?,iso2=?,city=?,founded=?,stadium=?,category=?,logo_url=?,source_id=?,updated_at=?,remote_id=?,prominence=?,wikidata=COALESCE(wikidata,?) WHERE id=?", arrayOf<Any?>(*vals, wd, id))
                 }
                 val al = o.optJSONArray("aliases"); if (al != null) for (a in 0 until al.length()) {
                     val txt = al.optString(a).trim(); val ak = WorldNorm.fold(txt)

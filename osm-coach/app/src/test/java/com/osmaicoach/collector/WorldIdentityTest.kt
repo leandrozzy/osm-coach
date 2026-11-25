@@ -88,3 +88,18 @@ class WorldIdentityTest {
         assertNull(r.best)
     }
 }
+
+class WorldClubTieBreakTest {
+    private fun c(id: Long, name: String, prom: Int, iso: String = "br", aliases: List<String> = listOf("Flamengo")) = WorldIdentity.ClubC(id, name, aliases, iso, "", null, prom)
+    @Test fun sameNameClubsDoNotGetConfirmedByLuck() {
+        val americana = c(1, "Flamengo Futebol Clube (Americana)", 1); val rio = c(2, "Clube de Regatas do Flamengo", 12)
+        val r = WorldIdentity.matchClub(WorldIdentity.ClubObs("Flamengo", "br", null, 2), listOf(americana, rio))
+        assertEquals(2L, r.best!!.id)                                                                      // o mais conhecido vence o empate de nome
+        assertTrue(r.reasons.any { it.contains("mais conhecido") })
+        // dois homônimos igualmente obscuros: NÃO confirma (antes confirmava o primeiro da lista)
+        val a = c(3, "Atlético Rio", 1); val b = c(4, "Atlético Rio", 2)
+        val t = WorldIdentity.matchClub(WorldIdentity.ClubObs("Atlético Rio", "br", null, 2), listOf(a, b))
+        assertNotEquals(WorldIdentity.Status.CONFIRMED, t.status)
+        assertTrue(t.reasons.any { it.contains("sem favorito") })
+    }
+}

@@ -38,13 +38,14 @@ object WorldOcr {
     internal fun clubCandidates(db: WorldSql, raw: String, key: WorldNorm.ClubKey): List<WorldIdentity.ClubC> {
         val first = key.core.substringBefore(' ')
         val rows = db.q(
-            """SELECT DISTINCT c.id,c.name,c.iso2,c.marker FROM football_clubs c LEFT JOIN football_entity_aliases a ON a.entity_type='club' AND a.entity_id=c.id
+            """SELECT DISTINCT c.id,c.name,c.iso2,c.marker,c.prominence FROM football_clubs c LEFT JOIN football_entity_aliases a ON a.entity_type='club' AND a.entity_id=c.id
                WHERE c.name_key=? OR a.alias_key=? OR (c.name_key LIKE ? AND length(c.name_key)<=?) LIMIT 60""", key.core, WorldNorm.fold(raw), "$first%", (key.core.length + 8).toString()
-        ) { Triple(it.getLong(0), it.getString(1), Pair(it.getString(2), it.getString(3))) }
-        return rows.map { (id, name, p) ->
+        ) { arrayOf<Any?>(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getInt(4)) }
+        return rows.map { r ->
+            val id = r[0] as Long; val name = r[1] as String
             val aliases = db.q("SELECT alias FROM football_entity_aliases WHERE entity_type='club' AND entity_id=? LIMIT 8", id.toString()) { it.getString(0) }
             val league = db.q("SELECT comp.name FROM football_competition_clubs cc JOIN football_competitions comp ON comp.id=cc.competition_id WHERE cc.club_id=? LIMIT 1", id.toString()) { it.getString(0) }.firstOrNull()
-            WorldIdentity.ClubC(id, name, aliases, p.first, p.second ?: "", league)
+            WorldIdentity.ClubC(id, name, aliases, r[2] as String?, (r[3] as String?) ?: "", league, r[4] as Int)
         }
     }
 

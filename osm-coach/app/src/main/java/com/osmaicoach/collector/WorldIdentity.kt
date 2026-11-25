@@ -15,13 +15,14 @@ object WorldIdentity {
     class Result<T>(val best: T?, val score: Int, val status: Status, val margin: Int, val reasons: List<String>, val runnerUp: T? = null)
 
     // ---------------------------------------------------------------- clubes
-    class ClubC(val id: Long, val name: String, val aliases: List<String> = emptyList(), val iso2: String? = null, val marker: String = "", val league: String? = null)
+    class ClubC(val id: Long, val name: String, val aliases: List<String> = emptyList(), val iso2: String? = null, val marker: String = "", val league: String? = null, val prominence: Int = 0)
     class ClubObs(val name: String, val iso2: String? = null, val league: String? = null, val independent: Int = 1)
 
     fun matchClub(o: ClubObs, cands: List<ClubC>, cfg: Config = DEFAULT): Result<ClubC> {
         val ok = WorldNorm.clubKey(o.name)
         if (ok.core.isEmpty()) return Result(null, 0, Status.UNRESOLVED, 0, listOf("nome vazio"))
         class Sc(val c: ClubC, val score: Int, val why: List<String>, val signals: Int, val contradiction: Boolean)
+        val tieBreak = 3     // diferença de "prominência" (nº de cadastros que conhecem o clube) para um empate de nome ter favorito
         val scored = cands.map { c ->
             val names = listOf(c.name) + c.aliases
             val keys = names.map { WorldNorm.clubKey(it) }
@@ -35,20 +36,24 @@ object WorldIdentity {
             if (o.iso2 != null && c.iso2 != null) { if (o.iso2.equals(c.iso2, true)) { sig++; best = minOf(100, best + 2); why.add("mesmo país") } else { best = minOf(best, 55); why.add("país diferente"); contra = true } }
             if (o.league != null && c.league != null && WorldNorm.nameSim(WorldNorm.fold(o.league), WorldNorm.fold(c.league)) >= 85) { sig++; why.add("mesma liga") }
             Sc(c, best, why, sig, contra)
-        }.sortedByDescending { it.score }
+        }.sortedWith(compareByDescending<Sc> { it.score }.thenByDescending { it.c.prominence })
         val top = scored.firstOrNull() ?: return Result(null, 0, Status.UNRESOLVED, 0, listOf("sem candidatos"))
-        val second = scored.getOrNull(1)?.score ?: 0
-        val margin = top.score - second
+        val second = scored.getOrNull(1)
+        val margin = top.score - (second?.score ?: 0)
+        // empate (ou quase) no nome: só há vencedor se o clube é CLARAMENTE mais conhecido que o 2º (ex.: Flamengo do Rio × Flamengo de Americana); senão fica provável, nunca "confirmado"
+        val tie = second != null && margin < cfg.margin
+        val favorite = tie && top.c.prominence - second!!.c.prominence >= tieBreak && !top.contradiction
+        val why = if (favorite) top.why + "mais conhecido que \"${second!!.c.name}\" (${top.c.prominence} × ${second.c.prominence} cadastros)" else if (tie) top.why + "empate com \"${second!!.c.name}\": sem favorito claro" else top.why
         val extra = if (o.independent >= 2) 1 else 0
         val status = when {
             top.score < cfg.ambiguous -> Status.UNRESOLVED
-            top.contradiction || margin < cfg.margin && top.score < 100 -> if (top.score >= cfg.probable) Status.PROBABLE else Status.AMBIGUOUS
+            top.contradiction || (tie && !favorite) -> if (top.score >= cfg.probable) Status.PROBABLE else Status.AMBIGUOUS
             top.score >= cfg.veryHigh && top.signals + extra >= 1 -> Status.CONFIRMED
             top.score >= cfg.veryHigh -> Status.VERY_HIGH
             top.score >= cfg.probable -> Status.PROBABLE
             else -> Status.AMBIGUOUS
         }
-        return Result(if (status == Status.UNRESOLVED) null else top.c, top.score, status, margin, top.why, scored.getOrNull(1)?.c)
+        return Result(if (status == Status.UNRESOLVED) null else top.c, top.score, status, margin, why, scored.getOrNull(1)?.c)
     }
 
     // ---------------------------------------------------------------- jogadores
