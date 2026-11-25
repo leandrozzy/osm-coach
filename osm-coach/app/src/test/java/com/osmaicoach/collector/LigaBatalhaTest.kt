@@ -299,4 +299,13 @@ class LigaBatalhaTest {
         val cov = LeagueResults.coverage(root, comp, null, played = 4)!!
         assertEquals(2, cov.expectedPerRound); assertEquals(listOf(3), cov.missing); assertEquals(listOf(2), cov.partial); assertTrue(cov.over.isEmpty())
     }
+
+    @Test fun recruitingBattleCardIsASlotWithoutCompetition() {
+        // S4 = "BATALHA DE GRUPOS / A RECRUTAR MEMBROS…" (print de 24/11): sem jornada; antes virava competição ativa e o S4 voltava a aparecer na Agenda/Hoje
+        val lines = Fx.hubLines().filter { !it.text.contains("3/10") && !it.text.contains("UZM VS BAY") && !it.text.contains("BATALHA DE GRUPOS") } +
+            listOf(Fx.line("BATALHA DE GRUPOS", 0.795f, 0.845f, 0.13f), Fx.line("A RECRUTAR MEMBROS...", 0.795f, 0.871f, 0.15f))
+        val cards = Parsers.hub(Fx.ocr(*lines.toTypedArray())).hubCards
+        val s4 = cards.firstOrNull { it.slot == 4 }
+        assertNotNull(s4); assertEquals("procurando", s4!!.state)
+    }
 }

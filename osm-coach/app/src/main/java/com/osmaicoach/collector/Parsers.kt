@@ -93,8 +93,9 @@ object Parsers {
                     continue
                 }
             }
-            if (done == null && all.contains("procurar advers")) {
-                val title = names.firstOrNull { !Txt.norm(it.text).contains("procurar") }?.text?.trim() ?: "Batalha"
+            // "A PROCURAR ADVERSÁRIO" ou "A RECRUTAR MEMBROS…" (batalha de grupos ainda formando as equipes): sem jogo, tratado como "procurando"
+            if (done == null && (all.contains("procurar advers") || all.contains("recrutar"))) {
+                val title = names.firstOrNull { val t = Txt.norm(it.text); !t.contains("procurar") && !t.contains("recrutar") }?.text?.trim() ?: "Batalha"
                 cards.add(HubCard(slot, "", title, null, null, "procurando", dx = dx, dy = dy))
                 continue
             }
