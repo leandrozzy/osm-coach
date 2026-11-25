@@ -143,7 +143,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val img = remember(p.nameKey, UiBus.version) { PhotoWeb.bitmapAny(ctx.filesDir, p.nameKey)?.asImageBitmap() }
                         val m = Modifier.size(104.dp).clip(CircleShape).border(2.dp, catColor(cat), CircleShape).clickable { pickPhoto.launch("image/*") }
-                        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = m)
+                        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = m.background(Color.White))
                         else Canvas(m) {
                             val w = size.width; val h = size.height
                             drawRect(Color(0xFFF3F5F9)); val ink = Color(0xFFB4BDD0)

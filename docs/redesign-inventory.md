@@ -69,3 +69,10 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 ## Sexta etapa — interação (pedido do usuário)
 - **Hoje**: tocar num slot da grade o ESCOLHE (o card do jogo, as prioridades e o detalhe passam a mostrar só aquele slot; tocar de novo volta ao geral). Abrir o slot: tocar no card do jogo ou no "Detalhe dos slots". Slot sem jogo (batalha, livre, encerrado) mostra o estado e o botão "Abrir o slot".
 - **Calendário do slot**: tocar num dia mostra os jogos daquela data (com escudos e placar/hora); setas ‹ › trocam o mês (limitadas ao primeiro e ao último mês com jogo lido) e "hoje" volta ao mês atual.
+
+## Sétima etapa — correções de uso (vídeo/prints do aparelho)
+- **Bolha**: lista do cartão limitada a 38 % da altura, aviso (`notice`) com no máximo 4 linhas, e o painel sobe sozinho se passar da tela (botões Tática/App/Encerrar sempre visíveis).
+- **Fotos sem fundo** (PNG transparente): aparecem sobre branco no Elenco e no detalhe do jogador (antes, sobre o fundo escuro do cartão).
+- **Slots**: trocar de slot na barra do topo mantém a aba (Elenco continua Elenco).
+- **Abertura**: app aberto do zero começa sempre em Hoje (`onCreate` com `savedInstanceState == null`); girar a tela/memória e voltar do OSM mantêm o lugar.
+- **Botão "App" da bolha**: abre o slot em que o OSM está (`Diag.currentSlot`) na aba atual (`Route.tab = -1` = manter).

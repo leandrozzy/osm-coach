@@ -199,6 +199,8 @@ class MainActivity : ComponentActivity() {
         KeepAliveService.start(applicationContext)
         // Ao recriar a tela (girar o celular) o intent antigo continua aqui: não reabre o slot da notificação.
         if (savedInstanceState == null) handleIntent(intent)
+        // app aberto do zero (fechado antes): sempre começa em Hoje; recriação da tela (girar, memória) e volta do OSM continuam onde estava
+        if (savedInstanceState == null) getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putInt("tab", 0).putInt("slot", 0).putInt("slotTab", 0).apply()
         setContent {
             val font = remember { osmFontFamily() }
             val base = androidx.compose.material3.Typography()
@@ -1748,7 +1750,7 @@ internal fun App() {
         if (Route.slot > 0) {
             tab = 2
             openSlot = Route.slot
-            openTab = Route.tab
+            if (Route.tab >= 0) openTab = Route.tab
             Route.slot = 0
         }
     }
@@ -1783,10 +1785,10 @@ internal fun App() {
                 0 -> TodayTab(onGoSettings = { tab = 5 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
                 1 -> AgendaTab()
                 2 -> if (openSlot > 0) {
-                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it; openTab = 0 }) { openSlot = 0 } }
+                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it }) { openSlot = 0 } }
                 } else SlotsTab { slot, t -> openSlot = slot; openTab = t }
                 3 -> if (openSlot > 0) {
-                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it; openTab = 0 }) { openSlot = 0 } }
+                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it }) { openSlot = 0 } }
                 } else DirectorTab { slot, t -> openSlot = slot; openTab = t }
                 4 -> ArtsTab()
                 else -> SettingsTab()

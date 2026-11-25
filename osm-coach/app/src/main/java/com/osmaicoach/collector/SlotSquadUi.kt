@@ -497,7 +497,8 @@ internal fun PlayerPhoto(nameKey: String, size: Dp) {
     val ver = UiBus.version
     val img = remember(nameKey, ver) { PhotoWeb.bitmapAny(ctx.filesDir, nameKey)?.asImageBitmap() }
     val m = Modifier.padding(end = 10.dp).size(size).clip(androidx.compose.foundation.shape.CircleShape)
-    if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = m)
+    // foto sem fundo (PNG transparente) aparece sobre branco, não sobre o fundo escuro do cartão
+    if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = m.background(Color.White))
     else androidx.compose.foundation.Canvas(m) {
         val w = this.size.width; val h = this.size.height
         drawRect(androidx.compose.ui.graphics.Color(0xFFF3F5F9))

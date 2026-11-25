@@ -485,12 +485,13 @@ class CaptureService : AccessibilityService() {
         // a lista não passa de ~55% da tela (o resto rola)
         scroll.layoutParams = LinearLayout.LayoutParams(maxW, LinearLayout.LayoutParams.WRAP_CONTENT)
         scroll.viewTreeObserver.addOnGlobalLayoutListener {
-            val cap = (resources.displayMetrics.heightPixels * 0.62f).toInt()
+            val cap = (resources.displayMetrics.heightPixels * 0.38f).toInt()
             if (scroll.height > cap) scroll.layoutParams = scroll.layoutParams.apply { height = cap }
         }
         val notice = chip("", 0xF2F5B942.toInt(), dp).apply {
             setTextColor(android.graphics.Color.BLACK)
             maxWidth = maxW
+            maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END
             visibility = View.GONE
         }
         fun gap(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(
@@ -569,6 +570,11 @@ class CaptureService : AccessibilityService() {
         box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> markBounds(v) }
         try {
             wm.addView(box, lp)
+            // o painel nunca passa da tela: se o conjunto (bola + cartão + aviso) ficar mais baixo que o espaço, sobe até caber (botões sempre visíveis)
+            box.viewTreeObserver.addOnGlobalLayoutListener {
+                val maxY = (resources.displayMetrics.heightPixels - box.height - (56 * dp).toInt()).coerceAtLeast(0)
+                if (lp.y > maxY) { lp.y = maxY; try { wm.updateViewLayout(box, lp) } catch (ex: Exception) { } }
+            }
             overlayBox = box
             overlay = end
             toggleView = toggle
@@ -594,6 +600,9 @@ class CaptureService : AccessibilityService() {
                 i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(i)
             } else {
+                // estando num slot do OSM (S1..S4), o app abre nesse slot (na aba em que você estava)
+                val sl = Diag.currentSlot
+                if (sl in 1..4) { Route.tab = -1; Route.slot = sl; Route.nonce++ }
                 startActivity(
                     android.content.Intent(this, MainActivity::class.java).addFlags(
                         android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
