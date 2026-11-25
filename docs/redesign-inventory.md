@@ -87,3 +87,5 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 ## Nona etapa — escudos e bandeiras (prints do aparelho)
 - `CrestAdmin` + `CrestManagerFold` (Ajustes → Imagens): excluir escudo errado/inventado (bloqueia o nome), adicionar/trocar à mão, filtros e busca; `CrestWeb`/`CrestCut` respeitam o bloqueio.
 - `FlagIdent.pick`: Flagpedia decide quando é claro; Atlas só vale se confere com o Flagpedia. `natiso3`/`natbank2` substituem os dados antigos. Teste com a bandeira real da Albânia (`FlagIdentTest`).
+- **Bandeiras (2ª rodada)**: Atlas fora da decisão; `FlagIdent.pick` = cor nomeada + Lab fino; teste com 13 bandeiras reais; `natiso4`/`natbank3`.
+- **Escudos (2ª rodada)**: leituras duplicadas agrupadas numa linha, "origem" usa a mesma busca do desenho (acabou o "sem escudo" com escudo aparecendo), botão "Limpar duplicadas", escudo salvo com o nome da Classificação.

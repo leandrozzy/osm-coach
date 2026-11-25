@@ -125,13 +125,14 @@ internal fun ImageManagerFold() {
 internal fun CrestManagerFold() {
     val ctx = LocalContext.current.applicationContext
     val tick = rememberTick(4000L)
-    val entries = rememberLoaded(emptyList<CrestAdmin.Entry>(), tick, UiBus.version) { CrestAdmin.entries(ctx.filesDir, CrestAdmin.knownNames(Repo(ctx))) }
+    val entries = rememberLoaded(emptyList<CrestAdmin.Entry>(), tick, UiBus.version) { CrestAdmin.entries(ctx.filesDir, CrestAdmin.knownNames(Repo(ctx)), CrestAdmin.trustedNames(Repo(ctx))) }
     var filter by remember { mutableStateOf("all") }
     var q by remember { mutableStateOf("") }
     var shown by remember { mutableStateOf(25) }
     var pickFor by remember { mutableStateOf<String?>(null) }
     var delete by remember { mutableStateOf<CrestAdmin.Entry?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var cleanup by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val name = pickFor; pickFor = null
@@ -159,6 +160,8 @@ internal fun CrestManagerFold() {
         }
         OutlinedTextField(q, { q = it; shown = 25 }, singleLine = true, label = { Text("Buscar clube") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { adding = true; newName = "" }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("＋ Adicionar escudo de um clube", fontWeight = FontWeight.ExtraBold) }
+        val dups = entries.sumOf { it.variants.size }
+        if (dups > 0) OutlinedButton(onClick = { cleanup = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("🧹 Limpar $dups leitura(s) duplicada(s) do mesmo clube") }
         val list = entries.filter { (filter == "all" || it.source == filter) && (q.isBlank() || Txt.norm(it.name).contains(Txt.norm(q))) }
         Text("${list.size} clube(s)", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
         for (e in list.take(shown)) {
@@ -167,7 +170,7 @@ internal fun CrestManagerFold() {
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(e.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(when (e.source) { "manual" -> "✋ escolhido à mão"; "web" -> "🌐 da web"; "recorte" -> "✂ recorte do jogo"; "bloqueado" -> "⛔ excluído (não será recriado)"; else -> "▫ sem escudo" }, fontSize = 12.sp, color = C.MUTED)
+                    Text(when (e.source) { "manual" -> "✋ escolhido à mão"; "web" -> "🌐 da web"; "recorte" -> "✂ recorte do jogo"; "bloqueado" -> "⛔ excluído (não será recriado)"; else -> "▫ sem escudo" } + (if (e.variants.isNotEmpty()) " • +${e.variants.size} leitura(s) igual(is)" else ""), fontSize = 12.sp, color = C.MUTED)
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -178,12 +181,21 @@ internal fun CrestManagerFold() {
         }
         if (list.size > shown) GhostButton("Mostrar mais (${list.size - shown})") { shown += 25 }
     }
+    if (cleanup) {
+        AlertDialog(
+            onDismissRequest = { cleanup = false },
+            title = { Text("Limpar leituras duplicadas?") },
+            text = { Text("Cada clube fica só com o nome mostrado na lista (o da Classificação, ou o que já tem escudo). As outras grafias (erro de leitura, como Wien II lido de dois jeitos) são excluídas e bloqueadas.") },
+            confirmButton = { TextButton(onClick = { cleanup = false; AppScope.scope.launch(Dispatchers.IO) { val n = CrestAdmin.removeDuplicates(ctx, entries); withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, "$n leitura(s) removida(s).", android.widget.Toast.LENGTH_LONG).show() } } }) { Text("Limpar") } },
+            dismissButton = { TextButton(onClick = { cleanup = false }) { Text("Cancelar") } }
+        )
+    }
     delete?.let { e ->
         AlertDialog(
             onDismissRequest = { delete = null },
             title = { Text("Excluir o escudo de ${e.name}?") },
             text = { Text("O escudo é apagado e o nome fica bloqueado: o app não busca nem recorta escudo para ele de novo. Dá para desbloquear ou adicionar à mão depois, na lista de Excluídos.") },
-            confirmButton = { TextButton(onClick = { delete = null; AppScope.scope.launch(Dispatchers.IO) { CrestAdmin.delete(ctx, e.name) } }) { Text("Excluir") } },
+            confirmButton = { TextButton(onClick = { delete = null; AppScope.scope.launch(Dispatchers.IO) { CrestAdmin.delete(ctx, e.name); e.variants.forEach { CrestAdmin.delete(ctx, it) } } }) { Text("Excluir") } },
             dismissButton = { TextButton(onClick = { delete = null }) { Text("Cancelar") } }
         )
     }

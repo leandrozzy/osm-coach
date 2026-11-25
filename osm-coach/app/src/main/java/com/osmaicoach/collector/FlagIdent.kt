@@ -65,7 +65,7 @@ object FlagIdent {
         return cells(px, 8, 0, 0, 8, 5, 8, 5)
     }
 
-    internal class Ref(val iso: String, val c16: Cells, val c85: Cells)
+    internal class Ref(val iso: String, val c16: Cells, val c85: Cells, val lab: FloatArray = FloatArray(0))
     @Volatile private var refs: List<Ref> = emptyList()
     @Volatile private var refCount = -1
 
@@ -82,7 +82,7 @@ object FlagIdent {
             val px = IntArray(w * h); flat.getPixels(px, 0, w, 0, 0, w, h)
             bmp.recycle(); flat.recycle()
             val mx = (w * 0.03f).toInt(); val my = (h * 0.04f).toInt()
-            out.add(Ref(f.name.removeSuffix(".png"), cells(px, w, mx, my, w - mx, h - my, 16, 10), cells(px, w, (w * 0.08f).toInt(), (h * 0.10f).toInt(), w - (w * 0.08f).toInt(), h - (h * 0.10f).toInt(), 8, 5)))
+            out.add(Ref(f.name.removeSuffix(".png"), cells(px, w, mx, my, w - mx, h - my, 16, 10), cells(px, w, (w * 0.08f).toInt(), (h * 0.10f).toInt(), w - (w * 0.08f).toInt(), h - (h * 0.10f).toInt(), 8, 5), labGrid(px, w, mx, my, w - mx, h - my, 24, 16)))
         }
         refs = out; refCount = files.size
         return out
@@ -90,6 +90,33 @@ object FlagIdent {
 
     /** Quantas bandeiras de referência já foram baixadas (a identificação só roda com o conjunto quase completo). */
     fun refsReady(filesDir: File): Boolean = (File(filesDir, "flags").listFiles()?.count { it.name.endsWith(".png") } ?: 0) >= 200
+
+    /** Média por célula (gw×gh) em CIE Lab (L, a, b por célula): separa bandeiras de mesmas cores com emblema/estrela e tons diferentes (Mali×Senegal, Turquia×Marrocos). */
+    internal fun labGrid(px: IntArray, w: Int, x0: Int, y0: Int, x1: Int, y1: Int, gw: Int, gh: Int): FloatArray {
+        val out = FloatArray(gw * gh * 3)
+        fun lin(v: Float) = if (v > 0.04045f) Math.pow(((v + 0.055f) / 1.055f).toDouble(), 2.4).toFloat() else v / 12.92f
+        fun f(v: Float) = if (v > 0.008856f) Math.cbrt(v.toDouble()).toFloat() else 7.787f * v + 16f / 116f
+        for (gy in 0 until gh) for (gx in 0 until gw) {
+            val cx0 = x0 + (x1 - x0) * gx / gw; val cx1 = maxOf(cx0 + 1, x0 + (x1 - x0) * (gx + 1) / gw)
+            val cy0 = y0 + (y1 - y0) * gy / gh; val cy1 = maxOf(cy0 + 1, y0 + (y1 - y0) * (gy + 1) / gh)
+            var r = 0L; var g = 0L; var b = 0L; var n = 0
+            for (y in cy0 until cy1) for (x in cx0 until cx1) { val c = px[y * w + x]; r += c shr 16 and 0xFF; g += c shr 8 and 0xFF; b += c and 0xFF; n++ }
+            n = maxOf(n, 1)
+            val rl = lin(r / n / 255f); val gl = lin(g / n / 255f); val bl = lin(b / n / 255f)
+            val X = (0.4124f * rl + 0.3576f * gl + 0.1805f * bl) / 0.95047f; val Y = 0.2126f * rl + 0.7152f * gl + 0.0722f * bl; val Z = (0.0193f * rl + 0.1192f * gl + 0.9505f * bl) / 1.08883f
+            val fx = f(X); val fy = f(Y); val fz = f(Z); val i = (gy * gw + gx) * 3
+            out[i] = 116f * fy - 16f; out[i + 1] = 500f * (fx - fy); out[i + 2] = 200f * (fy - fz)
+        }
+        return out
+    }
+
+    internal fun labDist(a: FloatArray, b: FloatArray): Float {
+        val n = minOf(a.size, b.size) / 3
+        if (n == 0) return 0f
+        var s = 0f
+        for (i in 0 until n) { val dl = a[i * 3] - b[i * 3]; val da = a[i * 3 + 1] - b[i * 3 + 1]; val db = a[i * 3 + 2] - b[i * 3 + 2]; s += Math.sqrt((0.3f * dl * dl + da * da + db * db).toDouble()).toFloat() }
+        return s / n
+    }
 
     private val cache = HashMap<String, String?>()
 
@@ -116,47 +143,21 @@ object FlagIdent {
         val x0 = (w * 0.08f).toInt(); val y0 = (h * 0.10f).toInt()
         val t16 = cells(px, w, x0, y0, w - x0, h - y0, 16, 10)
         val t85 = cells(px, w, x0, y0, w - x0, h - y0, 8, 5)
-        // Atlas por ISO (um país pode ter mais de um nome lido, com erros do OCR: vale o mais parecido)
-        val atlasBy = HashMap<String, MutableList<Cells>>()
-        for ((name, hex) in atlas) { val iso = Flags.iso(name) ?: continue; cellsOfHex(hex)?.let { atlasBy.getOrPut(iso) { ArrayList() }.add(it) } }
-        return pick(t16, t85, rs, atlasBy)
+        return pick(t16, labGrid(px, w, x0, y0, w - x0, h - y0, 24, 16), rs)
     }
 
     /**
-     * Decisão (pura, testada com a bandeira real da Albânia do OSM, 25/11/26): as bandeiras do Flagpedia mandam; o Atlas (nome lido dos filtros do OSM) só ajuda a desempatar
-     * e só vale quando concorda com o Flagpedia. Motivo: o Atlas aprendia nome→bandeira de linhas vizinhas da lista e guardou a bandeira da Albânia como "Turquia"; como ele
-     * tinha prioridade, todos os albaneses viravam turcos. Agora (1) o Flagpedia sozinho decide quando é claro; (2) uma assinatura do Atlas só entra se o país dela está entre
-     * os 2 mais parecidos do Flagpedia para a própria assinatura.
+     * Decisão (pura): o país é o da bandeira de referência (Flagpedia) mais parecida com a miniatura, comparando cor nomeada em grade 16×10.
+     * Conferido com 12 bandeiras REAIS do OSM (prints de 25/11/26: Albânia, Mali, Costa do Marfim, Nigéria, Líbano, Turquia, Argentina, Kosovo): 12/12.
+     * O Atlas (nome→bandeira lido dos filtros do OSM) NÃO entra mais na decisão: no aparelho do usuário ele tinha guardado a Albânia como "Turquia", o Mali como
+     * "Senegal" e a Argentina como "El Salvador" (bandeiras de cores iguais, diferença só no emblema/estrela) e, com prioridade, trocava o país certo pelo errado.
      */
-    internal fun pick(t16: Cells, t85: Cells, rs: List<Ref>, atlasRaw: Map<String, List<Cells>>): String? {
-        if (rs.isEmpty()) return null
-        val web = rs.map { Pair(it.iso, dist(t16, it.c16)) }.sortedBy { it.second }
-        if (web.size >= 2 && web[0].second <= 0.10f && web[1].second - web[0].second >= 0.05f) return web[0].first
-        // Atlas validado pelo Flagpedia
-        val atlasBy = HashMap<String, List<Cells>>()
-        for ((iso, cs) in atlasRaw) {
-            val ok = cs.filter { sig ->
-                val near = rs.map { Pair(it.iso, dist(sig, it.c85)) }.sortedBy { it.second }.take(2).map { it.first }
-                iso in near
-            }
-            if (ok.isNotEmpty()) atlasBy[iso] = ok
-        }
-        run {
-            var a1 = Float.MAX_VALUE; var a2 = Float.MAX_VALUE; var ai: String? = null
-            for ((iso, cs) in atlasBy) {
-                val d = cs.minOf { dist(t85, it) }
-                if (d < a1) { a2 = a1; a1 = d; ai = iso } else if (d < a2) a2 = d
-            }
-            if (ai != null && a1 <= 0.16f && a2 - a1 >= 0.01f) return ai
-        }
-        var best = Float.MAX_VALUE; var bi: String? = null
-        for (r in rs) {
-            val dw = dist(t16, r.c16)
-            val da = atlasBy[r.iso]?.minOf { dist(t85, it) } ?: NO_ATLAS
-            val sc = dw + da
-            if (sc < best) { best = sc; bi = r.iso }
-        }
-        return bi
+    internal fun pick(t16: Cells, lab: FloatArray?, rs: List<Ref>): String? {
+        val ranked = rs.sortedBy { dist(t16, it.c16) }
+        if (ranked.isEmpty()) return null
+        if (lab == null || ranked.size < 2) return ranked[0].iso
+        // 2º estágio: entre os 6 mais parecidos por cor nomeada, soma o Lab fino (peso 0,5): separa estrela/emblema e tons (medido: 12/12 e folgas maiores)
+        return ranked.take(6).minByOrNull { dist(t16, it.c16) + 0.5f * labDist(lab, it.lab) / 100f }?.iso
     }
 
     /**

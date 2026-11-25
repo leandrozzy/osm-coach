@@ -185,7 +185,7 @@ object CrestCut {
     fun dir(filesDir: File): File = File(filesDir, "crests/t5").apply { mkdirs() }
 
     fun file(filesDir: File, team: String?): File? {
-        val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
+        val k = Txt.key(CrestAdmin.snap(filesDir, team) ?: "").takeIf { it.length >= 3 } ?: return null
         return File(File(filesDir, "crests/t5"), "$k.png")
     }
 

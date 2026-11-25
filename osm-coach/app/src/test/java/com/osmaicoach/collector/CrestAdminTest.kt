@@ -26,3 +26,23 @@ class CrestAdminTest {
         assertEquals("bloqueado", by["25 anniversary"]?.source ?: "bloqueado")
     }
 }
+
+class CrestClusterTest {
+    @Test fun ocrVariantsOfTheSameClubAreGrouped() {
+        val g = CrestAdmin.cluster(listOf("SK Rapid Wien II", "SK Rapid Wien ||", "SK Rapid Wien Il", "5C Fortuna Köln", "SC Fortuna Köln", "Vf8 Stuttgart II", "VfB Stuttgart II", "VfB Stuttgart ll", "FC Hertha VWels", "FC Hertha Wels"))
+        val sets = g.map { it.toSet() }
+        assertTrue(sets.any { it == setOf("SK Rapid Wien II", "SK Rapid Wien ||", "SK Rapid Wien Il") })
+        assertTrue(sets.any { it == setOf("5C Fortuna Köln", "SC Fortuna Köln") })
+        assertTrue(sets.any { it == setOf("Vf8 Stuttgart II", "VfB Stuttgart II", "VfB Stuttgart ll") })
+        assertTrue(sets.any { it == setOf("FC Hertha VWels", "FC Hertha Wels") })
+    }
+
+    @Test fun differentClubsWithNumeralSuffixAreKeptApart() {
+        val g = CrestAdmin.cluster(listOf("VfB Stuttgart II", "VfB Stuttgart III", "SK Sturm Graz II", "SK Sturm Graz I", "SK Rapid Wien", "SK Rapid Wien II"))
+        assertEquals(6, g.size)
+    }
+
+    @Test fun differentClubsAreNeverMerged() {
+        assertEquals(4, CrestAdmin.cluster(listOf("Botafogo", "Internacional", "Grêmio", "Atlético Mineiro")).size)
+    }
+}

@@ -40,7 +40,7 @@ object CrestWeb {
 
     /** Arquivo do escudo real (nome exato; senão o nome mais parecido). */
     fun find(filesDir: File, team: String?): File? {
-        val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
+        val k = Txt.key(CrestAdmin.snap(filesDir, team) ?: "").takeIf { it.length >= 3 } ?: return null
         if (CrestAdmin.isBlocked(filesDir, team)) return null
         val d = dir(filesDir)
         val exact = File(d, "$k.png")
@@ -65,7 +65,7 @@ object CrestWeb {
 
     /** Pede o escudo de um clube (fila única, ritmo de 1 consulta a cada ~2,5 s; o que já existe ou falhou há pouco não repete). */
     fun request(ctx: Context, team: String?) {
-        val t = team?.trim() ?: return
+        val t = CrestAdmin.snap(ctx.filesDir, team?.trim()) ?: return
         if (CrestAdmin.isBlocked(ctx.filesDir, t)) return           // excluído à mão ou texto de banner ("25 anniversary")
         if (Txt.key(t).length < 3 || Fixtures.notAClub(t)) return   // fase da copa / "a definir" não é clube: o escudo vem quando a vaga for preenchida
         if (Settings.get(ctx, "web_crests", "1") != "1") return

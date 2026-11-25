@@ -417,7 +417,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "squadmissat", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso3", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "squadmissat", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso4", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -1155,6 +1155,7 @@ class Repo(private val ctx: Context) {
         League.read(ocr)?.let { (kind, rows) ->
             val old = dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
             dao.putPlan(PlanEntity(slot, "league", League.merge(old, kind, rows, now).toString(), now))
+            if (kind == "st") runCatching { CrestAdmin.rememberTrusted(ctx, rows.map { it.club }) }   // grafia limpa dos clubes: o nome dos escudos passa a ser este
         }
         runCatching { ResultsIngest.onScreen(this, slot, type, ocr, now) }
         val deals = Sponsors.parse(ocr)

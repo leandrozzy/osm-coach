@@ -282,7 +282,7 @@ object PhotoWeb {
                 if (usedToday(ctx) >= BUDGET) { block(ctx); Diag.log("Fotos: cota do dia usada ($BUDGET), volto amanhã"); break }
                 val terms = searchTerms(p.name)
                 if (terms.isEmpty()) continue
-                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso3")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
                 var cands: List<Cand> = emptyList()
                 var stop = false; var again = false; var zero = false
                 for ((ti, term) in terms.withIndex()) {
@@ -518,7 +518,7 @@ object PhotoWeb {
             for (p in queue) {
                 val q = toks(p.name).joinToString(" ")
                 if (q.length < 3) continue
-                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso3")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
                 fun mark(state: String) { wx.put(p.nameKey, JSONObject().put("s", state).put("at", System.currentTimeMillis())); runCatching { wikiFile(ctx.filesDir).writeText(wx.toString()) } }
                 val sUrl = "https://www.wikidata.org/w/api.php?action=query&list=search&format=json&srlimit=50&srsearch=" +
                     java.net.URLEncoder.encode("$q haswbstatement:P106=Q937857", "UTF-8")

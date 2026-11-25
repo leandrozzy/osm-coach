@@ -313,7 +313,7 @@ object Arts {
         val shortNames = ArrayList<String>()
         for (b in buys) {
             val p = mine.firstOrNull { it.nameKey == b.key } ?: continue
-            val iso = FlagManual.all(repo)[b.key] ?: repo.dao.plan(slot, "natiso3")?.json?.let { runCatching { JSONObject(it).optString(b.key) }.getOrNull() }?.takeIf { it.isNotBlank() }
+            val iso = FlagManual.all(repo)[b.key] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(b.key) }.getOrNull() }?.takeIf { it.isNotBlank() }
             val country = Flags.countryName(iso)
             val look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
             val sc = ArtsAi.scene(ArtsAi.portraitPrompt(colors, kit, look), seed + list.size * 31)
@@ -475,7 +475,7 @@ object Arts {
             "BUY", "PLAYER" -> {
                 val key = c.key ?: return null
                 val p = repo.dao.playersOf(slot).firstOrNull { it.owner == "MY" && it.nameKey == key } ?: return null
-                val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso3")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
                 val country = Flags.countryName(iso)
                 kit = ArtsAi.kitFor(ctx, repo, team, comp)
                 look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
