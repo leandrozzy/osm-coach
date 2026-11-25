@@ -616,5 +616,4 @@ internal fun CalendarOverview(slot: Int, d: SlotData, sorted: List<MatchEntity>)
         DsSection("Últimos resultados")
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(horizontal = 8.dp)) { for (m in recent) line(m, false) }
     }
-    DsSection("Posição e rodadas")
 }

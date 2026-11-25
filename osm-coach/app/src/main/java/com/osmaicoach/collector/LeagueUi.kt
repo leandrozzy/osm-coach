@@ -118,73 +118,10 @@ internal fun FinishBand(clubs: Int, best: Int, worst: Int, estimate: Int?, now: 
 internal fun LeagueResultsCard(slot: Int) {
     val ctx = LocalContext.current
     val v = rememberLoaded<LeagueView?>(null, UiBus.version, "lv$slot") { runCatching { loadLeagueView(Repo(ctx), slot) }.getOrNull() } ?: return
-    if (v.cov == null && v.stAt == null) return
-    val c = v.cov
-    Fold("📊", "Sua posição na liga", v.myRank?.let { "${it}º" } ?: c?.let { "${it.games} jogos" }, startOpen = true) {
-        // topo: a resposta primeiro
-        if (v.myRank != null) {
-            val mine = v.table.firstOrNull { v.me != null && League.key(it.club) == League.key(v.me) }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("${v.myRank}º", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
-                Column(Modifier.padding(start = 12.dp)) {
-                    Text("de ${v.table.size} clubes" + (mine?.let { " • ${it.pts} pontos em ${it.j} jogos" } ?: ""), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("Tabela de: ${v.source ?: "—"}", fontSize = 11.5.sp, color = C.MUTED)
-                    if (v.tieAmbiguous) Text("Há empates em pontos, saldo e gols: o desempate real do OSM eu não sei.", fontSize = 11.5.sp, color = C.WARN)
-                }
-            }
-        } else {
-            Text("Ainda não consigo dizer sua posição: " + (if (c == null) "nenhum resultado lido." else "faltam resultados de algumas rodadas e a Classificação não foi lida inteira."), fontSize = 13.sp, color = C.WARN)
-        }
-        // o que falta
-        if (c != null) {
-            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                for ((r, n) in c.perRound) {
-                    val full = c.expectedPerRound != null && n == c.expectedPerRound
-                    Pill("J$r " + (if (full) "✓" else if (c.expectedPerRound != null && n < c.expectedPerRound) "$n/${c.expectedPerRound}" else "$n"), if (full) true else null)
-                }
-                for (r in c.missing) Pill("J$r ?", false)
-            }
-            if (c.missing.isNotEmpty() || c.partial.isNotEmpty()) Text(
-                "⚠ Abra os Resultados no OSM e role até o fim de " + (c.missing + c.partial).distinct().sorted().joinToString(", ") { "J$it" } + " (uma vez cada).", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 4.dp))
-            Text("${c.games} jogos de ${c.rounds} jornada(s) lidos • última leitura ${fmtAt(c.lastAt)}", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
-        }
-        if (v.partial && v.source?.startsWith("resultados") != true) Text("⚠ A Classificação guardada mistura leituras de horas diferentes. Abra a Classificação e role tudo de uma vez.", fontSize = 12.sp, color = C.WARN)
-
-        // gráfico da tabela
-        if (v.table.isNotEmpty()) {
-            Text("Pontos de cada clube", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 12.dp))
-            PointsChart(v.table, v.me)
-        }
-
-        v.movement?.let { m ->
-            Text("O que mudou desde a leitura anterior", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 12.dp))
-            Text(if (m.rankTo < m.rankFrom) "⬆ Você subiu: ${m.rankFrom}º → ${m.rankTo}º" else if (m.rankTo > m.rankFrom) "⬇ Você desceu: ${m.rankFrom}º → ${m.rankTo}º" else "➡ Você continua em ${m.rankTo}º", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            if (m.passed.isNotEmpty()) Text("Passou: ${m.passed.joinToString()}", fontSize = 13.sp, color = C.OK)
-            if (m.closed.isNotEmpty()) Text("Chegaram perto (até 3 pontos): ${m.closed.joinToString()}", fontSize = 13.sp, color = C.WARN)
-            if (m.affecting.isNotEmpty()) Text("Jogos: ${m.affecting.take(6).joinToString(" • ")}", fontSize = 12.sp, color = C.MUTED)
-        }
-
-        v.projection?.let { p ->
-            Text("O que pode acontecer", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = C.GOLD, modifier = Modifier.padding(top = 12.dp))
-            if (p.ifWin != null) {
-                Text("Se no próximo jogo você…", fontSize = 13.sp)
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((lab, pos, col) in listOf(Triple("vencer", p.ifWin, C.OK), Triple("empatar", p.ifDraw, C.GOLD), Triple("perder", p.ifLoss, C.WARN))) Column(
-                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(C.SURFACE2).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally
-                    ) { Text("${pos}º", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = col); Text(lab, fontSize = 11.5.sp, color = C.MUTED) }
-                }
-                Text("Posição na tabela de hoje (os outros jogos da rodada não entram).", fontSize = 11.sp, color = C.MUTED)
-            }
-            if (p.remaining >= 0 && v.table.isNotEmpty()) {
-                Text("Fim do campeonato (faltam ${p.remaining} jogos):", fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                FinishBand(v.table.size, p.confirmedBest, p.confirmedWorst, p.estimateRank, v.myRank)
-                Text("• Certeza: termina entre ${p.confirmedBest}º e ${p.confirmedWorst}º.", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-                p.estimateRank?.let { Text("• Palpite pelo seu ritmo: por volta do ${it}º (≈ ${p.estimatePts} pontos).", fontSize = 13.sp) }
-            }
-            for (l in p.limits) Text("⚠ $l", fontSize = 12.sp, color = C.WARN, modifier = Modifier.padding(top = 2.dp))
-            Text("É uma conta, não uma promessa de vaga, título ou permanência.", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-        }
-    }
+    // O card "Sua posição na liga" (jornadas lidas, tabela cruzada, cenários) foi RETIRADO em 25/11: com o print real do usuário ele inventava jornada (J22),
+    // contava rodada de copa como "não lida" (J6, J11), estimava errado quantos jogos cada jornada tem (10/13) e afirmava leitura incompleta de telas já lidas.
+    // A posição e os pontos vêm do Hub (Visão geral); a copa abaixo foi conferida com o print real.
+    if (v.cup.isEmpty()) return
     if (v.cup.isNotEmpty()) Fold("🏆", "Copa: resultados lidos", "${v.cup.values.sumOf { it.size }} jogos", startOpen = false) {
         for ((phase, gs) in v.cup) {
             Text(phaseName(phase), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = C.GOLD, modifier = Modifier.padding(top = 6.dp))
