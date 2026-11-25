@@ -160,7 +160,7 @@ internal fun SlotSquad(slot: Int, d: SlotData) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (n in MarketPlanner.needs(counts)) {
                 val ok = n.have >= n.target
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(C.SURFACE).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("${n.have}/${n.target}", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = if (ok) C.OK else C.WARN)
                     Text(n.cat, fontSize = 12.sp, color = C.MUTED)
                 }

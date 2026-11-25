@@ -134,18 +134,21 @@ import org.json.JSONObject
 
 // Cores do OSM: azul-marinho de estádio à noite, azul vivo dos botões e o amarelo dos destaques.
 internal object C {
-    val BG = Color(0xFF081A3C)
-    val SURFACE = Color(0xFF0F2347)
-    val SURFACE2 = Color(0xFF16325F)
-    val PRIMARY = Color(0xFF2AB4FF)
-    val GOLD = Color(0xFFFFC21A)
-    val OK = Color(0xFF3DDC84)
-    val BAD = Color(0xFFFF5C5C)
-    val WARN = Color(0xFFFFB74D)
-    val MUTED = Color(0xFF9FB4D3)
+    val BG = DS.BG
+    val SURFACE = DS.SURFACE
+    val SURFACE2 = DS.ELEVATED
+    val PRIMARY = DS.LIME          // ação primária e destaque (texto escuro sobre ele)
+    val INFO = DS.CYAN             // análise
+    val GOLD = DS.AMBER            // atenção
+    val OK = DS.GREEN
+    val BAD = DS.RED
+    val WARN = DS.AMBER
+    val MUTED = DS.TEXT2
+    val BORDER = DS.BORDER
+    val TEXT = DS.TEXT
     val WIN = Color(0xFF2EA043)
-    val DRAW = Color(0xFFF2C94C)
-    val LOSS = Color(0xFFE5484D)
+    val DRAW = DS.AMBER
+    val LOSS = DS.RED
 }
 
 class MainActivity : ComponentActivity() {
@@ -204,11 +207,11 @@ class MainActivity : ComponentActivity() {
             fun f(t: androidx.compose.ui.text.TextStyle) = t.copy(fontFamily = font)
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = C.PRIMARY, secondary = C.GOLD, background = C.BG, surface = C.SURFACE,
-                    onSurface = Color.White, onBackground = Color.White, surfaceVariant = C.SURFACE2,
-                    onPrimary = Color.White, secondaryContainer = C.SURFACE2,
-                    onSecondary = Color(0xFF0B1C3E), onSecondaryContainer = Color.White, onSurfaceVariant = Color(0xFFC9D8F0),
-                    primaryContainer = C.SURFACE2, onPrimaryContainer = Color.White, outline = Color(0xFF3F6AA8)
+                    primary = C.PRIMARY, secondary = C.INFO, tertiary = C.GOLD, background = C.BG, surface = C.SURFACE,
+                    onSurface = C.TEXT, onBackground = C.TEXT, surfaceVariant = C.SURFACE2,
+                    onPrimary = DS.ON_LIME, secondaryContainer = C.SURFACE2,
+                    onSecondary = DS.ON_LIME, onSecondaryContainer = C.TEXT, onSurfaceVariant = C.MUTED,
+                    primaryContainer = C.SURFACE2, onPrimaryContainer = C.TEXT, outline = C.BORDER, error = C.BAD
                 ),
                 typography = base.copy(
                     displayLarge = f(base.displayLarge), displayMedium = f(base.displayMedium), displaySmall = f(base.displaySmall),
@@ -222,7 +225,7 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.material3.LocalTextStyle provides f(base.bodyLarge)
                 ) {
                     androidx.compose.runtime.CompositionLocalProvider(
-                        androidx.compose.material3.LocalContentColor provides Color.White
+                        androidx.compose.material3.LocalContentColor provides C.TEXT
                     ) {
                         OsmAppBackground(Modifier.fillMaxSize()) { App() }
                     }
@@ -568,9 +571,9 @@ internal fun Panel(content: @Composable () -> Unit) {
 @Composable
 internal fun Pill(text: String, ok: Boolean? = null) {
     val c = when (ok) {
-        true -> Color(0xFF22C55E)
-        false -> Color(0xFFEF4444)
-        null -> Color(0xFF5FA8FF)
+        true -> C.OK
+        false -> C.BAD
+        null -> C.INFO
     }
     Box(
         Modifier.padding(end = 6.dp, top = 2.dp, bottom = 2.dp).clip(RoundedCornerShape(50))
@@ -604,10 +607,10 @@ internal fun Crest(slot: Int, size: Dp, team: String? = null) {
 @Composable
 internal fun Bar(pct: Int) {
     val f by androidx.compose.animation.core.animateFloatAsState(pct.coerceIn(0, 100) / 100f, androidx.compose.animation.core.tween(800), label = "bar")
-    Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(Color(0x33000000))) {
+    Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(C.SURFACE2)) {
         Box(
             Modifier.fillMaxWidth(f).fillMaxHeight().clip(RoundedCornerShape(50))
-                .background(Brush.horizontalGradient(listOf(Color(0xFF1E6BFF), Color(0xFF3DB2FF), Color(0xFF6EE7FF))))
+                .background(C.INFO)
         )
     }
 }
@@ -643,13 +646,13 @@ internal fun Fold(icon: String, title: String, badge: String? = null, startOpen:
     ) {
         Column(Modifier.animateContentSize()) {
             Row(
-                Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { open = !open }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     Modifier.size(38.dp).clip(RoundedCornerShape(12.dp))
-                        .background(Brush.linearGradient(listOf(Color(0xFF2B5BB8), Color(0xFF14306E))))
-                        .border(1.dp, Color(0x4072B8FF), RoundedCornerShape(11.dp)),
+                        .background(C.SURFACE2)
+                        .border(1.dp, C.BORDER, RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) { Text(icon, fontSize = 17.sp) }
                 Spacer(Modifier.width(12.dp))
@@ -1029,7 +1032,7 @@ internal fun SeasonEndCard(d: SlotData) {
     val rank = info?.rank
     Box(
         Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF3A2A06), Color(0xFF1A1F33), Color(0xFF0E2A5A))))
+            .background(C.SURFACE2)
             .border(1.dp, Color(0x55FFC83D), RoundedCornerShape(12.dp)).padding(14.dp)
     ) {
         Column(Modifier.fillMaxWidth()) {
@@ -1210,7 +1213,7 @@ internal fun HowItWorks() {
         for ((i, s) in steps.withIndex()) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(46.dp).clip(RoundedCornerShape(50)).background(Brush.linearGradient(listOf(Color(0xFF1F6BFF), Color(0xFF00B4D8)))),
+                    Modifier.size(46.dp).clip(RoundedCornerShape(50)).background(Brush.linearGradient(listOf(C.SURFACE2, C.SURFACE2))),
                     contentAlignment = Alignment.Center
                 ) { Text(s.first, fontSize = 20.sp, color = Color.White) }
                 Text(s.second, fontSize = 11.5.sp, color = C.MUTED, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
@@ -1233,7 +1236,7 @@ internal fun RivalChangedCard(changes: List<RivalWatch.Change>, onGenerate: () -
     )
     Column(
         Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(16.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xFF4A2A06), Color(0xFF2A1A08))))
+            .background(C.SURFACE2)
             .border(1.5.dp, Color(0xFFFFB020).copy(alpha = glow), RoundedCornerShape(16.dp)).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1258,7 +1261,7 @@ internal fun RivalChangedCard(changes: List<RivalWatch.Change>, onGenerate: () -
         }
         Box(
             Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp))
-                .background(Brush.horizontalGradient(listOf(Color(0xFFFFC21A), Color(0xFFFF9500)))).clickable { onGenerate() }.padding(vertical = 12.dp),
+                .background(C.GOLD).clickable { onGenerate() }.padding(vertical = 12.dp),
             contentAlignment = Alignment.Center
         ) { Text("⚡ Gerar nova tática", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2A1A08)) }
     }
@@ -1671,12 +1674,15 @@ internal suspend fun loadToday(ctx: Context): TodayData {
 
 @Composable
 internal fun ChipButton(text: String, colors: List<Color>, onClick: () -> Unit) {
+    val txt = if (DS.luminance(colors.first()) > 0.35) DS.ON_LIME else C.TEXT
     Box(
-        Modifier.clip(RoundedCornerShape(50))
+        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(50))
             .background(Brush.horizontalGradient(colors))
+            .border(1.dp, if (colors.first() == C.SURFACE2) C.BORDER else Color.Transparent, RoundedCornerShape(50))
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 7.dp)
-    ) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1) }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = txt, maxLines = 1) }
 }
 
 /**
@@ -1691,14 +1697,14 @@ internal fun OsmButton(modifier: Modifier = Modifier) {
     val active = tick >= 0 && Control.activeSession(ctx) != null
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (active) {
-            ChipButton("■ Encerrar", listOf(Color(0xFFD32F2F), Color(0xFFFF5C5C))) {
+            ChipButton("■ Encerrar", listOf(C.BAD, C.BAD)) {
                 AppScope.scope.launch { Control.end(ctx.applicationContext) }
                 Toast.makeText(ctx, "Captura encerrada. Processando em segundo plano…", Toast.LENGTH_SHORT).show()
             }
             Spacer(Modifier.width(6.dp))
-            ChipButton("⚽ OSM ↗", listOf(Color(0xFF1F6BFF), Color(0xFF00B4D8))) { openOsm(ctx) }
+            ChipButton("⚽ OSM ↗", listOf(C.SURFACE2, C.SURFACE2)) { openOsm(ctx) }
         } else {
-            ChipButton("▶ OSM + captura", listOf(Color(0xFF1F6BFF), Color(0xFF00B4D8))) {
+            ChipButton("▶ OSM + captura", listOf(DS.LIME, DS.LIME)) {
                 if (serviceEnabled(ctx) && Diag.serviceConnected) {
                     scope.launch {
                         Control.start(ctx)
@@ -1742,7 +1748,7 @@ internal fun App() {
         topBar = { BrandBar() },
         floatingActionButton = { if (openSlot == 0) OsmButton() },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF071530), tonalElevation = 0.dp) {
+            NavigationBar(containerColor = C.SURFACE, tonalElevation = 0.dp, modifier = Modifier.border(1.dp, C.BORDER)) {
                 items.forEachIndexed { i, (icon, name) ->
                     NavigationBarItem(
                         selected = tab == i,
@@ -1753,11 +1759,11 @@ internal fun App() {
                         },
                         label = {
                             val newArts = if (i == 4) Arts.unseenCount(ctx).also { UiBus.version } else 0
-                            Text(if (newArts > 0) "$name ($newArts)" else name, fontSize = 13.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+                            Text(if (newArts > 0) "$name ($newArts)" else name, fontSize = 12.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
                         },
                         colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                            indicatorColor = C.PRIMARY.copy(alpha = 0.20f), selectedTextColor = C.PRIMARY, unselectedTextColor = C.MUTED,
-                            selectedIconColor = C.PRIMARY, unselectedIconColor = C.MUTED
+                            indicatorColor = C.PRIMARY, selectedTextColor = C.PRIMARY, unselectedTextColor = C.MUTED,
+                            selectedIconColor = DS.ON_LIME, unselectedIconColor = C.MUTED
                         )
                     )
                 }
@@ -2026,7 +2032,7 @@ internal fun BrandBar() {
     val col = if (ready) C.OK else C.BAD
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(androidx.compose.ui.graphics.ImageBitmap.imageResource(R.drawable.g_logo), contentDescription = null, modifier = Modifier.size(46.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+            Image(androidx.compose.ui.graphics.ImageBitmap.imageResource(R.drawable.g_logo), contentDescription = "OSM AI Coach", modifier = Modifier.size(44.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row {
@@ -2048,7 +2054,7 @@ internal fun BrandBar() {
                 Text(if (ready) "Online" else "Parado", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = col)
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x662AB4FF), Color.Transparent))))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(C.BORDER))
     }
 }
 
@@ -2063,7 +2069,7 @@ internal fun PageTitle(icon: String, title: String, chip: String? = null) {
             Box(Modifier.padding(top = 2.dp).width(44.dp).height(3.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
         }
         if (chip != null) Box(
-            Modifier.clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, Color(0x552AB4FF), RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 8.dp)
+            Modifier.clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 8.dp)
         ) { Text(chip, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
     }
 }
@@ -2145,9 +2151,9 @@ internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
 /** Círculo com a força do time (como no pré-jogo do OSM). */
 @Composable
 internal fun StrengthBadge(value: Int?, size: Dp = 34.dp, highlight: Boolean = false) {
-    val col = if (highlight) C.PRIMARY else Color(0x992AB4FF)
+    val col = if (highlight) C.PRIMARY else C.BORDER
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(50)).background(Color(0xFF0A1830)).border(2.dp, col, RoundedCornerShape(50)),
+        Modifier.size(size).clip(RoundedCornerShape(50)).background(C.SURFACE).border(2.dp, col, RoundedCornerShape(50)),
         contentAlignment = Alignment.Center
     ) { Text(value?.toString() ?: "?", fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.ExtraBold, color = if (value == null) C.MUTED else Color.White) }
 }
@@ -2160,24 +2166,24 @@ internal fun MetricBar(label: String, pct: Int, valueText: String, color: Color,
             Text(label, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(valueText, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = color)
         }
-        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(Color(0xFF14264A))) {
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(C.SURFACE2)) {
             Box(Modifier.fillMaxWidth(pct.coerceIn(0, 100) / 100f).height(6.dp).clip(RoundedCornerShape(50)).background(color))
         }
     }
 }
 
-/** Botão grande ciano → azul, como nas referências. */
+/** Botão primário: verde-lima sólido, texto escuro, alvo de toque ≥ 48 dp. */
 @Composable
 internal fun CtaButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-            .background(Brush.horizontalGradient(if (enabled) listOf(Color(0xFF19C3FF), Color(0xFF1B6BFF)) else listOf(Color(0xFF28406B), Color(0xFF28406B))))
-            .clickable(enabled = enabled) { onClick() }.padding(vertical = 14.dp),
+        modifier.fillMaxWidth().heightIn(min = DS.TOUCH).clip(RoundedCornerShape(DS.RADIUS_CONTROL))
+            .background(if (enabled) DS.LIME else C.SURFACE2)
+            .clickable(enabled = enabled) { onClick() }.padding(vertical = 13.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            Text("  ›", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (enabled) DS.ON_LIME else C.MUTED)
+            Text("  ›", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = if (enabled) DS.ON_LIME else C.MUTED)
         }
     }
 }
@@ -2186,7 +2192,7 @@ internal fun CtaButton(text: String, modifier: Modifier = Modifier, enabled: Boo
 @Composable
 internal fun GhostButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.3.dp, Color(0x802AB4FF), RoundedCornerShape(14.dp))
+        modifier.fillMaxWidth().heightIn(min = DS.TOUCH).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CONTROL))
             .clickable { onClick() }.padding(vertical = 13.dp),
         contentAlignment = Alignment.Center
     ) { Text(text, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = C.PRIMARY) }
@@ -2199,8 +2205,8 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
     val at = s.nextAt?.takeIf { it > now && !s.ended && s.state == null }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().clickable { onOpen() }.padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Brush.horizontalGradient(listOf(Color(0xFF1E88E5), Color(0xFF1565C0)))).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                Text("S${s.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(C.PRIMARY).padding(horizontal = 10.dp, vertical = 5.dp)) {
+                Text("S${s.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = DS.ON_LIME)
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
@@ -2221,7 +2227,7 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
                 s.needsResult -> "📊 O jogo já passou: registre o resultado para o app aprender."
                 else -> "📖 Leia o Pré-jogo e o Calendário no OSM para o app saber o próximo jogo."
             }
-            Text(msg, fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).padding(12.dp))
+            Text(msg, fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(C.SURFACE).padding(12.dp))
             if (s.needsResult) CtaButton("Registrar resultado", Modifier.padding(top = 12.dp)) { onTab(5) } else CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }
             return@Column
         }
@@ -2947,14 +2953,15 @@ internal fun SlotTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit
             val on = i == selected
             Row(
                 Modifier.clip(RoundedCornerShape(50))
-                    .background(if (on) Brush.horizontalGradient(listOf(Color(0xFF1E9BFF), Color(0xFF1665C8))) else Brush.horizontalGradient(listOf(C.SURFACE, C.SURFACE)))
-                    .border(1.dp, if (on) Color(0x6672B8FF) else Color(0x2272B8FF), RoundedCornerShape(50))
-                    .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 9.dp),
+                    .background(if (on) C.PRIMARY else C.SURFACE)
+                    .border(1.dp, if (on) C.PRIMARY else C.BORDER, RoundedCornerShape(50))
+                    .heightIn(min = 44.dp)
+                    .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(icons.getOrElse(i) { "•" }, fontSize = 14.sp)
                 Spacer(Modifier.width(6.dp))
-                Text(t, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) Color.White else C.MUTED, maxLines = 1)
+                Text(t, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) DS.ON_LIME else C.MUTED, maxLines = 1)
             }
         }
     }
@@ -3539,7 +3546,7 @@ internal fun fmtM(m: Double?): String = if (m == null) "?" else if (m < 0) "-" +
 internal fun StepHeader(n: Int, icon: String, title: String, badge: String? = null) {
     Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(28.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY), contentAlignment = Alignment.Center) {
-            Text("$n", fontWeight = FontWeight.ExtraBold, color = Color.White, fontSize = 14.sp)
+            Text("$n", fontWeight = FontWeight.ExtraBold, color = DS.ON_LIME, fontSize = 14.sp)
         }
         Text("  $icon $title", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
         if (badge != null) Pill(badge)
@@ -3572,7 +3579,7 @@ internal fun SlotDirector(slot: Int, d: SlotData) {
     // ---- onde o time está
     Box(
         Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF0E2A5A), Color(0xFF16213D))))
+            .background(C.SURFACE2)
             .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp)).padding(14.dp)
     ) {
         Column(Modifier.fillMaxWidth()) {

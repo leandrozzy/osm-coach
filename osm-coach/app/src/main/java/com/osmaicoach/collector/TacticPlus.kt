@@ -127,7 +127,7 @@ internal fun AuditView(r: TacticAudit.Result) {
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((lab, n, col) in listOf(Triple("Problemas", r.problems.size, C.BAD), Triple("Bom", r.good.size, C.OK), Triple("Sugestões", r.tips.size, C.GOLD))) {
                 Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).border(1.dp, Color(0x332AB4FF), RoundedCornerShape(12.dp)).padding(vertical = 8.dp),
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(12.dp)).padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(lab, fontSize = 11.5.sp, color = C.MUTED)
@@ -175,7 +175,7 @@ internal fun PlanBView(a: AltPlan) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((lab, v, sub) in listOf(Triple("Pressão", a.pressure, Osm.pressureLabel(a.pressure)), Triple("Estilo", a.mentality, Osm.mentalityLabel(a.mentality)), Triple("Ritmo", a.tempo, Osm.tempoLabel(a.tempo)))) {
                 Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).border(1.dp, Color(0x332AB4FF), RoundedCornerShape(12.dp)).padding(vertical = 8.dp),
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(12.dp)).padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(lab, fontSize = 11.5.sp, color = C.MUTED)

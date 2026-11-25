@@ -207,7 +207,7 @@ internal fun StadiumCard(c: WorkCard, now: Long, modifier: Modifier = Modifier) 
             Box(Modifier.weight(1f).padding(horizontal = 4.dp).height(5.dp).clip(RoundedCornerShape(50)).background(Color(0xFF1B3D7A))) {
                 if (building || ended) Box(
                     Modifier.fillMaxHeight().fillMaxWidth(if (ended) 1f else 0.5f)
-                        .background(Brush.horizontalGradient(listOf(Color(0xFF3DB2FF), Color(0xFF7FD3FF))))
+                        .background(C.INFO)
                 )
             }
             Text(c.level?.let { (it + 1).toString() } ?: "?", fontSize = 11.5.sp, color = C.MUTED, fontWeight = FontWeight.Bold)

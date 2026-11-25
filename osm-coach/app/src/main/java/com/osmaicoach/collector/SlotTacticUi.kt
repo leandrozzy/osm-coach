@@ -381,7 +381,7 @@ internal fun TacticHero(d: SlotData) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((lab, v, sub) in listOf(Triple("Pressão", pr, Osm.pressureLabel(pr)), Triple("Estilo", me, Osm.mentalityLabel(me)), Triple("Ritmo", te, Osm.tempoLabel(te)))) {
                 Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.dp, Color(0x332AB4FF), RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(lab, fontSize = 12.sp, color = C.MUTED)
