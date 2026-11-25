@@ -180,7 +180,7 @@ class Repo(private val ctx: Context) {
         if (slot == null) return 0
         val n = applyTyped(slot, ex, source, now)
         // Base Mundial: registra as observações lidas (só grava; falha ou lentidão nunca afetam o OCR/slots)
-        runCatching { WorldOcr.fromExtraction(ctx, slot, ex, now) }
+        runCatching { WorldOcr.submit(ctx, slot, ex, now) }
         // registra que a tela foi lida (base do "telas para atualizar"): só se trouxe conteúdo de verdade
         val meaningful = when (ex.type) {
             // tela reconhecida pelo classificador = você passou por ela (mesmo sem treinador/obra/listagem para ler)

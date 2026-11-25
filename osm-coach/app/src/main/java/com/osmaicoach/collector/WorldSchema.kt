@@ -5,7 +5,7 @@ package com.osmaicoach.collector
  * Camadas: REAL (football_*), OSM (observações/mapeamentos por slot) e CORRESPONDÊNCIA (football_osm_entity_mappings). Dado externo nunca grava força/valor/atributo do jogo.
  */
 object WorldSchema {
-    const val VERSION = 2
+    const val VERSION = 3
     /** Colunas novas (v2): ALTER aditivo, ignorado se já existir. */
     val ALTERS = listOf("ALTER TABLE football_countries ADD COLUMN osm_seen INTEGER NOT NULL DEFAULT 0")
     val DDL: List<String> = listOf(
@@ -46,6 +46,7 @@ object WorldSchema {
         "CREATE INDEX IF NOT EXISTS ix_alias_key ON football_entity_aliases(entity_type, alias_key)", "CREATE INDEX IF NOT EXISTS ix_ext_entity ON football_external_ids(entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS ix_obs_status ON football_ocr_observations(status, at)", "CREATE UNIQUE INDEX IF NOT EXISTS ux_obs ON football_ocr_observations(kind, norm, slot, capture_key)", "CREATE INDEX IF NOT EXISTS ix_obs_norm ON football_ocr_observations(kind, norm, slot)",
         "CREATE INDEX IF NOT EXISTS ix_map_status ON football_osm_entity_mappings(status)", "CREATE INDEX IF NOT EXISTS ix_squad_player ON football_squads(player_id)",
+        "CREATE INDEX IF NOT EXISTS ix_clubs_osm ON football_clubs(osm_seen)", "CREATE INDEX IF NOT EXISTS ix_players_osm ON football_players(osm_seen)", "CREATE INDEX IF NOT EXISTS ix_comp_osm ON football_competitions(osm_seen)", "CREATE INDEX IF NOT EXISTS ix_players_nat ON football_players(nationality_iso)", "CREATE INDEX IF NOT EXISTS ix_clubs_iso ON football_clubs(iso2)",
         "CREATE INDEX IF NOT EXISTS ix_jobs_src ON football_sync_jobs(source_id, started)", "CREATE INDEX IF NOT EXISTS ix_metrics ON football_coverage_metrics(metric, scope, at)"
     )
 }

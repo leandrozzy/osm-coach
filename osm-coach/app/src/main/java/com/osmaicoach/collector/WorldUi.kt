@@ -130,7 +130,7 @@ internal fun <T> WorldPaged(key: Any?, empty: String, load: (WorldSql, Int) -> L
 @Composable
 internal fun <T> rememberWorld(initial: T, key: Any? = null, loader: (WorldDb) -> T): T {
     val ctx = LocalContext.current
-    val tick = rememberTick(5000L)
+    val tick = rememberTick(20000L)
     return rememberLoaded(initial, tick, Pair(key, UiBus.version)) { loader(WorldDb.get(ctx)) }
 }
 
@@ -262,7 +262,7 @@ internal fun CompRowView(r: WorldQuery.CompRow, onClick: () -> Unit) {
 @Composable
 internal fun ClubRowView(r: WorldQuery.ClubRow, onClick: () -> Unit) {
     WorldCard(onClick = onClick) { Row(verticalAlignment = Alignment.CenterVertically) {
-        RivalShield(r.name, 40.dp); Spacer(Modifier.width(8.dp))
+        RivalShield(r.name, 40.dp, web = false); Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) { Text(r.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(listOfNotNull(r.city, r.league, if (r.marker.isNotEmpty()) markerLabel(r.marker) else null).joinToString(" • ").ifEmpty { "sem detalhes" }, fontSize = 12.5.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         FlagBadge(r.iso?.uppercase(), null, null, 28.dp, 20.dp)
         if (r.osmSeen) DsChip("OSM", C.OK)

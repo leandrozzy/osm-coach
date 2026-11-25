@@ -20,23 +20,26 @@ object WorldClean {
     }
     fun isWomen(s: String?): Boolean = s != null && WorldNorm.fold(s).let { WOMEN.containsMatchIn(it) || it.endsWith(" w") }
 
-    /** Remove o que não serve ao OSM (uma passada, idempotente). Devolve quantas linhas saíram. */
+    /** Remove o que não serve ao OSM (idempotente). Em BLOCOS de 5 000 linhas com transação curta: nunca carrega a tabela inteira na memória nem segura o banco por muito tempo. */
     fun purge(db: WorldSql): Long {
         var n = 0L
-        fun ids(sql: String, ok: (List<String?>) -> Boolean): List<Long> = ArrayList<Long>().also { out -> for (r in db.rows(sql)) if (!ok(r)) out.add(r[0]!!.toLong()) }
-        fun del(table: String, ids: List<Long>) {
-            for (chunk in ids.chunked(500)) { val ph = chunk.joinToString(","); n += db.exec("DELETE FROM $table WHERE id IN ($ph)", emptyArray()) }
+        fun sweep(table: String, cols: String, ok: (List<String?>) -> Boolean) {
+            var last = 0L
+            while (true) {
+                val page = db.rows("SELECT id,$cols FROM $table WHERE id>? ORDER BY id LIMIT 5000", last.toString())
+                if (page.isEmpty()) break
+                last = page.last()[0]!!.toLong()
+                val bad = page.filter { !ok(it) }.map { it[0]!!.toLong() }
+                if (bad.isNotEmpty()) { db.begin(); try { for (c in bad.chunked(400)) n += db.exec("DELETE FROM $table WHERE id IN (${c.joinToString(",")})", emptyArray()); db.commit() } catch (e: Exception) { runCatching { db.rollback() }; throw e } }
+                Thread.sleep(5)    // deixa o OCR/captura usar o banco entre os blocos
+            }
         }
-        db.begin()
-        try {
-            del("football_players", ids("SELECT id,name FROM football_players") { nameOk(it[1]) })
-            del("football_clubs", ids("SELECT id,name,marker,category FROM football_clubs") { nameOk(it[1]) && !(it[2] ?: "").contains("W") && !isWomen(it[1]) && !isWomen(it[3]) })
-            del("football_competitions", ids("SELECT id,name,gender,category FROM football_competitions") { nameOk(it[1]) && !isWomen(it[1]) && !isWomen(it[3]) && (it[2] ?: "").lowercase() !in setOf("f", "female", "women", "feminino") })
-            n += db.exec("DELETE FROM football_entity_aliases WHERE entity_type='club' AND entity_id NOT IN (SELECT id FROM football_clubs)", emptyArray())
-            n += db.exec("DELETE FROM football_entity_aliases WHERE entity_type='player' AND entity_id NOT IN (SELECT id FROM football_players)", emptyArray())
-            n += db.exec("DELETE FROM football_competition_clubs WHERE club_id NOT IN (SELECT id FROM football_clubs) OR competition_id NOT IN (SELECT id FROM football_competitions)", emptyArray())
-            db.commit()
-        } catch (e: Exception) { runCatching { db.rollback() }; throw e }
+        sweep("football_players", "name") { nameOk(it[1]) }
+        sweep("football_clubs", "name,marker,category") { nameOk(it[1]) && !(it[2] ?: "").contains("W") && !isWomen(it[1]) && !isWomen(it[3]) }
+        sweep("football_competitions", "name,gender,category") { nameOk(it[1]) && !isWomen(it[1]) && !isWomen(it[3]) && (it[2] ?: "").lowercase() !in setOf("f", "female", "women", "feminino") }
+        n += db.exec("DELETE FROM football_entity_aliases WHERE entity_type='club' AND entity_id NOT IN (SELECT id FROM football_clubs)", emptyArray())
+        n += db.exec("DELETE FROM football_entity_aliases WHERE entity_type='player' AND entity_id NOT IN (SELECT id FROM football_players)", emptyArray())
+        n += db.exec("DELETE FROM football_competition_clubs WHERE club_id NOT IN (SELECT id FROM football_clubs) OR competition_id NOT IN (SELECT id FROM football_competitions)", emptyArray())
         return n
     }
 }

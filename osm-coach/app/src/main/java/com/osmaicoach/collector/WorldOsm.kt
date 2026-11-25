@@ -105,7 +105,7 @@ object WorldOsm {
     fun prefetchImages(ctx: Context, photoBudget: Int = 8): Int {
         val db = WorldDb.get(ctx)
         db.query("SELECT iso2 FROM football_countries WHERE osm_seen>0") { it.getString(0) }.forEach { FlagWeb.request(ctx, it) }
-        db.query("SELECT name FROM football_clubs WHERE osm_seen>0 ORDER BY osm_seen DESC LIMIT 400") { it.getString(0) }.forEach { CrestWeb.request(ctx, it) }
+        db.query("SELECT name FROM football_clubs WHERE osm_seen>0 ORDER BY osm_seen DESC LIMIT 30") { it.getString(0) }.filter { CrestWeb.find(ctx.filesDir, it) == null }.forEach { CrestWeb.request(ctx, it) }
         var got = 0
         val ids = db.query("SELECT id FROM football_players WHERE osm_seen>0 AND wikidata IS NOT NULL ORDER BY osm_seen DESC LIMIT 200") { it.getLong(0) }
         for (id in ids) {

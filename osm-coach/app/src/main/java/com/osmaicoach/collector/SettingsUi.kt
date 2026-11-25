@@ -890,7 +890,7 @@ internal fun SettingsTab() {
         }
         val readOk = serviceEnabled(ctx) && Diag.serviceConnected && batteryUnrestricted(ctx)
         SectionLabel("Sistema", "Leitura das telas do OSM e inteligência artificial")
-        Fold("📱", "Leitura automática", if (readOk) "ok" else "⚠", startOpen = !readOk) {
+        Fold("📱", "Leitura automática", if (readOk) "ok" else "⚠", startOpen = false) {
             StatusLight(serviceEnabled(ctx), "Acessibilidade ativada")
             StatusLight(Diag.serviceConnected && tick >= 0, "Serviço conectado")
             StatusLight(batteryUnrestricted(ctx), "Bateria sem restrição")
@@ -908,7 +908,7 @@ internal fun SettingsTab() {
             ) { Text("Bateria: não otimizar este app") }
         }
         val anyKey = listOf(gKey, cKey, mKey, oKey, clKey).any { it.isNotBlank() }
-        Fold("🤖", "Inteligência artificial", if (!anyKey) "sem chave" else null, startOpen = !anyKey) {
+        Fold("🤖", "Inteligência artificial", if (!anyKey) "sem chave" else null, startOpen = false) {
             val saveAll = {
                 Settings.put(ctx, Settings.GEMINI_KEY, gKey)
                 Settings.put(ctx, Settings.GEMINI_MODEL, gModel.ifBlank { Settings.DEFAULT_GEMINI_MODEL })
@@ -1036,7 +1036,7 @@ internal fun GptGuideFold() {
         val d = (System.currentTimeMillis() - st.at) / 86400000L
         if (d <= 0) "atualizado hoje" else "atualizado há $d dia(s)"
     }
-    Fold("🤖", "Guia para o ChatGPT", if (st.at == 0L) "novo" else if (st.changedSinceSent) "reenviar" else "em dia", startOpen = true) {
+    Fold("🤖", "Guia para o ChatGPT", if (st.at == 0L) "novo" else if (st.changedSinceSent) "reenviar" else "em dia") {
         Text("O guia é um arquivo de texto com tudo que o app leu e serve para as imagens: clubes (nome do jogo → nome real), ligas, seu elenco, melhores do rival e jogos recentes. " +
             "O app o atualiza sozinho 1 vez por semana. Suba no Projeto do ChatGPT (Arquivos do projeto) e reenvie quando aparecer \"reenviar\".", fontSize = 13.sp, color = C.MUTED)
         Text(age + (if (st.clubs > 0) " • ${st.clubs} clubes" else "") + (if (st.at > 0L) (if (st.changedSinceSent) " • 🆕 mudou desde o último envio" else " • ✅ já enviado") else ""), fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp))
@@ -1056,13 +1056,13 @@ internal fun GptGuideFold() {
 internal fun BattleLabPanel() {
     val ctx = LocalContext.current
     var bTeam by remember { mutableStateOf(Settings.get(ctx, Battle.SETTING, Battle.DEFAULT_TEAM)) }
-    Fold("⚔", "Minha equipe de batalha", bTeam.ifBlank { Battle.DEFAULT_TEAM }, startOpen = true) {
+    Fold("⚔", "Minha equipe de batalha", bTeam.ifBlank { Battle.DEFAULT_TEAM }) {
         Text("O nome com que você aparece nas batalhas. O app usa para achar o seu lado (esquerda ou direita) na tela de resultados da batalha. Vale para as próximas leituras; o histórico de batalhas já lidas não muda. Uma batalha nova com outras equipes é reconhecida sozinha.", fontSize = 13.sp, color = C.MUTED)
         OutlinedTextField(bTeam, { bTeam = it; Settings.put(ctx, Battle.SETTING, it.trim()) }, label = { Text("Minha equipe de batalha") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
         Text("Padrão: ${Battle.DEFAULT_TEAM}", fontSize = 12.sp, color = C.MUTED)
     }
     var labOn by remember { mutableStateOf(Settings.get(ctx, "lab_on", "0") == "1") }
-    Fold("🧪", "Modo de teste do motor novo", if (labOn) "ligado" else "desligado", startOpen = true) {
+    Fold("🧪", "Modo de teste do motor novo", if (labOn) "ligado" else "desligado") {
         Text("Roda um segundo motor em paralelo só para comparar. A tática recomendada continua sendo a do motor atual; o novo aparece num bloco fechado na aba Tática do slot. Antes de cada jogo o app congela as previsões dos dois (sem refazer depois do resultado). Desligado por padrão.", fontSize = 13.sp, color = C.MUTED)
         SwitchRow("Ligar o modo de teste", labOn) { labOn = it; Settings.put(ctx, "lab_on", if (it) "1" else "0") }
         if (labOn) {

@@ -746,11 +746,11 @@ internal fun initials(name: String): String {
 
 /** Escudo desenhado para o rival (cor fixa pelo nome, com as iniciais). */
 @Composable
-internal fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
+internal fun RivalShield(name: String?, size: Dp, slot: Int? = null, web: Boolean = true) {
     val ctx = LocalContext.current
     val ver = UiBus.version
     // escudo REAL do rival (recorte do Pré-jogo), só enquanto for o mesmo rival do recorte
-    androidx.compose.runtime.LaunchedEffect(name) { CrestWeb.request(ctx, name) }
+    if (web) androidx.compose.runtime.LaunchedEffect(name) { CrestWeb.request(ctx, name) }
     val real = remember(name, ver) {
         if (name == null) null else runCatching {
             // escudo real da web primeiro; senão o arquivo global por nome do time (calendário/pré-jogo/central: o escudo de um clube não muda)

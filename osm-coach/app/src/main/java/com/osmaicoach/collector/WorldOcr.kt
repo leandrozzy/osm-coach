@@ -12,7 +12,11 @@ import org.json.JSONObject
 object WorldOcr {
     private const val KIND_CLUB = "club"; private const val KIND_PLAYER = "player"
 
-    /** Chamado por `Repo.apply` depois de gravar a tela: barato, sem rede, falha isolada. */
+    /** Fila própria (1 thread, prioridade baixa, no máx. 40 pendentes — descarta as mais antigas): o OCR/captura NUNCA espera o banco da Base. */
+    private val exec = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.ArrayBlockingQueue(40), { r -> Thread(r, "world-ocr").apply { priority = Thread.MIN_PRIORITY; isDaemon = true } }, java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
+    fun submit(ctx: Context, slot: Int, ex: Extraction, now: Long) { val app = ctx.applicationContext; exec.execute { runCatching { fromExtraction(app, slot, ex, now) } } }
+
+    /** Roda na fila de [submit]: barato, sem rede, falha isolada. */
     fun fromExtraction(ctx: Context, slot: Int, ex: Extraction, now: Long) {
         val db: WorldSql = AndroidSql(WorldDb.get(ctx).w)
         val capture = "${ex.type}:${now / 3_600_000L}"           // mesma tela na mesma hora = a MESMA evidência
