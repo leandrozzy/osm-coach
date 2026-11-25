@@ -67,4 +67,9 @@ class WorldRemoteTest {
             assertNull(bad, WorldRemote.valid(bad, k))
         assertNull(WorldRemote.valid("https://abcd.supabase.co", "curta"))
     }
+
+    @Test fun newStyleKeysGoOnlyInApikeyHeader() {
+        val n = WorldRemote.headersFor("sb_publishable_" + "a".repeat(30)); assertEquals(setOf("apikey", "Accept"), n.keys)
+        val l = WorldRemote.headersFor("eyJ" + "a".repeat(40)); assertTrue(l.containsKey("Authorization"))
+    }
 }

@@ -27,7 +27,9 @@ object WorldRemote {
         return if (host.endsWith(".supabase.co") && host.length > ".supabase.co".length) Cfg(url, key) else null
     }
 
-    private fun headers(c: Cfg) = mapOf("apikey" to c.key, "Authorization" to "Bearer ${c.key}", "Accept" to "application/json")
+    /** Chaves novas (`sb_publishable_…`/`sb_secret_…`) NÃO são JWT: só no cabeçalho apikey. As legadas (JWT `eyJ…`) também vão em Authorization. */
+    internal fun headersFor(key: String) = if (key.startsWith("sb_")) mapOf("apikey" to key, "Accept" to "application/json") else mapOf("apikey" to key, "Authorization" to "Bearer $key", "Accept" to "application/json")
+    private fun headers(c: Cfg) = headersFor(c.key)
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     /** GET JSON. (código HTTP, corpo). Lança só em falha de rede. */

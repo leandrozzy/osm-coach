@@ -194,8 +194,10 @@ class Supa:
     def call(self, method, path, body=None, retries=5):
         data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
         for i in range(retries):
-            req = urllib.request.Request(self.url + path, data=data, method=method, headers={
-                "apikey": self.key, "Authorization": f"Bearer {self.key}", "Content-Type": "application/json", "Prefer": "return=representation"})
+            hdr = {"apikey": self.key, "Content-Type": "application/json", "Prefer": "return=representation"}
+            if not self.key.startswith("sb_"):   # chaves novas (sb_secret_…) não são JWT: só apikey; as legadas (eyJ…) também em Authorization
+                hdr["Authorization"] = f"Bearer {self.key}"
+            req = urllib.request.Request(self.url + path, data=data, method=method, headers=hdr)
             try:
                 with urllib.request.urlopen(req, timeout=180) as r:
                     t = r.read().decode("utf-8"); return json.loads(t) if t else None
