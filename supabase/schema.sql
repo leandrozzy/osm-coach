@@ -27,6 +27,20 @@ create table if not exists wf_runs(
   id bigint generated always as identity primary key, source text not null, started_at timestamptz not null default now(), finished_at timestamptz,
   rows_read bigint default 0, rows_changed bigint default 0, rows_skipped bigint default 0, status text, message text);
 
+-- ===== imagens que o APP usa (bandeiras, escudos, fotos): o app envia cada imagem nova e busca daqui antes de baixar da internet =====
+-- Bucket público de leitura; o app (chave anon) só pode INSERIR (png/jpg/webp até 300 KB, caminho flags|crests|photos/nome.png, sem sobrescrever nem apagar).
+create table if not exists wf_images(
+  id bigint generated always as identity primary key,
+  kind text not null check (kind in ('flag','crest','photo')),
+  key text not null check (key ~ '^[a-z0-9._-]{1,120}$'),
+  path text not null, bytes int not null check (bytes between 100 and 307200), sha text, source text default 'app',
+  created_at timestamptz not null default now(), unique(kind, key));
+alter table wf_images enable row level security;
+drop policy if exists wf_images_read on wf_images; create policy wf_images_read on wf_images for select to anon, authenticated using (true);
+drop policy if exists wf_images_ins on wf_images; create policy wf_images_ins on wf_images for insert to anon, authenticated with check (path = case kind when 'flag' then 'flags/' when 'crest' then 'crests/' else 'photos/' end || key || '.png');
+grant select, insert on wf_images to anon, authenticated;
+
+
 create index if not exists wf_clubs_fold_trgm on wf_clubs using gin (name_fold gin_trgm_ops);
 create index if not exists wf_clubs_alias on wf_clubs using gin (alias_fold);
 create index if not exists wf_clubs_upd on wf_clubs(updated_at);
@@ -70,7 +84,7 @@ $$;
 create or replace function wf_stats() returns jsonb language sql stable as $$
   select jsonb_build_object(
     'countries', (select count(*) from wf_countries), 'competitions', (select count(*) from wf_competitions),
-    'clubs', (select count(*) from wf_clubs), 'players', (select count(*) from wf_players),
+    'clubs', (select count(*) from wf_clubs), 'players', (select count(*) from wf_players), 'images', (select count(*) from wf_images),
     'last_run', (select to_jsonb(r) from (select source, finished_at, rows_read, rows_changed, status, message from wf_runs where finished_at is not null order by id desc limit 1) r));
 $$;
 
@@ -141,3 +155,11 @@ revoke execute on function wf_upsert_clubs(jsonb), wf_upsert_players(jsonb), wf_
 grant execute on function wf_upsert_clubs(jsonb), wf_upsert_players(jsonb), wf_upsert_competitions(jsonb), wf_upsert_countries(jsonb) to service_role;
 grant select on wf_countries, wf_competitions, wf_clubs, wf_players, wf_runs to anon, authenticated;
 grant execute on function wf_match_clubs(text,int), wf_match_players(text,text,text,int), wf_match_competitions(text,int), wf_stats() to anon, authenticated;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('wf-images', 'wf-images', true, 307200, array['image/png','image/jpeg','image/webp'])
+on conflict (id) do update set public = true, file_size_limit = 307200, allowed_mime_types = array['image/png','image/jpeg','image/webp'];
+drop policy if exists wf_images_obj_read on storage.objects;
+create policy wf_images_obj_read on storage.objects for select to anon, authenticated using (bucket_id = 'wf-images');
+drop policy if exists wf_images_obj_ins on storage.objects;
+create policy wf_images_obj_ins on storage.objects for insert to anon, authenticated with check (bucket_id = 'wf-images' and name ~ '^(flags|crests|photos)/[a-z0-9._-]{1,120}\.png$');

@@ -12,6 +12,8 @@ A importação em massa no aparelho (148 MB, travava o app) foi REMOVIDA. A base
 - App (`WorldRemote`): URL + chave **anon** em Ajustes (nunca no repositório; diagnóstico mascara `*_key`). Lê o OCR → pede ao Supabase só os candidatos daquele nome → guarda cópia local pequena (só o que o OSM mostrou) → identifica (`WorldIdentity`, inalterado) → 1x/dia pergunta só o que mudou (`updated_at`). Sem rede, a leitura fica "nova" e é avaliada depois (nunca vira "desconhecido" por falta de candidatos).
 - Migração única (`WorldClean.slim`): apaga da cópia local o que veio da importação antiga e o OSM nunca mostrou, e compacta o arquivo.
 - O OCR grava as observações numa fila própria de baixa prioridade (`WorldOcr.submit`): a captura nunca espera o banco da Base.
+- Imagens (`WorldImagesRemote`): bucket público `wf-images`; o app envia bandeiras (`flags/`), escudos da web (`crests/web/`) e fotos (`photos/`) que já tem e busca lá o que o OSM mostrou e falta no aparelho, antes de ir à internet. Não envia escudos/bandeiras manuais nem recortes do jogo.
+- Atualização dos DADOS: o Supabase NÃO se atualiza sozinho (só guarda o que o carregador gravou). Reep v0 é congelada e o OpenFootballBase só muda quando o mantenedor atualiza; transferências e mudanças de divisão exigem uma fonte viva (ver conversa de 25/11: Wikidata por Supabase Cron + Edge Function, ou API-Football) — NÃO implementado.
 Não validado: o Supabase real (não há projeto/credenciais neste ambiente), a 1ª carga completa e o tempo de resposta no aparelho.
 
 ## Foco no OSM (revisão 25/11)

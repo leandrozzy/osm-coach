@@ -27,6 +27,7 @@ object WorldSync {
     @Volatile var progress: Float? = null; private set
     @Volatile var counters: WorldImport.Counters = WorldImport.Counters(); private set
     /** Etapa geral da sincronização ("2 de 6") — a barra geral = etapas concluídas + progresso da atual. */
+    @Volatile var imagesNote: String = ""; private set
     @Volatile var step: Int = 0; private set
     @Volatile var steps: Int = 0; private set
     val overall: Float? get() = if (running == null || steps == 0) null else ((step.toFloat() + (progress ?: 0f)) / steps).coerceIn(0f, 1f)
@@ -87,9 +88,12 @@ object WorldSync {
             step = 2; running = "Atualizando o que mudou no Supabase"; UiBus.bump()
             val changed = runCatching { WorldRemote.refreshCache(ctx, AndroidSql(db.w)) }.getOrDefault(0)
             step = 3; running = "Bandeiras, escudos e fotos do OSM"; progress = null; UiBus.bump()
-            runCatching { WorldOsm.prefetchImages(ctx) }
+            val got = runCatching { WorldImagesRemote.pull(ctx) }.getOrDefault(0)        // 1º: o que já está no Supabase (evita baixar da internet)
+            runCatching { WorldOsm.prefetchImages(ctx) }                                 // 2º: o que falta, pelos baixadores do app
+            val sent = runCatching { WorldImagesRemote.push(ctx) }.getOrDefault(0)       // 3º: o que o app tem e o Supabase ainda não
+            imagesNote = "Imagens: $got baixadas do Supabase • $sent enviadas"
             runCatching { WorldCoverage.snapshot(db) }
-            lastMessage = "Concluída: " + WorldOsm.lastReport + (if (changed > 0) " $changed itens atualizados do Supabase." else "")
+            lastMessage = "Concluída: " + WorldOsm.lastReport + (if (changed > 0) " $changed itens atualizados do Supabase." else "") + " " + imagesNote
         } finally { running = null; progress = null; step = 0; steps = 0; lock.unlock(); UiBus.bump() }
     }
 
@@ -105,7 +109,7 @@ object WorldSync {
         if (WorldRemote.cfg(ctx) == null) { WorldSources.status(db, WorldSources.SUPABASE, "aguardando configuração", "Cole a URL e a chave em Fontes de Dados → Configurar."); return Result.failure(IllegalStateException("não configurado")) }
         val r = WorldRemote.stats(ctx)
         r.fold(
-            { st -> WorldSources.status(db, WorldSources.SUPABASE, if (st.players + st.clubs > 0) "atualizada" else "aguardando sincronização", "Conectado: ${st.countries} países • ${st.competitions} competições • ${st.clubs} clubes • ${st.players} jogadores" + (st.lastRun?.let { " • última carga: $it" } ?: "")); db.w.execSQL("UPDATE football_sources SET verified_at=? WHERE id=?", arrayOf(System.currentTimeMillis(), WorldSources.SUPABASE)) },
+            { st -> WorldSources.status(db, WorldSources.SUPABASE, if (st.players + st.clubs > 0) "atualizada" else "aguardando sincronização", "Conectado: ${st.countries} países • ${st.competitions} competições • ${st.clubs} clubes • ${st.players} jogadores • ${st.images} imagens" + (st.lastRun?.let { " • última carga: $it" } ?: "")); db.w.execSQL("UPDATE football_sources SET verified_at=? WHERE id=?", arrayOf(System.currentTimeMillis(), WorldSources.SUPABASE)) },
             { e -> WorldSources.status(db, WorldSources.SUPABASE, "indisponível", e.message) })
         UiBus.bump()
         return r

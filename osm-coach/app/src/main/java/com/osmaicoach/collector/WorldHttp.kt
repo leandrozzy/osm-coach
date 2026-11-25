@@ -68,4 +68,21 @@ object WorldHttp {
             return Pair(r.code, out.toString("UTF-8"))
         }
     }
+
+    /** POST (envio de imagem e linha de índice ao Supabase). Mesmas regras de destino; sem seguir redirecionamento. (código, corpo curto) */
+    fun post(url: String, body: ByteArray, contentType: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 30_000): Pair<Int, String?> {
+        require(allowed(url)) { "URL não autorizada: $url" }
+        require(body.size <= 2_000_000) { "corpo grande demais" }
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.instanceFollowRedirects = false; c.requestMethod = "POST"; c.doOutput = true
+            c.connectTimeout = timeoutMs; c.readTimeout = timeoutMs
+            c.setRequestProperty("User-Agent", UA); c.setRequestProperty("Content-Type", contentType)
+            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+            c.outputStream.use { it.write(body) }
+            val code = c.responseCode
+            val txt = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes().take(2000).toByteArray().toString(Charsets.UTF_8) }
+            return Pair(code, txt)
+        } finally { c.disconnect() }
+    }
 }

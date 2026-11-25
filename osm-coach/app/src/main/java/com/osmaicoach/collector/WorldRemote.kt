@@ -29,8 +29,8 @@ object WorldRemote {
 
     /** Chaves novas (`sb_publishable_…`/`sb_secret_…`) NÃO são JWT: só no cabeçalho apikey. As legadas (JWT `eyJ…`) também vão em Authorization. */
     internal fun headersFor(key: String) = if (key.startsWith("sb_")) mapOf("apikey" to key, "Accept" to "application/json") else mapOf("apikey" to key, "Authorization" to "Bearer $key", "Accept" to "application/json")
-    private fun headers(c: Cfg) = headersFor(c.key)
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+    internal fun headers(c: Cfg) = headersFor(c.key)
+    internal fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     /** GET JSON. (código HTTP, corpo). Lança só em falha de rede. */
     fun get(ctx: Context, path: String): Pair<Int, String?> {
@@ -38,7 +38,7 @@ object WorldRemote {
         return WorldHttp.text(c.url + path, headers(c), 6_000_000)
     }
 
-    class Stats(val countries: Long, val competitions: Long, val clubs: Long, val players: Long, val lastRun: String?)
+    class Stats(val countries: Long, val competitions: Long, val clubs: Long, val players: Long, val lastRun: String?, val images: Long = 0)
     /** Testa a conexão e devolve as contagens REAIS do Supabase (nada de número inventado). */
     fun stats(ctx: Context): Result<Stats> = runCatching {
         val (code, body) = get(ctx, "/rest/v1/rpc/wf_stats")
@@ -46,7 +46,7 @@ object WorldRemote {
         if (code !in 200..299 || body == null) error(when (code) { 401, 403 -> "chave recusada (use a chave anon)"; 404 -> "banco ainda sem as tabelas: rode supabase/schema.sql"; else -> "HTTP $code" })
         val o = JSONObject(body)
         Stats(o.optLong("countries"), o.optLong("competitions"), o.optLong("clubs"), o.optLong("players"),
-            o.optJSONObject("last_run")?.let { r -> "${r.optString("source")} • ${r.optString("status")} • ${r.optLong("rows_changed")} alterados" })
+            o.optJSONObject("last_run")?.let { r -> "${r.optString("source")} • ${r.optString("status")} • ${r.optLong("rows_changed")} alterados" }, o.optLong("images"))
     }
 
     // ------------------------------------------------------------------ cópia local (testável: só SQL)

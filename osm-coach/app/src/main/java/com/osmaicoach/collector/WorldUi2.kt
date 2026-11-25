@@ -221,6 +221,7 @@ internal fun WorldSyncView() {
             WorldCard {
                 if (rows.isEmpty()) Text("Ainda não há países, clubes ou jogadores do OSM identificados; as imagens são pedidas assim que houver.", fontSize = 13.sp, color = C.MUTED)
                 for ((l, h, n) in rows) WorldBar(l, h, n)
+                if (WorldSync.imagesNote.isNotEmpty()) Text(WorldSync.imagesNote + " (o app envia ao Supabase o que baixa e busca lá antes de ir à internet)", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 if (rows.isNotEmpty()) OutlinedButton(onClick = { busyImg = true; scope.launch(Dispatchers.IO) { runCatching { WorldOsm.prefetchImages(ctx, 12) }; busyImg = false } }, enabled = !busyImg, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (busyImg) "Baixando…" else "Baixar imagens que faltam") }
             }
         }
