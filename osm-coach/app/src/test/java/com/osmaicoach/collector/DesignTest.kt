@@ -53,3 +53,22 @@ class DesignKitTest {
         assertEquals("qua", ptDow(c))
     }
 }
+
+class WidgetDesignTest {
+    private val now = 1_000_000_000_000L
+    @Test fun urgencyColorFollowsTheAppRule() {
+        assertEquals(0xFFEF5350.toInt(), SlotWidget.urgencyColor(now + 30 * 60_000L, now))        // ≤ 1 h
+        assertEquals(0xFFF5B942.toInt(), SlotWidget.urgencyColor(now + 3 * 3_600_000L, now))      // dentro das 8 h
+        assertEquals(0xFF4CCB7A.toInt(), SlotWidget.urgencyColor(now + 10 * 3_600_000L, now))     // depois
+        assertEquals(0xFFA8B7C8.toInt(), SlotWidget.urgencyColor(null, now))
+        assertEquals(0xFFA8B7C8.toInt(), SlotWidget.urgencyColor(now - 1000L, now))
+    }
+
+    @Test fun staleTextOnlyWhenOld() {
+        fun row(stale: Boolean, readAt: Long?) = SlotWidget.Row(1, "S1", "", "", stale, 0, readAt)
+        assertEquals("", SlotWidget.staleText(row(false, now - 3_600_000L), now))
+        assertEquals("⚠ lido há 14 h", SlotWidget.staleText(row(true, now - 14 * 3_600_000L), now))
+        assertEquals("⚠ lido há 3 d", SlotWidget.staleText(row(true, now - 80 * 3_600_000L), now))
+        assertEquals("⚠ sem leitura", SlotWidget.staleText(row(true, null), now))
+    }
+}

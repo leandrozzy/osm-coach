@@ -78,3 +78,8 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Botão "App" da bolha**: abre o slot em que o OSM está (`Diag.currentSlot`) na aba atual (`Route.tab = -1` = manter).
 - **Missões (Hoje "Atualizar: Missões")**: a tela com todas as missões liberadas só mostra "A semana reinicia em"; o cronômetro antigo de "novas missões" ficava vencido para sempre. Agora ler a tela sem esse contador apaga o cronômetro vencido (`Repo.applyExtra`, MISSIONS). Teste novo em `ScreensTest`.
 - **Posição na liga (novo)**: `Standings.kt` + `StandingsCard` (aba Calendário) usam só a Classificação do OSM, sem cruzar resultados das jornadas. Testes com a tabela real do usuário (`StandingsTest`) e com o layout real das telas de Classificação e de Resultados (`RealLayoutTest`).
+
+## Oitava etapa — widgets (protótipo aprovado)
+- `res/layout/widget_small|wide|large.xml`, drawables `widget_bg`, `w_tile`, `w_tile_hero`, `w_hero`, `w_pill`, `w_chip`, `w_badge_*` (selos arredondados) e `SlotWidget.small/wide/large`: mesmos dados e regras de antes; novo visual (2×2 jogo em destaque; 4×2 quatro cartões com o mais próximo em lima; 4×4 destaque com contagem grande + lista).
+- Novo: `urgencyColor` (cor da contagem), `staleText` ("⚠ lido há X h"), `formBitmap` (V/E/D em quadradinhos). Testes: `WidgetDesignTest`.
+- Não validado: inflar os layouts num Android real (RemoteViews não tem blur/sombra/fonte do app), tamanho real do 4×4 em telas pequenas, escudos reais no widget.

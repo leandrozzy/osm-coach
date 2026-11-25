@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/s_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@drawable/widget_bg" android:padding="10dp" android:gravity="center_horizontal">
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/s_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@drawable/widget_bg" android:padding="12dp">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-        <TextView android:id="@+id/s_badge" android:layout_width="18dp" android:layout_height="18dp" android:textSize="10sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#0B111B" android:textStyle="bold" />
-        <TextView android:id="@+id/s_head" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:textColor="#39BDF8" android:textSize="12sp" android:textStyle="bold" android:maxLines="1" android:text="OSM AI Coach" />
+        <TextView android:id="@+id/s_badge" android:layout_width="22dp" android:layout_height="22dp" android:textSize="12sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#0B111B" android:textStyle="bold" />
+        <TextView android:id="@+id/s_head" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="end" android:textColor="#F5B942" android:textSize="15sp" android:textStyle="bold" android:maxLines="1" android:text="OSM AI Coach" />
     </LinearLayout>
     <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal" android:gravity="center">
-        <ImageView android:id="@+id/s_crest_me" android:layout_width="36dp" android:layout_height="36dp" android:scaleType="fitCenter" />
-        <TextView android:id="@+id/s_vs" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textColor="#A8B7C8" android:textSize="11sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" android:layout_marginHorizontal="6dp"/>
-        <ImageView android:id="@+id/s_crest_opp" android:layout_width="36dp" android:layout_height="36dp" android:scaleType="fitCenter" />
+        <ImageView android:id="@+id/s_crest_me" android:layout_width="40dp" android:layout_height="40dp" android:scaleType="fitCenter" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="×" android:textColor="#A8B7C8" android:textSize="14sp" android:textStyle="bold" android:layout_marginHorizontal="10dp" />
+        <ImageView android:id="@+id/s_crest_opp" android:layout_width="40dp" android:layout_height="40dp" android:scaleType="fitCenter" />
     </LinearLayout>
-    <ImageView android:id="@+id/s_prob" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:layout_marginTop="3dp" android:scaleType="center" />
-    <TextView android:id="@+id/s_probtxt" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#FFFFFF" android:textSize="10sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
-    <TextView android:id="@+id/s_time" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#A8B7C8" android:textSize="10sp" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/s_vs" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#A8B7C8" android:textSize="12sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+    <ImageView android:id="@+id/s_prob" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:layout_marginTop="4dp" android:scaleType="center" />
+    <TextView android:id="@+id/s_probtxt" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#A8B7C8" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/s_time" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="2dp" android:textColor="#F4F7FB" android:textSize="11sp" android:maxLines="1" android:ellipsize="end" />
 </LinearLayout>

@@ -150,7 +150,7 @@ object SlotWidget {
         val clip = android.graphics.Path().apply { addRoundRect(android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()), h / 2f, h / 2f, android.graphics.Path.Direction.CW) }
         c.clipPath(clip)
         var x = 0f
-        for ((v, col) in listOf(win to 0xFF2ECC71.toInt(), draw to 0xFFFFC043.toInt(), loss to 0xFFE5534B.toInt())) {
+        for ((v, col) in listOf(win to 0xFF4CCB7A.toInt(), draw to 0xFFF5B942.toInt(), loss to 0xFFEF5350.toInt())) {
             val ww = w * v / tot; p.color = col; c.drawRect(x, 0f, x + ww, h.toFloat(), p); x += ww
         }
         return bmp
@@ -181,31 +181,82 @@ object SlotWidget {
 
     private fun upd(now: Long) = "atualizado " + SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date(now))
 
+    // ------------------------------------------------------------------ visual do redesign (cores do app; tudo por RemoteViews, sem blur/sombra)
+    private val C_LIME = 0xFFB9F363.toInt(); private const val C_AMBER = 0xFFF5B942.toInt(); private const val C_RED = 0xFFEF5350.toInt()
+    private val C_GREEN = 0xFF4CCB7A.toInt(); private const val C_TEXT = 0xFFF4F7FB.toInt(); private const val C_MUTED = 0xFFA8B7C8.toInt()
+
+    /** Cor da contagem (mesma regra do app): ≤ 1 h vermelho, dentro das 8 h da tática âmbar, depois verde; sem hora, cinza. */
+    fun urgencyColor(at: Long?, now: Long): Int {
+        if (at == null || at <= now) return C_MUTED
+        val m = (at - now) / 60_000L
+        return if (m <= 60) C_RED else if (m <= TACTIC_WINDOW / 60_000L) C_AMBER else C_GREEN
+    }
+    private fun stateColor(state: Int) = when (state) { STATE_OK -> C_GREEN; STATE_WAIT -> C_AMBER; STATE_OLD -> C_RED; else -> C_MUTED }
+    private fun short(r: Row) = r.`when`.removePrefix("em ").ifEmpty { "—" }
+    /** "⚠ lido há 14 h" para dado antigo (> 12 h); vazio se o dado é recente. */
+    fun staleText(r: Row, now: Long): String {
+        if (!r.stale) return ""
+        val h = r.readAt?.let { (now - it) / 3_600_000L } ?: return "⚠ sem leitura"
+        return if (h >= 48) "⚠ lido há ${h / 24} d" else "⚠ lido há $h h"
+    }
+
+    /** Forma recente como quadradinhos V/E/D coloridos (bitmap, para funcionar em qualquer Android). */
+    fun formBitmap(form: String?, ctx: Context, alignEnd: Boolean): android.graphics.Bitmap? {
+        val f = form?.filter { it == 'V' || it == 'E' || it == 'D' }?.takeLast(5)?.takeIf { it.isNotEmpty() } ?: return null
+        val d = ctx.resources.displayMetrics.density
+        val s = (13 * d).toInt(); val gap = (3 * d).toInt()
+        val w = f.length * s + (f.length - 1) * gap
+        val bmp = android.graphics.Bitmap.createBitmap(w, s, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val tp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0B111B.toInt(); textSize = s * 0.68f; typeface = android.graphics.Typeface.DEFAULT_BOLD; textAlign = android.graphics.Paint.Align.CENTER }
+        for ((i, ch) in f.withIndex()) {
+            val x = i * (s + gap).toFloat()
+            p.color = when (ch) { 'V' -> C_GREEN; 'E' -> C_AMBER; else -> C_RED }
+            c.drawRoundRect(android.graphics.RectF(x, 0f, x + s, s.toFloat()), s * 0.3f, s * 0.3f, p)
+            c.drawText(ch.toString(), x + s / 2f, s * 0.74f, tp)
+        }
+        return bmp
+    }
+    private fun setForm(ctx: Context, v: RemoteViews, id: Int, form: String?, alignEnd: Boolean) {
+        val b = formBitmap(form, ctx, alignEnd)
+        if (b != null) { v.setImageViewBitmap(id, b); v.setViewVisibility(id, android.view.View.VISIBLE) } else v.setViewVisibility(id, android.view.View.INVISIBLE)
+    }
+
     /** 2×2: o próximo jogo (escudos, forças, chances, hora). */
     fun small(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 110): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_small)
         val h = hero(rows)
-        if (h == null) { v.setTextViewText(R.id.s_head, "OSM AI Coach"); v.setTextViewText(R.id.s_probtxt, "sem clube nos slots"); return v }
-        v.setTextViewText(R.id.s_head, "S${h.slot}" + (if (h.`when`.isNotEmpty()) " • ${h.`when`}" else ""))
+        if (h == null) { v.setTextViewText(R.id.s_head, "OSM AI Coach"); v.setTextColor(R.id.s_head, C_TEXT); v.setTextViewText(R.id.s_probtxt, "sem clube nos slots"); return v }
+        val old = h.stale
+        v.setTextViewText(R.id.s_head, h.`when`.ifEmpty { "sem jogo" }); v.setTextColor(R.id.s_head, if (old) C_MUTED else urgencyColor(h.at, now))
         v.setInt(R.id.s_badge, "setBackgroundResource", badgeFor(h.state)); v.setTextViewText(R.id.s_badge, h.slot.toString())
+        v.setTextColor(R.id.s_badge, if (h.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
         setCrest(ctx, v, R.id.s_crest_me, h.club, 96); setCrest(ctx, v, R.id.s_crest_opp, h.rival, 96)
-        v.setTextViewText(R.id.s_vs, strengths(h))
+        v.setTextViewText(R.id.s_vs, if (h.strMe != null && h.strOpp != null) strengths(h) else h.rival?.let { "× $it" } ?: h.short)
         setProb(ctx, v, R.id.s_prob, h, wDp - 28f)
-        v.setTextViewText(R.id.s_probtxt, probText(h).ifEmpty { h.rival?.let { "× $it" } ?: h.short })
+        val st = staleText(h, now)
+        v.setTextViewText(R.id.s_probtxt, if (st.isNotEmpty()) st else probText(h))
+        v.setTextColor(R.id.s_probtxt, if (st.isNotEmpty()) C_RED else C_MUTED)
         v.setTextViewText(R.id.s_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)} ${where(h)}".trim() else h.icon + " " + h.short)
         click(ctx, v, R.id.s_root, h, 800)
         return v
     }
 
-    /** 4×2: quatro cartões lado a lado (estilo previsão do tempo): escudo, clube, contagem, estado e chances. */
+    /** 4×2: quatro cartões lado a lado: escudo, clube, contagem (pílula colorida pela urgência) e chances/rodada; o jogo mais próximo ganha contorno lima. */
     fun wide(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_wide)
+        val hr = hero(rows)
         for ((i, r) in rows.withIndex()) {
             val id = WIDE[i]
             v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
+            v.setTextColor(id[1], if (r.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
+            v.setInt(id[0], "setBackgroundResource", if (r === hr && r.at != null) R.drawable.w_tile_hero else R.drawable.w_tile)
             v.setTextViewText(id[3], r.club.ifBlank { "sem clube" })
-            v.setTextViewText(id[4], r.`when`.ifEmpty { if (r.state == STATE_NONE) "—" else r.icon })
-            v.setTextViewText(id[5], if (r.win != null && r.at != null) "V${r.win} E${r.draw} D${r.loss}" else r.round ?: "")
+            v.setTextViewText(id[4], if (r.state == STATE_NONE) "livre" else short(r))
+            v.setTextColor(id[4], if (r.state == STATE_NONE || r.stale) C_MUTED else urgencyColor(r.at, now))
+            v.setTextViewText(id[5], if (r.stale) staleText(r, now) else if (r.win != null && r.at != null) "V${r.win} E${r.draw} D${r.loss}" else r.round ?: "")
+            v.setTextColor(id[5], if (r.stale) C_RED else C_MUTED)
             setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club)
             click(ctx, v, id[0], r, 700)
         }
@@ -213,28 +264,37 @@ object SlotWidget {
         return v
     }
 
-    /** 4×4: jogo em destaque (escudos, forças, contagem, chances, forma, status) e a lista dos 4 slots com rodada, rival e estado. */
+    /** 4×4: jogo em destaque (escudos, contagem grande, chances, forma, estado) e a lista dos 4 slots. */
     fun large(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_large)
         val h = hero(rows)
         if (h != null) {
-            v.setTextViewText(R.id.h_slot, "S${h.slot}"); v.setInt(R.id.h_slot, "setBackgroundResource", badgeFor(h.state))
-            setCrest(ctx, v, R.id.h_crest_me, h.club, 96); setCrest(ctx, v, R.id.h_crest_opp, h.rival, 96)
+            v.setTextViewText(R.id.h_slot, h.slot.toString()); v.setInt(R.id.h_slot, "setBackgroundResource", badgeFor(h.state))
+            v.setTextColor(R.id.h_slot, if (h.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
+            setCrest(ctx, v, R.id.h_crest_me, h.club, 120); setCrest(ctx, v, R.id.h_crest_opp, h.rival, 120)
             v.setTextViewText(R.id.h_me, h.club); v.setTextViewText(R.id.h_opp, h.rival ?: "—")
-            v.setTextViewText(R.id.h_when, h.`when`.ifEmpty { "sem jogo" })
-            v.setTextViewText(R.id.h_time, if (h.at != null) "${clock(h.at)} • ${day(h.at)}" else h.short)
-            v.setTextViewText(R.id.h_str, strengths(h) + (h.round?.let { "  •  $it" } ?: "") + (h.pos?.let { "  •  $it" } ?: ""))
-            setProb(ctx, v, R.id.h_prob, h, wDp * 0.6f); v.setTextViewText(R.id.h_probtxt, (probText(h) + "  " + where(h)).trim())
-            v.setTextViewText(R.id.h_form_me, formEmoji(h.formMe)); v.setTextViewText(R.id.h_form_opp, formEmoji(h.formOpp))
-            v.setTextViewText(R.id.h_status, h.icon + " " + h.short)
+            v.setTextViewText(R.id.h_when, h.`when`.removePrefix("em ").ifEmpty { "sem jogo" })
+            v.setTextColor(R.id.h_when, if (h.stale) C_MUTED else urgencyColor(h.at, now))
+            v.setTextViewText(R.id.h_time, if (h.at != null) "${day(h.at)} • ${clock(h.at)} ${where(h)}".trim() else h.short)
+            v.setTextViewText(R.id.h_str, listOfNotNull(if (h.strMe != null && h.strOpp != null) strengths(h) else null, h.round, h.pos).joinToString(" • "))
+            setProb(ctx, v, R.id.h_prob, h, wDp * 0.8f); v.setTextViewText(R.id.h_probtxt, probText(h))
+            setForm(ctx, v, R.id.h_form_me, h.formMe, false); setForm(ctx, v, R.id.h_form_opp, h.formOpp, true)
+            val st = staleText(h, now)
+            v.setTextViewText(R.id.h_status, if (st.isNotEmpty()) st else h.icon + " " + h.short)
+            v.setTextColor(R.id.h_status, stateColor(h.state))
             click(ctx, v, R.id.h_card, h, 900)
         }
         for ((i, r) in rows.withIndex()) {
             val id = LIST[i]
             v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
-            v.setTextViewText(id[3], r.club.ifBlank { "sem clube" }); v.setTextViewText(id[4], r.line.ifBlank { "abra o OSM com a captura ligada" }); v.setTextViewText(id[5], r.`when`)
-            v.setTextViewText(id[6], listOfNotNull(r.round, r.pos, r.win?.let { "V$it%" }).joinToString(" • "))
-            setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club, 48)
+            v.setTextColor(id[1], if (r.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
+            v.setTextViewText(id[3], r.club.ifBlank { "sem clube" })
+            v.setTextViewText(id[4], if (r.rival != null && r.at != null) "× ${r.rival} • ${clock(r.at)}" else r.short.ifBlank { "abra o OSM com a captura ligada" })
+            v.setTextViewText(id[5], if (r.state == STATE_NONE) "livre" else short(r))
+            v.setTextColor(id[5], if (r.state == STATE_NONE || r.stale) C_MUTED else urgencyColor(r.at, now))
+            v.setTextViewText(id[6], if (r.stale) staleText(r, now) else listOfNotNull(r.round, r.pos).joinToString(" • "))
+            v.setTextColor(id[6], if (r.stale) C_RED else C_MUTED)
+            setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club, 64)
             click(ctx, v, id[0], r, 700)
         }
         v.setTextViewText(R.id.l_footer, upd(now))
