@@ -151,6 +151,9 @@ class CaptureService : AccessibilityService() {
     private var listView: LinearLayout? = null
     private var headView: TextView? = null
     private var badgeView: TextView? = null
+    private var ringView: View? = null
+    private var statusView: TextView? = null
+    private var ringAnim: android.animation.ObjectAnimator? = null
     private var overlayLp: WindowManager.LayoutParams? = null
     private var hintJob: Job? = null
     private var hintKey = ""
@@ -244,6 +247,7 @@ class CaptureService : AccessibilityService() {
         listView = null
         headView = null
         badgeView = null
+        ringAnim?.cancel(); ringAnim = null; ringView = null; statusView = null
         try {
             (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v)
         } catch (e: Exception) {
@@ -348,6 +352,28 @@ class CaptureService : AccessibilityService() {
         b.visibility = if (n > 0) View.VISIBLE else View.GONE
     }
 
+    /**
+     * Estado visual da bola (só aparência): anel lima = parada, anel ciano pulsando + selo "Capturando" quando uma captura aconteceu nos
+     * últimos 5 s, anel âmbar quando há pendências e nada sendo lido.
+     */
+    private fun updateRing() {
+        val r = ringView ?: return
+        val dp = resources.displayMetrics.density
+        val capturing = System.currentTimeMillis() - Diag.lastShotAt < 5000L && Diag.lastShotAt > 0L
+        val pending = hints.any { it.action }
+        val col = when { capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
+        r.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), col) }
+        statusView?.let { s ->
+            s.visibility = if (capturing) View.VISIBLE else View.GONE
+            if (capturing) s.text = "● Capturando"
+        }
+        if (capturing) {
+            if (ringAnim == null) ringAnim = android.animation.ObjectAnimator.ofFloat(r, "alpha", 1f, 0.35f).apply {
+                duration = 700; repeatMode = android.animation.ValueAnimator.REVERSE; repeatCount = android.animation.ValueAnimator.INFINITE; start()
+            }
+        } else { ringAnim?.cancel(); ringAnim = null; r.alpha = 1f }
+    }
+
     /** Recalcula o que fazer quando a tela/slot muda ou chega leitura nova; dica que sumiu = feito. */
     private fun startHints() {
         if (hintJob != null) return
@@ -373,6 +399,7 @@ class CaptureService : AccessibilityService() {
                         }
                     }
                 }
+                withContext(Dispatchers.Main) { updateRing() }
                 delay(1500L)
             }
         }
@@ -411,11 +438,15 @@ class CaptureService : AccessibilityService() {
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             elevation = 9 * dp
         }
-        bubble.addView(icon, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize, Gravity.CENTER))
+        val ring = View(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), 0xFFB9F363.toInt()) }
+        }
+        bubble.addView(ring, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize, Gravity.CENTER))
+        bubble.addView(icon, android.widget.FrameLayout.LayoutParams(bubbleSize - (10 * dp).toInt(), bubbleSize - (10 * dp).toInt(), Gravity.CENTER))
         val badge = TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE); textSize = 11f; gravity = Gravity.CENTER
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFE5484D.toInt()); setStroke((1.5f * dp).toInt(), android.graphics.Color.WHITE) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFEF5350.toInt()); setStroke((1.5f * dp).toInt(), android.graphics.Color.WHITE) }
             elevation = 10 * dp
             visibility = View.GONE
         }
@@ -423,13 +454,14 @@ class CaptureService : AccessibilityService() {
 
         // cartão: título, lista de dicas e os botões App / Tática / Encerrar
         val head = TextView(this).apply {
-            setTextColor(0xFFFFD24A.toInt()); textSize = 13f
+            setTextColor(0xFFB9F363.toInt()); textSize = 13f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val end = chip("■ Encerrar", 0xE6D32F2F.toInt(), dp)
-        val toggle = chip("📱 App", 0xE61F6BFF.toInt(), dp)
-        val tactic = chip("📋 Tática", 0xE6B8860B.toInt(), dp)
+        val end = chip("■ Encerrar", 0xFFEF5350.toInt(), dp)
+        val toggle = chip("📱 App", 0xFFB9F363.toInt(), dp).apply { setTextColor(0xFF0B111B.toInt()) }
+        val tactic = chip("📋 Tática", 0xFF1C2938.toInt(), dp)
+        val statusPill = chip("● Capturando", 0xF239BDF8.toInt(), dp).apply { setTextColor(0xFF0B111B.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD); visibility = View.GONE }
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             fun lp() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = (6 * dp).toInt() }
@@ -439,9 +471,10 @@ class CaptureService : AccessibilityService() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFA0F2347.toInt(), 0xFA081A3C.toInt())).apply {
-                cornerRadius = 18 * dp
-                setStroke((1.5f * dp).toInt(), 0xAA2AB4FF.toInt())
+            background = GradientDrawable().apply {
+                setColor(0xF5151F2D.toInt())
+                cornerRadius = 20 * dp
+                setStroke((1.5f * dp).toInt(), 0xCCB9F363.toInt())
             }
             elevation = 12 * dp
             addView(head)
@@ -455,7 +488,7 @@ class CaptureService : AccessibilityService() {
             val cap = (resources.displayMetrics.heightPixels * 0.62f).toInt()
             if (scroll.height > cap) scroll.layoutParams = scroll.layoutParams.apply { height = cap }
         }
-        val notice = chip("", 0xF2FFB300.toInt(), dp).apply {
+        val notice = chip("", 0xF2F5B942.toInt(), dp).apply {
             setTextColor(android.graphics.Color.BLACK)
             maxWidth = maxW
             visibility = View.GONE
@@ -467,6 +500,7 @@ class CaptureService : AccessibilityService() {
             orientation = LinearLayout.VERTICAL
             alpha = 0.97f
             addView(bubble, LinearLayout.LayoutParams(bubbleSize + (6 * dp).toInt(), bubbleSize + (6 * dp).toInt()))
+            addView(statusPill, gap())
             addView(card, gap())
             addView(notice, gap())
         }
@@ -543,6 +577,8 @@ class CaptureService : AccessibilityService() {
             listView = list
             headView = head
             badgeView = badge
+            ringView = ring
+            statusView = statusPill
             updateToggle()
             startHints()
         } catch (e: Exception) {

@@ -1,5 +1,7 @@
 package com.osmaicoach.collector
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -77,9 +79,11 @@ internal fun PointsChart(rows: List<LeagueResults.Adj>, me: String?) {
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         for ((i, r) in rows.withIndex()) {
             val mine = me != null && League.key(r.club) == League.key(me)
-            Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${i + 1}º", fontSize = 11.sp, color = if (mine) C.GOLD else C.MUTED, fontWeight = if (mine) FontWeight.ExtraBold else FontWeight.Normal, modifier = Modifier.width(26.dp))
-                Text(r.club, fontSize = 11.sp, color = if (mine) C.GOLD else androidx.compose.ui.graphics.Color.White, fontWeight = if (mine) FontWeight.ExtraBold else FontWeight.Normal, maxLines = 1, modifier = Modifier.width(112.dp))
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp).then(if (mine) Modifier.clip(RoundedCornerShape(12.dp)).background(C.GOLD.copy(alpha = 0.14f)).padding(horizontal = 4.dp) else Modifier), verticalAlignment = Alignment.CenterVertically) {
+                Text("${i + 1}º", fontSize = 12.sp, color = if (mine) C.GOLD else C.MUTED, fontWeight = if (mine) FontWeight.ExtraBold else FontWeight.Normal, modifier = Modifier.width(28.dp))
+                RivalShield(r.club, 24.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(r.club, fontSize = 12.sp, color = if (mine) C.GOLD else androidx.compose.ui.graphics.Color.White, fontWeight = if (mine) FontWeight.ExtraBold else FontWeight.Normal, maxLines = 1, modifier = Modifier.width(96.dp), overflow = TextOverflow.Ellipsis)
                 Box(Modifier.weight(1f).height(9.dp).clip(RoundedCornerShape(5.dp)).background(C.SURFACE2)) {
                     Box(Modifier.fillMaxWidth(r.pts.toFloat() / max).height(9.dp).clip(RoundedCornerShape(5.dp)).background(if (mine) C.GOLD else C.PRIMARY))
                 }
@@ -184,7 +188,7 @@ internal fun LeagueResultsCard(slot: Int) {
     if (v.cup.isNotEmpty()) Fold("🏆", "Copa: resultados lidos", "${v.cup.values.sumOf { it.size }} jogos", startOpen = false) {
         for ((phase, gs) in v.cup) {
             Text(phaseName(phase), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = C.GOLD, modifier = Modifier.padding(top = 6.dp))
-            for (g in gs) Text("${g.home} ${g.gh} × ${g.ga} ${g.away}", fontSize = 12.5.sp)
+            for (g in gs) MatchLineNames(g.home, g.away, "${g.gh} – ${g.ga}", "")
         }
         Text("A copa é guardada à parte: não entra na tabela da liga.", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }

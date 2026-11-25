@@ -547,6 +547,8 @@ internal fun SectionLabel(text: String, hint: String? = null) {
 @Composable
 internal fun Title(text: String) {
     Row(Modifier.padding(top = 22.dp, bottom = 8.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(5.dp).height(22.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
+        Spacer(Modifier.width(10.dp))
         Text(text, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
@@ -563,7 +565,7 @@ internal fun KV(label: String, value: String) {
 internal fun Panel(content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(DS.RADIUS_CARD + 4.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) { Column(Modifier.padding(16.dp)) { content() } }
 }
@@ -674,8 +676,9 @@ internal fun Fold(icon: String, title: String, badge: String? = null, startOpen:
 @Composable
 internal fun StatTile(icon: String, value: String, label: String, color: Color, modifier: Modifier = Modifier) {
     Column(
-        modifier.clip(RoundedCornerShape(14.dp))
+        modifier.clip(RoundedCornerShape(16.dp))
             .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
             .padding(vertical = 12.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -784,7 +787,12 @@ internal val REF_COLORS = listOf(Color(0xFF2F8CFF), Color(0xFF3DDC84), Color(0xF
 internal fun RefereeMeter(value: String?, compact: Boolean = false) {
     val lvl = Referee.level(value)
     val name = Referee.norm(value)
-    Column(Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    // rosto real do árbitro do jogo (muito brando … muito rigoroso), com contorno na cor do nível
+    if (lvl != null) Box(Modifier.padding(end = 10.dp).size(if (compact) 52.dp else 84.dp).clip(RoundedCornerShape(18.dp)).background(REF_COLORS[lvl].copy(alpha = 0.16f)).border(1.5.dp, REF_COLORS[lvl], RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+        RefereeFace(lvl, Modifier.fillMaxSize().padding(3.dp))
+    }
+    Column(Modifier.weight(1f)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("🌡", fontSize = if (compact) 13.sp else 16.sp)
             Text(" Árbitro ", fontSize = 13.sp, color = C.MUTED)
@@ -814,6 +822,7 @@ internal fun RefereeMeter(value: String?, compact: Boolean = false) {
                 }
             }
         }
+    }
     }
 }
 
@@ -2061,17 +2070,7 @@ internal fun BrandBar() {
 /** Título de página como nas referências: ícone, título grande com traço ciano e um chip à direita. */
 @Composable
 internal fun PageTitle(icon: String, title: String, chip: String? = null) {
-    Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(icon, fontSize = 26.sp)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
-            Box(Modifier.padding(top = 2.dp).width(44.dp).height(3.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
-        }
-        if (chip != null) Box(
-            Modifier.clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 8.dp)
-        ) { Text(chip, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
-    }
+    HeroHeader(icon, title, null, chip)
 }
 
 
@@ -2978,12 +2977,18 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () ->
     val tab = if (idle != null) 0 else tab
     val title = if (idle != null) "Slot $slot" else known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(50)).clickable { onBack() }, contentAlignment = Alignment.Center) { Text("‹", fontSize = 30.sp, color = Color.White) }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).clip(RoundedCornerShape(24.dp))
+                .background(Brush.linearGradient(listOf(C.INFO.copy(alpha = 0.18f), DS.SURFACE, DS.SURFACE)))
+                .border(1.dp, C.INFO.copy(alpha = 0.4f), RoundedCornerShape(24.dp)).padding(start = 6.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(DS.ELEVATED).border(1.dp, C.BORDER, RoundedCornerShape(16.dp)).clickable { onBack() }, contentAlignment = Alignment.Center) { Text("‹", fontSize = 28.sp, color = Color.White) }
+            Spacer(Modifier.width(8.dp))
             Crest(slot, 44.dp, if (idle != null) null else known(data.fields, K.TEAM))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (idle != null) Text(idle, color = C.GOLD, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 else Row(verticalAlignment = Alignment.CenterVertically) {
                     FlagBadge(Flags.isoFromCompetition(known(data.fields, K.COMPETITION)), data.leagueRich, null, 22.dp, 16.dp)

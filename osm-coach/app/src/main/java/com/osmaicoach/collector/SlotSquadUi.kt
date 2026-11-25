@@ -412,9 +412,10 @@ internal fun SlotCalendar(slot: Int, d: SlotData) {
         if (e0 != null) MatchDialog(slot, e0, null) { editRound = null }
         return
     }
+    val sorted = d.matches.sortedBy { it.round ?: 999 }
+    CalendarOverview(slot, d, sorted)
     ResultsStrip(d)
     LeagueResultsCard(slot)
-    val sorted = d.matches.sortedBy { it.round ?: 999 }
     // o total do hub pode contar só a liga (34) enquanto o calendário traz também as copas (43): vale o maior
     val total = fv(d, K.ROUND_TOTAL).toIntOrNull()?.let { t -> maxOf(t, sorted.maxOfOrNull { it.round ?: 0 } ?: 0) }
     val read = sorted.count { it.round != null }
@@ -505,4 +506,77 @@ internal fun PlayerPhoto(nameKey: String, size: Dp) {
         drawCircle(ink, radius = w * 0.20f, center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.40f))
         drawOval(ink, topLeft = androidx.compose.ui.geometry.Offset(w * 0.16f, h * 0.66f), size = androidx.compose.ui.geometry.Size(w * 0.68f, h * 0.70f))
     }
+}
+
+
+/** Redesign do Calendário: próximo jogo com escudos, mês com pontos por jogo, próximos jogos e últimos resultados. Só leitura dos dados já lidos. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun CalendarOverview(slot: Int, d: SlotData, sorted: List<MatchEntity>) {
+    val now = System.currentTimeMillis()
+    val my = known(d.fields, K.TEAM)
+    val curRound = fv(d, K.ROUND).toIntOrNull()
+    val curAt = fv(d, K.MATCH_AT).toLongOrNull()
+    val next = Fixtures.next(sorted, now, curRound, curAt)
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = now }
+    val year = cal.get(java.util.Calendar.YEAR); val month = cal.get(java.util.Calendar.MONTH); val today = cal.get(java.util.Calendar.DAY_OF_MONTH)
+    // pontos do mês: cor pelo resultado (V verde, E âmbar, D vermelho), lima = a jogar, ciano = copa a jogar
+    val dots = HashMap<Int, MutableList<Color>>()
+    for (m in sorted) {
+        val dm = parseDm(m.date) ?: continue
+        if (dm.second != month || (dm.third != null && dm.third != year)) continue
+        val col = when (m.result) { "V" -> C.WIN; "E" -> C.DRAW; "D" -> C.LOSS; else -> if (Fixtures.isCup(m)) C.INFO else C.PRIMARY }
+        dots.getOrPut(dm.first) { ArrayList() }.add(col)
+    }
+    if (next != null) {
+        val at = if (next.round == curRound && curAt != null) curAt else null
+        val opp = Fixtures.opponent(next)
+        val mineLeft = next.home != false
+        val shape = RoundedCornerShape(24.dp)
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape).background(Brush.verticalGradient(listOf(C.PRIMARY.copy(alpha = 0.16f), DS.SURFACE))).border(1.dp, C.PRIMARY.copy(alpha = 0.45f), shape).padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DsChip("Próximo jogo", C.PRIMARY)
+                Spacer(Modifier.width(6.dp))
+                next.home?.let { DsChip(if (it) "casa" else "fora") }
+                Spacer(Modifier.weight(1f))
+                Text(if (at != null && at > now) "em " + countdownShort(at) else (next.date ?: next.time ?: ""), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = C.INFO)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                val mine: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { Crest(slot, 64.dp, my); Text(my ?: "Seu time", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) } }
+                val riv: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { RivalShield(opp, 64.dp, slot); Text(opp ?: Fixtures.stage(next) ?: "a definir", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) } }
+                if (mineLeft) mine(Modifier.weight(1f)) else riv(Modifier.weight(1f))
+                Text("VS", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY, modifier = Modifier.padding(horizontal = 8.dp))
+                if (mineLeft) riv(Modifier.weight(1f)) else mine(Modifier.weight(1f))
+            }
+            val hm = next.time ?: at?.let { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+            Text("J${next.round}" + (hm?.let { " • $it" } ?: "") + (next.date?.let { " • $it" } ?: ""), fontSize = 13.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), textAlign = TextAlign.Center)
+        }
+    }
+    DsSection("${monthName(month).replaceFirstChar { it.uppercase() }} de $year", "hoje $today")
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(12.dp)) {
+        MonthGrid(year, month, dots, today)
+        androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 10.dp)) {
+            DsLegend(C.WIN, "vitória"); DsLegend(C.DRAW, "empate"); DsLegend(C.LOSS, "derrota"); DsLegend(C.PRIMARY, "a jogar"); DsLegend(C.INFO, "copa")
+        }
+    }
+    val upcoming = sorted.filter { it.round != null && it.result == null && !Fixtures.void(it, sorted) && Fixtures.opponent(it) != null }.filter { (it.round ?: 0) >= (next?.round ?: 0) }.take(3)
+    val recent = sorted.filter { it.result != null && it.round != null }.sortedByDescending { it.round }.take(4)
+    @Composable
+    fun line(m: MatchEntity, fut: Boolean) {
+        val opp = Fixtures.opponent(m) ?: return
+        val mineLeft = m.home != false
+        val l = if (mineLeft) (my ?: "Seu time") else opp
+        val r = if (mineLeft) opp else (my ?: "Seu time")
+        val center = if (fut) (m.time ?: "–") else if (m.scoreMine != null && m.scoreOpp != null) (if (mineLeft) "${m.scoreMine} – ${m.scoreOpp}" else "${m.scoreOpp} – ${m.scoreMine}") else "–"
+        MatchLine(slot, my, l, r, center, { if (fut) DsChip(m.date ?: "", C.MUTED) else ResultBadge(m.result) }, "J${m.round}", mineLeft)
+    }
+    if (upcoming.isNotEmpty()) {
+        DsSection("Próximos jogos")
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(horizontal = 8.dp)) { for (m in upcoming) line(m, true) }
+    }
+    if (recent.isNotEmpty()) {
+        DsSection("Últimos resultados")
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(DS.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CARD)).padding(horizontal = 8.dp)) { for (m in recent) line(m, false) }
+    }
+    DsSection("Posição e rodadas")
 }

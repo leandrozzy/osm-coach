@@ -36,3 +36,20 @@ class DesignTest {
         assertTrue(r in 1.1..3.0)
     }
 }
+
+class DesignKitTest {
+    @Test fun parseDm_leDataDoCardDoOsm() {
+        assertEquals(Triple(25, 10, 2026), parseDm("25/11/2026"))
+        assertEquals(Triple(5, 0, 2026), parseDm("05/01/26"))
+        assertEquals(Triple(3, 11, null), parseDm("sáb 3/12"))
+        assertNull(parseDm("32/13/2026"))
+        assertNull(parseDm(null))
+        assertNull(parseDm("sem data"))
+    }
+    @Test fun nomesDeMesEDiaDaSemana() {
+        assertEquals("novembro", monthName(10))
+        assertEquals("janeiro", monthName(-3))
+        val c = java.util.Calendar.getInstance().apply { clear(); set(2026, 10, 25) }   // quarta-feira
+        assertEquals("qua", ptDow(c))
+    }
+}

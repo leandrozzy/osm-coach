@@ -37,3 +37,13 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 ## Validação
 - Executados: `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` (resultado no relatório final) e `DesignTest` (contraste WCAG ≥ 7:1 no texto principal, ≥ 4,5:1 em secundário e acentos; alvo de toque ≥ 48 dp; raios 12–18 dp).
 - **Não foi possível:** capturas de tela reais do app Android (sem emulador/aparelho neste ambiente) e os viewports 360/390/430/1440 do Playwright (o app não é web). O "antes" está no vídeo anexado; o "depois" precisa ser visto no aparelho com o APK do CI da branch `design`.
+
+## Segunda etapa (protótipo aprovado v5) — `DesignKit.kt`
+- Linguagem única de forma: cantos arredondados (sem cortes retos). Peças novas em `DesignKit.kt`: `HeroHeader`, `DsChip`, `DsSection`, `DayStrip`, `DsFilters`, `NowLine`, `MonthGrid`, `MatchLine`/`MatchLineNames`, `DsLegend`. `PageTitle` e `Title` passaram a usá-las.
+- **Agenda** (`AgendaUi.kt`): faixa dos próximos 7 dias com pontos por tipo, filtros Tudo/Jogos/Treinos/Obras, card âmbar "passaram do horário" com Dispensar, linha AGORA, linha do tempo; jogo com escudo do seu time (`Crest`) e do rival (`RivalShield`). Mesmos dados e mesmas regras (`AgendaSkip`, `open`).
+- **Calendário do slot** (`SlotSquadUi.kt` → `CalendarOverview`): próximo jogo com os dois escudos, grade do mês com pontos V/E/D/a jogar/copa, próximos jogos e últimos resultados com escudos; classificação (`PointsChart`) e jogos da copa (`LeagueUi.kt`) com escudo de cada clube. A lista de rodadas e a posição na liga seguem como antes.
+- **Cabeçalho do slot** (`SlotScreen`): faixa arredondada com escudo, bandeira e % lido.
+- **Árbitro** (`RefereeMeter`): rosto real `g_arbitro_0..4` com contorno na cor do nível (antes `RefereeFace` não era usado); desarme/marcação/fora-de-jogo/estilo seguem na Tática.
+- **Bolha** (`CaptureService.updateRing`): anel lima (parada), ciano pulsando + selo "● Capturando" (captura nos últimos 5 s), âmbar (pendências); cartão e botões nas cores do sistema.
+- Testes novos: `DesignKitTest` (`parseDm`, `monthName`, `ptDow`).
+- Não validado no aparelho: layout Compose real, escudos reais (vêm do OSM/web em tempo de execução), o selo "Capturando" e a animação da bolha.
