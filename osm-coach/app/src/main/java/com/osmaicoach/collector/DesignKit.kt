@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Calendar
 import java.util.Locale
+import androidx.compose.foundation.layout.fillMaxHeight
 
 /**
  * Peças do redesign (só aparência). Uma única linguagem de forma: cantos arredondados (nada de cortes retos), cartões planos
@@ -228,3 +229,106 @@ internal fun monthName(m: Int): String = listOf("janeiro", "fevereiro", "março"
 internal fun ptDow(c: Calendar): String = listOf("dom", "seg", "ter", "qua", "qui", "sex", "sáb")[c.get(Calendar.DAY_OF_WEEK) - 1]
 
 @Suppress("unused") private val keepLocale = Locale("pt", "BR")
+
+
+/** Próximo jogo entre todos os slots: faixa grande com os dois escudos e a contagem regressiva (só leitura de `SlotSummary`). */
+@Composable
+internal fun NextGameHero(slots: List<SlotSummary>, onOpen: (Int, Int) -> Unit) {
+    val now = System.currentTimeMillis()
+    val s = slots.filter { it.nextAt != null && it.nextAt > now && !it.ended && it.state == null }.minByOrNull { it.nextAt!! } ?: return
+    val at = s.nextAt!!
+    val col = countdownColor(at)
+    val shape = RoundedCornerShape(24.dp)
+    val mineLeft = s.home != false
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(shape).background(Brush.horizontalGradient(listOf(C.PRIMARY.copy(alpha = 0.16f), DS.SURFACE, C.INFO.copy(alpha = 0.14f))))
+            .border(1.dp, col.copy(alpha = 0.5f), shape).clickable { onOpen(s.slot, 1) }.padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DsChip("próximo jogo · S${s.slot}" + (s.home?.let { if (it) " · casa" else " · fora" } ?: ""), C.PRIMARY)
+            Spacer(Modifier.weight(1f))
+            Text(java.text.SimpleDateFormat("EEE HH:mm", Locale("pt", "BR")).format(java.util.Date(at)), fontSize = 13.sp, color = C.MUTED)
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            val mine: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { Crest(s.slot, 68.dp, s.title); Text(s.title, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) } }
+            val riv: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { RivalShield(s.rival, 68.dp, s.slot); Text(s.rival ?: "rival não lido", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp), color = if (s.rival != null) C.TEXT else C.WARN) } }
+            if (mineLeft) mine(Modifier.weight(1f)) else riv(Modifier.weight(1f))
+            Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("FALTAM", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = C.MUTED, letterSpacing = 1.5.sp)
+                Text(countdownShort(at), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = col, maxLines = 1)
+            }
+            if (mineLeft) riv(Modifier.weight(1f)) else mine(Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.Center) {
+            val tac = when {
+                s.tacticReady -> "✓ tática pronta" to C.OK
+                at - now > Director.TACTIC_WINDOW_MS -> "tática só nas 8 h antes" to C.MUTED
+                s.tacticStale || s.rivalGaps -> "reler o rival" to C.WARN
+                else -> "falta gerar a tática" to C.WARN
+            }
+            DsChip(tac.first, tac.second)
+        }
+    }
+}
+
+/** Cartão pequeno de slot (grade 2×2 do Hoje): escudo, nome e contagem. */
+@Composable
+internal fun SlotTile(s: SlotSummary, selected: Boolean, modifier: Modifier, onOpen: () -> Unit) {
+    val now = System.currentTimeMillis()
+    val at = s.nextAt?.takeIf { it > now && !s.ended && s.state == null }
+    val shape = RoundedCornerShape(DS.RADIUS_CARD)
+    Column(
+        modifier.clip(shape).background(DS.SURFACE).border(if (selected) 1.5.dp else 1.dp, if (selected) C.PRIMARY else C.BORDER, shape).clickable { onOpen() }.padding(vertical = 12.dp, horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (s.compType == "Batalha") Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(C.INFO.copy(alpha = 0.16f)).border(1.dp, C.INFO.copy(alpha = 0.5f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text("⚔", fontSize = 20.sp) }
+        else Crest(s.slot, 44.dp, s.title.takeIf { s.known })
+        Text("Slot ${s.slot}", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 6.dp))
+        Text(s.title, fontSize = 12.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.padding(top = 6.dp)) {
+            when {
+                at != null -> DsChip(countdownShort(at), countdownColor(at))
+                s.compType == "Batalha" && s.state != null -> DsChip("recrutando", C.INFO)
+                s.state != null -> DsChip("livre")
+                s.ended -> DsChip("encerrada")
+                else -> DsChip("ler")
+            }
+        }
+    }
+}
+
+
+/** Fundo de destaque dos cartões de duelo (Visão geral, Pré-jogo): brilho do tom no alto, cantos de 24 dp e borda fina. */
+internal fun Modifier.dsHero(tint: Color = C.PRIMARY): Modifier {
+    val shape = RoundedCornerShape(24.dp)
+    return this.clip(shape).background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.18f), DS.SURFACE))).border(1.dp, tint.copy(alpha = 0.45f), shape)
+}
+
+
+/** Faixa de duelo do topo do Pré-jogo: escudos, "FALTAM" e a forma recente dos dois (só leitura dos campos já lidos). */
+@Composable
+internal fun DuelBanner(slot: Int, d: SlotData) {
+    val my = known(d.fields, K.TEAM)
+    val rival = known(d.fields, K.RIVAL_TEAM)
+    val at = known(d.fields, K.MATCH_AT)?.toLongOrNull()
+    val mineLeft = known(d.fields, K.HOME) != "Fora"
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).dsHero(C.PRIMARY).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val mine: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { Crest(slot, 58.dp, my); Text(my ?: "Meu time", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp)) } }
+            val riv: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { RivalShield(rival, 58.dp, slot); Text(rival ?: "rival não lido", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp), color = if (rival != null) C.TEXT else C.WARN) } }
+            if (mineLeft) mine(Modifier.weight(1f)) else riv(Modifier.weight(1f))
+            Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (at != null && at > System.currentTimeMillis()) {
+                    Text("FALTAM", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = C.MUTED, letterSpacing = 1.4.sp)
+                    Text(countdownShort(at), fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = countdownColor(at), maxLines = 1)
+                } else Text("VS", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY)
+            }
+            if (mineLeft) riv(Modifier.weight(1f)) else mine(Modifier.weight(1f))
+        }
+        val fm = known(d.fields, K.MY_FORM); val fr = known(d.fields, K.RIVAL_FORM)
+        if (fm != null || fr != null) Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(if (mineLeft) fm else fr) }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) fr else fm) }
+        }
+    }
+}

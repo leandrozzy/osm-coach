@@ -47,3 +47,10 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Bolha** (`CaptureService.updateRing`): anel lima (parada), ciano pulsando + selo "● Capturando" (captura nos últimos 5 s), âmbar (pendências); cartão e botões nas cores do sistema.
 - Testes novos: `DesignKitTest` (`parseDm`, `monthName`, `ptDow`).
 - Não validado no aparelho: layout Compose real, escudos reais (vêm do OSM/web em tempo de execução), o selo "Capturando" e a animação da bolha.
+
+## Terceira etapa — Hoje, Slots, Pré-jogo, Diretor
+- **Hoje** (`TodayTab`): `HeroHeader` com a data, `NextGameHero` (próximo jogo entre os slots, escudos e contagem), botão lima "Abrir OSM e capturar" (vermelho "Encerrar" com captura ativa), grade "Meus slots" (`SlotTile`), "Prioridades do dia" (`TodoCard` em cartões por tom, mesma lista `todoItems/priorityPerSlot`) e o detalhe dos slots logo abaixo.
+- **Slots / SlotCardV2**: título maior e anel `Ring` com o progresso da rodada; veredito V/E/D abaixo.
+- **Visão geral** (`MatchupHero`): fundo de destaque `dsHero`. **Pré-jogo**: `DuelBanner` no topo (escudos, FALTAM, forma) e botão ciano da análise com IA.
+- **Tema**: `Shapes` do Material em 12–28 dp (nenhum canto reto); `OsmTitle` com barra lima.
+- Diretor, Artes, Ajustes, Elenco, Resultado, Histórico, Aprendizado herdam cabeçalho, títulos, cartões, chips e botões novos; o conteúdo e as regras não mudaram.

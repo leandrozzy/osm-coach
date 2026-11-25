@@ -213,6 +213,9 @@ class MainActivity : ComponentActivity() {
                     onSecondary = DS.ON_LIME, onSecondaryContainer = C.TEXT, onSurfaceVariant = C.MUTED,
                     primaryContainer = C.SURFACE2, onPrimaryContainer = C.TEXT, outline = C.BORDER, error = C.BAD
                 ),
+                shapes = androidx.compose.material3.Shapes(
+                    extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(DS.RADIUS_CONTROL), medium = RoundedCornerShape(DS.RADIUS_CARD), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(28.dp)
+                ),
                 typography = base.copy(
                     displayLarge = f(base.displayLarge), displayMedium = f(base.displayMedium), displaySmall = f(base.displaySmall),
                     headlineLarge = f(base.headlineLarge), headlineMedium = f(base.headlineMedium), headlineSmall = f(base.headlineSmall),
@@ -856,7 +859,7 @@ internal fun MatchupHero(slot: Int, d: SlotData) {
     val human = known(d.fields, K.RIVAL_HUMAN)
     val myStr = known(d.fields, K.MY_STRENGTH)?.toIntOrNull()
     val rivalStr = known(d.fields, K.RIVAL_STRENGTH)?.toIntOrNull()
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).dsHero(C.INFO).padding(16.dp)) {
         Text("📅  Próximo jogo", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
         val sub = listOfNotNull(known(d.fields, K.COMPETITION), known(d.fields, K.ROUND)?.let { "Rodada $it" }).joinToString(" • ")
         if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
@@ -2115,35 +2118,34 @@ internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
     val all = todoItems(data, now)
     val sorted = priorityPerSlot(all)
     val readySlots = data.slots.filter { !it.ended && it.state == null && sorted.none { t -> t.slot == it.slot } }.map { it.slot }
-    Column(Modifier.fillMaxWidth().padding(top = 14.dp).osmPanel().padding(vertical = 8.dp)) {
-        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Prioridade por slot", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-            if (sorted.isNotEmpty()) Pill("${sorted.size}", false)
-        }
-        if (sorted.isEmpty()) {
-            Text("✅ Todos os slots em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
-        }
-        for (t in sorted.take(6)) {
-            Row(
-                Modifier.fillMaxWidth().clickable { onOpenSlot(t.slot, t.tab) }.padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) { Text(t.icon, fontSize = 18.sp) }
+    DsSection("Prioridades do dia", if (sorted.isNotEmpty()) "${sorted.size}" else null)
+    if (sorted.isEmpty()) {
+        Text("✅ Todos os slots em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(C.OK.copy(alpha = 0.1f)).border(1.dp, C.OK.copy(alpha = 0.4f), RoundedCornerShape(DS.RADIUS_CARD)).padding(14.dp))
+    }
+    val tones = listOf(C.PRIMARY, C.INFO, C.GOLD)
+    for ((i, t) in sorted.take(6).withIndex()) {
+        val tone = tones[i % tones.size]
+        val shape = RoundedCornerShape(DS.RADIUS_CARD)
+        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(tone.copy(alpha = 0.08f)).border(1.dp, tone.copy(alpha = 0.45f), shape).clickable { onOpenSlot(t.slot, t.tab) }.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(tone.copy(alpha = 0.18f)).border(1.dp, tone.copy(alpha = 0.5f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text(t.icon, fontSize = 20.sp) }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(t.title + " →", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(t.title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(t.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("S${t.slot}", fontSize = 13.sp, color = C.GOLD, fontWeight = FontWeight.ExtraBold)
-                Text("  ›", fontSize = 18.sp, color = C.MUTED)
+                DsChip("S${t.slot}", C.GOLD)
+            }
+            Box(Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 44.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(DS.ELEVATED).border(1.dp, tone.copy(alpha = 0.6f), RoundedCornerShape(DS.RADIUS_CONTROL)), contentAlignment = Alignment.Center) {
+                Text("Abrir →", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tone)
             }
         }
-        if (readySlots.isNotEmpty() && sorted.isNotEmpty()) Text("✅ " + readySlots.joinToString(" • ") { "S$it" } + " em dia", fontSize = 13.sp, color = C.OK, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        val extra = all.size - sorted.size
-        if (extra > 0) Fold("📋", "Outras pendências", "$extra") {
-            for (t in all.filter { a -> sorted.none { it === a } }) Text("S${t.slot} · ${t.title} — ${t.sub}", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(vertical = 3.dp).clickable { onOpenSlot(t.slot, t.tab) })
-        }
+    }
+    if (readySlots.isNotEmpty() && sorted.isNotEmpty()) Text("✅ " + readySlots.joinToString(" • ") { "S$it" } + " em dia", fontSize = 13.sp, color = C.OK, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp))
+    val extra = all.size - sorted.size
+    if (extra > 0) Fold("📋", "Outras pendências", "$extra") {
+        for (t in all.filter { a -> sorted.none { it === a } }) Text("S${t.slot} · ${t.title} — ${t.sub}", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(vertical = 3.dp).clickable { onOpenSlot(t.slot, t.tab) })
     }
 }
 
@@ -2209,14 +2211,17 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (s.known) Color.White else C.MUTED)
+                Text(s.title, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (s.known) Color.White else C.MUTED)
                 val kind = when (s.compType) { "Batalha" -> "⚔ Batalha"; "Copa" -> "🏆 Copa"; else -> null }
                 val flagE = Flags.emojiOfCompetition(s.competition)
                 val sub = listOfNotNull(kind, s.competition?.let { c -> if (flagE != null) "$flagE $c" else c }, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
                 if (sub.isNotBlank() && !(s.ended && s.state == null)) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            s.win?.takeIf { at != null }?.let { w -> VerdictPill(verdictOf(w.win, w.draw, w.loss)) }
+            val rd = s.roundDone?.filter { it.isDigit() }?.toIntOrNull(); val rt = s.roundTotal?.filter { it.isDigit() }?.toIntOrNull()
+            if (rd != null && rt != null && rt > 0 && !(s.ended && s.state == null)) Ring(rd * 100 / rt, 54.dp, C.INFO, "J$rd")
+            else s.win?.takeIf { at != null }?.let { w -> VerdictPill(verdictOf(w.win, w.draw, w.loss)) }
         }
+        if (at != null && s.win != null && s.state == null && !s.ended) Box(Modifier.padding(top = 8.dp)) { VerdictPill(verdictOf(s.win.win, s.win.draw, s.win.loss)) }
         if (s.state != null || s.ended || at == null) {
             val msg = when {
                 s.state == "vazio" -> "➕ Sem liga ou batalha. Comece uma no OSM; o app acompanha sozinho."
@@ -2404,22 +2409,22 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
     val hasKey = Settings.get(ctx, Settings.GEMINI_KEY, "").isNotBlank()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 96.dp)) {
-        PageTitle("🏠", "Hoje", SimpleDateFormat("EEE, d 'de' MMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() })
+        HeroHeader("🏠", "Hoje", SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, tint = C.PRIMARY)
 
         KilledBanner(ctx, enabled, connected, batteryOk)
         if (!ready || !batteryOk || !hasKey) SetupBanner(ctx, enabled, connected, batteryOk, hasKey, onGoSettings)
 
-        Spacer(Modifier.height(8.dp))
+        NextGameHero(data.slots, onOpenSlot)
         if (data.active) {
             Button(
                 onClick = {
                     AppScope.scope.launch { Control.end(ctx.applicationContext) }
                     msg = "Captura encerrada. Processando em segundo plano…"
                 },
-                modifier = Modifier.fillMaxWidth().height(58.dp),
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                shape = RoundedCornerShape(DS.RADIUS_CARD),
                 colors = ButtonDefaults.buttonColors(containerColor = C.BAD)
-            ) { Text("ENCERRAR CAPTURA E PROCESSAR", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+            ) { Text("ENCERRAR CAPTURA E PROCESSAR", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White) }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { if (!openOsm(ctx)) msg = "OSM não encontrado." }, modifier = Modifier.fillMaxWidth()) {
                 Text("Voltar ao OSM (a mesma sessão continua)")
@@ -2441,19 +2446,26 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
                     }
                 },
                 enabled = ready,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(20.dp)
-            ) { Text("▶  Abrir OSM e capturar", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp),
+                shape = RoundedCornerShape(DS.RADIUS_CARD),
+                colors = ButtonDefaults.buttonColors(containerColor = C.PRIMARY, contentColor = DS.ON_LIME, disabledContainerColor = DS.ELEVATED, disabledContentColor = C.MUTED)
+            ) { Text("▶  ABRIR OSM E CAPTURAR", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold) }
             if (!ready) Text("⚙ Ative a leitura (acima) para liberar o botão.", color = C.WARN, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
             if (data.slots.none { it.known }) Panel { HowItWorks() }
         }
         if (msg.isNotBlank()) Text(msg, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
         ProcessCard()
 
+        DsSection("Meus slots")
+        val sortedSlots = data.slots.sortedBy { sl -> sl.slot }
+        val soonest = sortedSlots.filter { it.nextAt != null && !it.ended && it.state == null }.minByOrNull { it.nextAt!! }?.slot
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (s in sortedSlots) SlotTile(s, s.slot == soonest, Modifier.weight(1f)) { onOpenSlot(s.slot, 0) }
+        }
         TodoCard(data, onOpenSlot)
         NewsCard()
-        Title("Seus slots")
-        for (s in data.slots.sortedBy { sl -> sl.slot }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
+        DsSection("Detalhe dos slots")
+        for (s in sortedSlots) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
         data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }
@@ -3392,14 +3404,17 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
         }
         return
     }
+    DuelBanner(slot, d)
     RivalRadarCard(slot, d)
     val at = fv(d, K.MATCH_AT).toLongOrNull()
     // IA sempre no topo
-    OutlinedButton(
+    Button(
         onClick = { startReadLatest(ctx, slot) },
         enabled = !ProcessState.running,
-        modifier = Modifier.fillMaxWidth()
-    ) { Text("🤖 Ler a análise do rival com IA agora") }
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+        shape = RoundedCornerShape(DS.RADIUS_CARD),
+        colors = ButtonDefaults.buttonColors(containerColor = C.INFO, contentColor = DS.ON_LIME, disabledContainerColor = DS.ELEVATED, disabledContentColor = C.MUTED)
+    ) { Text("🤖 Ler a análise do rival com IA agora", fontWeight = FontWeight.ExtraBold) }
     ProcessCard()
     Panel {
         RefereeMeter(known(d.fields, K.REFEREE))
