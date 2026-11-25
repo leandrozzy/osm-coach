@@ -1100,7 +1100,9 @@ class Repo(private val ctx: Context) {
             }
             ScreenType.MISSIONS -> {
                 val up = LinkedHashMap<String, Pair<Long, String>?>()
-                if (x.has("newIn")) up["mission_new"] = Pair(now + x.optLong("newIn") * 1000L, "missões: novas")
+                // sem o "Novas missões dentro de" na tela (todas liberadas), o aviso de renovação antigo não vale mais: some o cronômetro vencido
+                // (antes ele ficava para sempre e "Atualizar: Missões" não saía do Hoje mesmo passando pela tela)
+                if (x.has("newIn")) up["mission_new"] = Pair(now + x.optLong("newIn") * 1000L, "missões: novas") else up["mission_new"] = null
                 if (x.has("weekIn")) up["mission_week"] = Pair(now + x.optLong("weekIn") * 1000L, "missões: semana")
                 if (up.isEmpty()) return 0
                 updateTimers(0, up, now)

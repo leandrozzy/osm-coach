@@ -76,3 +76,4 @@ Componentes tocados (todos herdam): `osmPanel` (sem brilho neon; borda 1 dp), `O
 - **Slots**: trocar de slot na barra do topo mantém a aba (Elenco continua Elenco).
 - **Abertura**: app aberto do zero começa sempre em Hoje (`onCreate` com `savedInstanceState == null`); girar a tela/memória e voltar do OSM mantêm o lugar.
 - **Botão "App" da bolha**: abre o slot em que o OSM está (`Diag.currentSlot`) na aba atual (`Route.tab = -1` = manter).
+- **Missões (Hoje "Atualizar: Missões")**: a tela com todas as missões liberadas só mostra "A semana reinicia em"; o cronômetro antigo de "novas missões" ficava vencido para sempre. Agora ler a tela sem esse contador apaga o cronômetro vencido (`Repo.applyExtra`, MISSIONS). Teste novo em `ScreensTest`.
