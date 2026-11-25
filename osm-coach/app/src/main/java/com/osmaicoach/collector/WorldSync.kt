@@ -77,24 +77,25 @@ object WorldSync {
         try {
             WorldSources.seed(db); healStale(db)
             steps = 4; step = 0; progress = null
-            running = "Lendo o que o OSM já mostrou"; UiBus.bump()
+            running = "Lendo o que o OSM já mostrou"; UiBus.bump(); Live.on("sync", "Base: lendo o que o OSM mostrou")
             runCatching { WorldOsm.refresh(ctx, force = true) }                           // local + Supabase (só os nomes lidos)
             if (pause.get()) { lastMessage = "Pausada."; return }
             if (!allowedNet(ctx)) { lastMessage = "Sem rede liberada (Wi‑Fi). O que já está no aparelho continua valendo."; return }
-            step = 1; running = "Países"; UiBus.bump()
+            step = 1; running = "Países"; Live.on("sync", "Base: países"); UiBus.bump()
             runCatching { ensureCountries(ctx, db) }
             if (pause.get()) { lastMessage = "Pausada."; return }
             runCatching { checkSupabase(ctx, db) }
-            step = 2; running = "Atualizando o que mudou no Supabase"; UiBus.bump()
+            step = 2; running = "Atualizando o que mudou no Supabase"; Live.on("sync", "Base: o que mudou no Supabase"); UiBus.bump()
             val changed = runCatching { WorldRemote.refreshCache(ctx, AndroidSql(db.w)) }.getOrDefault(0)
-            step = 3; running = "Bandeiras, escudos e fotos do OSM"; progress = null; UiBus.bump()
+            step = 3; running = "Bandeiras, escudos e fotos do OSM"; progress = null; Live.on("sync", "Base: bandeiras, escudos e fotos"); UiBus.bump()
             val got = runCatching { WorldImagesRemote.pull(ctx) }.getOrDefault(0)        // 1º: o que já está no Supabase (evita baixar da internet)
-            runCatching { WorldOsm.prefetchImages(ctx) }                                 // 2º: o que falta, pelos baixadores do app
-            val sent = runCatching { WorldImagesRemote.push(ctx) }.getOrDefault(0)       // 3º: o que o app tem e o Supabase ainda não
+            runCatching { WorldOsm.photosFromBase(ctx) }                                 // 2º: fotos pelo cadastro real (ID da API-Football: sem gastar a cota)
+            runCatching { WorldOsm.prefetchImages(ctx) }                                 // 3º: o que falta, pelos baixadores do app
+            val sent = runCatching { WorldImagesRemote.push(ctx) }.getOrDefault(0)       // 4º: o que o app tem e o Supabase ainda não
             imagesNote = "Imagens: $got baixadas do Supabase • $sent enviadas"
             runCatching { WorldCoverage.snapshot(db) }
             lastMessage = "Concluída: " + WorldOsm.lastReport + (if (changed > 0) " $changed itens atualizados do Supabase." else "") + " " + imagesNote
-        } finally { running = null; progress = null; step = 0; steps = 0; lock.unlock(); UiBus.bump() }
+        } finally { running = null; progress = null; step = 0; steps = 0; Live.off("sync", lastMessage.take(60)); lock.unlock(); UiBus.bump() }
     }
 
     private fun ensureCountries(ctx: Context, db: WorldDb) {

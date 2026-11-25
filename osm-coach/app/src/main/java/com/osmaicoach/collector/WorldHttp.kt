@@ -74,6 +74,7 @@ object WorldHttp {
         require(allowed(url)) { "URL não autorizada: $url" }
         require(body.size <= 2_000_000) { "corpo grande demais" }
         val c = URL(url).openConnection() as HttpURLConnection
+        val live = Live.begin(if ("/storage/" in url) "Supabase: enviando imagem" else "Supabase: gravando")
         try {
             c.instanceFollowRedirects = false; c.requestMethod = "POST"; c.doOutput = true
             c.connectTimeout = timeoutMs; c.readTimeout = timeoutMs
@@ -83,6 +84,6 @@ object WorldHttp {
             val code = c.responseCode
             val txt = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes().take(2000).toByteArray().toString(Charsets.UTF_8) }
             return Pair(code, txt)
-        } finally { c.disconnect() }
+        } finally { c.disconnect(); Live.end(live) }
     }
 }

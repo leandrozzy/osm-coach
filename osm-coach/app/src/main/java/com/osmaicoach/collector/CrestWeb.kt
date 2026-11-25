@@ -146,10 +146,12 @@ object CrestWeb {
     fun missing(filesDir: File, names: Collection<String>): List<String> = names.filter { find(filesDir, it) == null && missedRecently(filesDir, it) }
 
     /** true = consultou o TheSportsDB (precisa do intervalo entre pedidos). O repositório football-logos vem 1º: sem limite e em vetor. */
-    private fun fetch(ctx: Context, team: String): Boolean {
+    private fun fetch(ctx: Context, team: String): Boolean { return Live.run("Escudo: " + team.take(28)) { fetchInner(ctx, team) } }
+    private fun fetchInner(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         if (fetchRepo(ctx, team)) return false
-        val queries = variants(team, aliasOf(fd, team)).take(4)
+        // o apelido dado à mão vale mais; senão, o NOME REAL do cadastro (o OCR errou letras: "Wyersar", "Uzimvsiri")
+        val queries = variants(team, aliasOf(fd, team) ?: WorldOcr.realClubName(ctx, team)).take(4)
         for (q in queries) {
             val (code, body) = get(SEARCH + java.net.URLEncoder.encode(q, "UTF-8"), true)
             if (code == 429) { Diag.log("Escudo da web: limite de consultas, tento depois"); return true }
@@ -222,7 +224,7 @@ object CrestWeb {
     private fun fetchRepo(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         val idx = loadIndex(fd)
-        val path = variants(team, aliasOf(fd, team)).firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
+        val path = variants(team, aliasOf(fd, team) ?: WorldOcr.realClubName(ctx, team)).firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
         val url = RAW + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
         val (code, body) = get(url, true)
         if (code !in 200..299 || body == null || body.size > MAX_SVG) return false

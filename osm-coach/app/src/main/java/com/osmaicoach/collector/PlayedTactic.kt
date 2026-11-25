@@ -102,14 +102,40 @@ object PlayedTactic {
 
     suspend fun current(repo: Repo, slot: Int): JSONObject? {
         val f = repo.fieldMap(slot)
-        return repo.dao.plan(slot, kind(matchId(slot, f)))?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val id = matchId(slot, f)
+        val round = f[K.ROUND]?.value?.filter { it.isDigit() }?.toIntOrNull()
+        val rec = repo.dao.plan(slot, kind(id))?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        return carryFrom(rec, id, round, otherRecords(repo, slot))
+    }
+
+    private suspend fun otherRecords(repo: Repo, slot: Int): List<JSONObject> =
+        repo.dao.plansOf(slot).filter { it.kind.startsWith("played_") }.mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }
+
+    /**
+     * REGRA (25/11, pedido do usuário): a tática fica como está até o usuário mudar. Campo que NÃO foi lido nesta partida vale o valor da ÚLTIMA LEITURA daquele campo
+     * (mesmo slot e mesma competição, em rodada igual ou anterior): "se não leu mais, não mudei". Continua sendo SÓ leitura real (tela/Resultado/confirmação manual): nunca vem da
+     * sugestão. O valor emprestado é marcado `carried` (origem "última leitura") e uma leitura nova da partida sempre vence. Sem nenhuma leitura anterior, o campo segue desconhecido.
+     */
+    fun carryFrom(rec: JSONObject?, id: String, round: Int?, others: List<JSONObject>): JSONObject? {
+        val prefix = id.substringBeforeLast('|').substringBeforeLast('|') + "|"
+        val prev = others.filter { it.optString("id").startsWith(prefix) && it.optString("id") != id && (round == null || round < 0 || it.optInt("round", -1) <= round) }
+        if (prev.isEmpty()) return rec
+        val out = rec?.let { JSONObject(it.toString()) } ?: JSONObject().put("id", id).put("round", round ?: -1)
+        val fields = out.optJSONObject("fields") ?: JSONObject().also { out.put("fields", it) }
+        for (f in FIELDS) {
+            if (fields.optJSONObject(f) != null) continue
+            val best = prev.mapNotNull { it.optJSONObject("fields")?.optJSONObject(f) }.filter { it.optString("v").isNotBlank() }.maxByOrNull { it.optLong("at") } ?: continue
+            fields.put(f, JSONObject(best.toString()).put("carried", true).put("from", best.optString("src")).put("src", "última leitura"))
+        }
+        return out
     }
 
     /** Registro da partida de um jogo já jogado (usa a identidade guardada no tlog: rodada, rival e a competição atual do slot). */
     suspend fun forLog(repo: Repo, slot: Int, round: Int, rival: String?): JSONObject? {
         val f = repo.fieldMap(slot)
         val id = matchId(slot, f[K.COMPETITION]?.value ?: f[K.HUB_TITLE]?.value, f[K.ROUND_TOTAL]?.value, round, rival)
-        return repo.dao.plan(slot, kind(id))?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val rec = repo.dao.plan(slot, kind(id))?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+        return carryFrom(rec, id, round, otherRecords(repo, slot))
     }
 
     fun cell(played: JSONObject?, field: String): JSONObject? = played?.optJSONObject("fields")?.optJSONObject(field)

@@ -71,7 +71,8 @@ object GptGuide {
                 sb.append("\n### Meu elenco (${mine.size})\n")
                 for (p in mine) {
                     val iso = FlagManual.all(repo)[p.nameKey] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
-                    sb.append("- ${p.name}" + (p.posCode?.let { " | $it" } ?: "") + (p.age?.let { " | $it anos" } ?: "") + (p.strength?.let { " | força $it" } ?: "") + (Flags.countryName(iso)?.let { " | $it" } ?: "") + "\n")
+                    val real = runCatching { WorldOcr.realPlayer(ctx, slot, p.name) }.getOrNull()
+                    sb.append("- ${p.name}" + (real?.let { " (real: ${it.fullName ?: it.name}${it.dob?.let { d -> ", nasc. ${d.take(10)}" } ?: ""})" } ?: "") + (p.posCode?.let { " | $it" } ?: "") + (p.age?.let { " | $it anos" } ?: "") + (p.strength?.let { " | força $it" } ?: "") + (Flags.countryName(iso)?.let { " | $it" } ?: "") + "\n")
                     players++
                 }
             }

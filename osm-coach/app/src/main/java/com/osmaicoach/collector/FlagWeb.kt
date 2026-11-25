@@ -43,7 +43,8 @@ object FlagWeb {
         }
     }
 
-    private fun fetch(ctx: Context, iso: String): Boolean {
+    private fun fetch(ctx: Context, iso: String): Boolean { return Live.run("Bandeira: " + iso) { fetchInner(ctx, iso) } }
+    private fun fetchInner(ctx: Context, iso: String): Boolean {
         val c = URL("https://flagcdn.com/w160/$iso.png").openConnection() as HttpURLConnection
         c.connectTimeout = 10000; c.readTimeout = 15000
         c.setRequestProperty("User-Agent", "OSMCoach/5")

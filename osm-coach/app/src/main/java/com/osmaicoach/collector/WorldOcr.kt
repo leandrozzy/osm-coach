@@ -58,6 +58,7 @@ object WorldOcr {
 
     internal fun setMapping(db: WorldSql, kind: String, key: String, slot: Int, entityId: Long?, status: String, score: Int, evidence: String, nObs: Int) {
         val now = System.currentTimeMillis()
+        if ((db.long("SELECT COUNT(*) FROM football_osm_entity_mappings WHERE osm_kind=? AND osm_key=? AND slot=? AND algo='manual'", kind, key, slot.toString()) ?: 0L) > 0L) return   // confirmação manual nunca é sobrescrita pela automática
         val old = db.q("SELECT id,status,entity_id FROM football_osm_entity_mappings WHERE osm_kind=? AND osm_key=? AND slot=?", kind, key, slot.toString()) { Triple(it.getLong(0), it.getString(1), if (it.isNull(2)) null else it.getLong(2)) }.firstOrNull()
         if (old == null) {
             db.exec("INSERT INTO football_osm_entity_mappings(osm_kind,osm_key,slot,entity_type,entity_id,status,score,evidence,algo,observations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf(kind, key, slot, kind, entityId, status, score, evidence, WorldIdentity.ALGO, nObs, now, now))
@@ -102,8 +103,8 @@ object WorldOcr {
         var pulls = 0
         val env = Env(
             natIso = { slot, key -> runCatching { natIso(ctx, slot, key) }.getOrNull() },
-            pullClub = { name -> if (!remote) !wanted else if (pulls++ > 80) false else WorldRemote.pullClub(ctx, sql, name) },
-            pullPlayer = { name -> if (!remote) !wanted else if (pulls++ > 80) false else WorldRemote.pullPlayer(ctx, sql, name) },
+            pullClub = { name -> if (!remote) !wanted else if (pulls++ > 300) false else WorldRemote.pullClub(ctx, sql, name) },
+            pullPlayer = { name -> if (!remote) !wanted else if (pulls++ > 300) false else WorldRemote.pullPlayer(ctx, sql, name) },
             enrich = { name -> !wanted && budget(ctx) && run { val hits = runCatching { WorldWikidata.searchPlayers(ctx, db, name) }.getOrNull().orEmpty(); hits.forEach { runCatching { WorldWikidata.savePlayer(db, WorldImport.Countries.index(sql), it) } }; hits.isNotEmpty() } }
         )
         val n = evaluate(sql, env, pendingGroups(sql, max))
@@ -173,12 +174,23 @@ object WorldOcr {
         UiBus.bump()
     }
 
-    /** Identidade real de um jogador do slot (para a tela do jogador): só se confirmada ou provável. */
-    class RealPlayer(val name: String, val fullName: String?, val dob: String?, val nationality: String?, val iso: String?, val position: String?, val heightCm: Int?, val status: String, val score: Int, val wikidata: String?)
+    /** Identidade real de um jogador (para a tela do jogador, busca de fotos e prompts): só se confirmada ou provável. */
+    class RealPlayer(val name: String, val fullName: String?, val dob: String?, val nationality: String?, val iso: String?, val position: String?, val heightCm: Int?, val status: String, val score: Int, val wikidata: String?,
+                     val apifId: String? = null, val tmId: String? = null, val reepId: String? = null)
+    /** Busca a identificação do jogador no slot; se aquele slot ainda não o avaliou, vale a de outro slot (mesmo nome lido = mesmo jogador). */
     fun realPlayer(ctx: Context, slot: Int, playerName: String): RealPlayer? {
         val db: WorldSql = AndroidSql(WorldDb.get(ctx).readableDatabase); val k = WorldNorm.fold(playerName)
         return db.q(
-            "SELECT p.name,p.full_name,p.dob,p.nationality,p.nationality_iso,p.position,p.height_cm,m.status,m.score,p.wikidata FROM football_osm_entity_mappings m JOIN football_players p ON p.id=m.entity_id WHERE m.osm_kind='player' AND m.osm_key=? AND m.slot=? AND m.status IN ('confirmado','muito alta','provável')", k, slot.toString()
-        ) { RealPlayer(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), if (it.isNull(6)) null else it.getInt(6), it.getString(7), it.getInt(8), it.getString(9)) }.firstOrNull()
+            """SELECT p.name,p.full_name,p.dob,p.nationality,p.nationality_iso,p.position,p.height_cm,m.status,m.score,p.wikidata,p.apif_id,p.tm_id,p.reep_id
+               FROM football_osm_entity_mappings m JOIN football_players p ON p.id=m.entity_id
+               WHERE m.osm_kind='player' AND m.osm_key=? AND m.status IN ('confirmado','muito alta','provável')
+               ORDER BY (m.slot=?) DESC, CASE m.status WHEN 'confirmado' THEN 0 WHEN 'muito alta' THEN 1 ELSE 2 END, m.score DESC LIMIT 1""", k, slot.toString()
+        ) { RealPlayer(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), if (it.isNull(6)) null else it.getInt(6), it.getString(7), it.getInt(8), it.getString(9), it.getString(10), it.getString(11), it.getString(12)) }.firstOrNull()
     }
+
+    /** Nome REAL do clube lido pelo OCR (para achar escudo/foto com o nome certo quando o OCR errou uma letra). */
+    fun realClubName(ctx: Context, osmName: String): String? = runCatching {
+        val db: WorldSql = AndroidSql(WorldDb.get(ctx).readableDatabase)
+        db.q("SELECT c.name FROM football_osm_entity_mappings m JOIN football_clubs c ON c.id=m.entity_id WHERE m.osm_kind='club' AND m.osm_key=? AND m.status IN ('confirmado','muito alta','provável') ORDER BY CASE m.status WHEN 'confirmado' THEN 0 ELSE 1 END, m.score DESC LIMIT 1", WorldNorm.fold(osmName)) { it.getString(0) }.firstOrNull()
+    }.getOrNull()
 }

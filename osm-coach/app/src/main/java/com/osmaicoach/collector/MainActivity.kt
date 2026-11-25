@@ -2066,6 +2066,7 @@ internal fun BrandBar() {
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(C.BORDER))
+        LiveStrip()
     }
 }
 

@@ -80,16 +80,18 @@ object WorldOsm {
         try {
             val wdb = WorldDb.get(ctx); val sql: WorldSql = AndroidSql(wdb.w)
             var purged = 0L
-            if (Settings.get(ctx, "world_slim_v1", "0") != "1") {
-                if (wdb.count("football_players") + wdb.count("football_clubs") > 0) {
-                    val t0 = System.currentTimeMillis(); Diag.log("Base: enxugando a cópia local (${wdb.count("football_players")} jogadores, ${wdb.count("football_clubs")} clubes)…")
-                    purged = WorldClean.slim(sql); Diag.log("Base: cópia enxugada em ${System.currentTimeMillis() - t0} ms; compactando…")
-                    runCatching { wdb.w.execSQL("VACUUM") }; Diag.log("Base: compactação concluída em ${System.currentTimeMillis() - t0} ms")
-                }
-                Settings.put(ctx, "world_slim_v1", "1")
+            // Cópia local enxuta: com o Supabase configurado, a cópia só guarda candidatos dos nomes lidos. Se ela estiver grande (restos da importação antiga), enxuga —
+            // por CONDIÇÃO (não por marcador), para se corrigir sozinha se uma tentativa anterior não terminou.
+            if (WorldRemote.cfg(ctx) != null && (wdb.count("football_players") > 60_000 || wdb.count("football_clubs") > 60_000)) {
+                val t0 = System.currentTimeMillis(); Live.on("osm", "Base: enxugando a cópia local"); Diag.log("Base: enxugando a cópia local (${wdb.count("football_players")} jogadores, ${wdb.count("football_clubs")} clubes)…")
+                purged = WorldClean.slim(sql); Diag.log("Base: cópia enxugada em ${System.currentTimeMillis() - t0} ms; compactando…")
+                runCatching { wdb.w.execSQL("VACUUM") }; Diag.log("Base: compactação concluída em ${System.currentTimeMillis() - t0} ms")
             }
+            Live.on("osm", "Base: lendo o que o OSM mostrou")
             val obs = backfill(ctx)
-            var resolved = 0; repeat(6) { val k = WorldOcr.resolvePending(ctx, 400); resolved += k }
+            Live.on("osm", "Base: identificando nomes lidos")
+            var resolved = 0
+            for (round in 1..8) { val k = WorldOcr.resolvePending(ctx, 400); resolved += k; if (k == 0) break }
             markScope(ctx)
             lastAt = System.currentTimeMillis()
             lastReport = buildString {
@@ -97,7 +99,7 @@ object WorldOsm {
                 append("Lidos do app: $obs leituras novas; $resolved identificadas.")
             }
             UiBus.bump(); lastReport
-        } finally { running = false }
+        } finally { running = false; Live.off("osm") }
     }
 
     // ------------------------------------------------------------------ imagens (reaproveita os baixadores do app: bandeira Flagpedia, escudo web, foto Commons)
@@ -109,6 +111,19 @@ object WorldOsm {
         val players = db.query("SELECT id,wikidata FROM football_players WHERE osm_seen>0") { Pair(it.getLong(0), it.getString(1)) }
         return ImgStat(isos.count { FlagWeb.file(ctx.filesDir, it) != null }.toLong(), isos.size.toLong(), clubs.count { CrestWeb.find(ctx.filesDir, it) != null }.toLong(), clubs.size.toLong(),
             players.count { WorldImages.file(ctx, it.first).exists() }.toLong(), players.count { it.second != null }.toLong())
+    }
+
+    /** Jogadores dos slots já identificados que têm ID da API-Football no cadastro real e ainda estão sem foto: baixa a imagem (não gasta a cota da API). Devolve quantas salvou. */
+    suspend fun photosFromBase(ctx: Context, budget: Int = 12): Int {
+        val repo = Repo(ctx); var n = 0
+        for (slot in 1..4) for (p in repo.dao.playersOf(slot)) {
+            if (n >= budget) return n
+            if (PhotoWeb.file(ctx.filesDir, p.nameKey) != null) continue
+            val re = WorldOcr.realPlayer(ctx, slot, p.name)?.takeIf { it.apifId != null && (it.status == "confirmado" || it.status == "muito alta") } ?: continue
+            if (PhotoWeb.saveFromBaseId(ctx, p.nameKey, re.apifId!!)) n++
+            kotlinx.coroutines.delay(400)
+        }
+        return n
     }
 
     /** Pede as imagens que faltam (só do escopo do OSM). Fotos: no máx. [photoBudget] por chamada (cota do Wikidata/Commons). Devolve quantas fotos baixou. */

@@ -36,8 +36,14 @@ object WorldRemote {
     fun get(ctx: Context, path: String, timeoutMs: Int = 20_000): Pair<Int, String?> {
         val c = cfg(ctx) ?: return Pair(-1, null)
         val t0 = System.currentTimeMillis()
+        val live = Live.begin("Supabase: " + liveName(path))
         return try { WorldHttp.text(c.url + path, headers(c), 6_000_000, timeoutMs).also { Diag.log("Base/Supabase GET ${path.substringBefore('?').take(40)} → HTTP ${it.first} em ${System.currentTimeMillis() - t0} ms") } }
         catch (e: Exception) { Diag.log("Base/Supabase GET ${path.substringBefore('?').take(40)} FALHOU em ${System.currentTimeMillis() - t0} ms: ${e.javaClass.simpleName} ${e.message?.take(80)}"); throw e }
+        finally { Live.end(live) }
+    }
+    private fun liveName(path: String): String = when {
+        "wf_match_clubs" in path -> "buscando clube"; "wf_match_players" in path -> "buscando jogador"; "wf_stats" in path -> "testando conexão"
+        "wf_images" in path -> "índice de imagens"; "wf_competitions" in path -> "competição"; "wf_clubs" in path || "wf_players" in path -> "atualizando o que mudou"; else -> path.substringBefore('?').takeLast(24)
     }
 
     class Stats(val countries: Long, val competitions: Long, val clubs: Long, val players: Long, val lastRun: String?, val images: Long = 0)
@@ -136,8 +142,8 @@ object WorldRemote {
     private fun logPull(db: WorldSql, kind: String, key: String, found: Boolean) { db.exec("INSERT OR REPLACE INTO football_pull_log(kind,key,at,found) VALUES(?,?,?,?)", arrayOf(kind, key, System.currentTimeMillis(), if (found) 1 else 0)) }
 
     /** Pede ao Supabase os clubes parecidos com o nome lido e guarda na cópia local. `false` = sem conexão/erro (tenta de novo depois). */
-    fun pullClub(ctx: Context, db: WorldSql, raw: String): Boolean {
-        val q = WorldNorm.fold(raw); if (q.length < 3 || cfg(ctx) == null || !due(db, "club", q)) return true
+    fun pullClub(ctx: Context, db: WorldSql, raw: String, force: Boolean = false): Boolean {
+        val q = WorldNorm.fold(raw); if (q.length < 3 || cfg(ctx) == null || (!force && !due(db, "club", q))) return true
         val (code, body) = get(ctx, "/rest/v1/rpc/wf_match_clubs?q=${enc(q)}&lim=40")
         if (code !in 200..299 || body == null) return false
         val arr = JSONArray(body)
@@ -145,8 +151,8 @@ object WorldRemote {
         logPull(db, "club", q, arr.length() > 0); return true
     }
 
-    fun pullPlayer(ctx: Context, db: WorldSql, raw: String): Boolean {
-        val pk = WorldNorm.playerKey(raw); if (pk.surname.length < 2 || cfg(ctx) == null || !due(db, "player", pk.full)) return true
+    fun pullPlayer(ctx: Context, db: WorldSql, raw: String, force: Boolean = false): Boolean {
+        val pk = WorldNorm.playerKey(raw); if (pk.surname.length < 2 || cfg(ctx) == null || (!force && !due(db, "player", pk.full))) return true
         val last = pk.full.substringAfterLast(' ')
         val (code, body) = get(ctx, "/rest/v1/rpc/wf_match_players?p_full=${enc(pk.full)}&p_surname=${enc(pk.surname)}&p_last=${enc(last)}&lim=120")
         if (code !in 200..299 || body == null) return false
@@ -184,4 +190,10 @@ object WorldRemote {
         return changed
     }
     private fun isoUtc(ms: Long): String = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date(ms))
+
+    /** Competições que o cadastro real (Supabase) tem para um país: nome e nível. Consulta ao vivo, sem guardar. */
+    fun countryCompetitions(ctx: Context, iso: String): List<Pair<String, Int?>> = runCatching {
+        val (code, body) = get(ctx, "/rest/v1/wf_competitions?iso2=eq.${enc(iso.lowercase())}&select=name,level&order=level.asc.nullslast,name.asc&limit=60")
+        if (code !in 200..299 || body == null) emptyList() else JSONArray(body).let { a -> (0 until a.length()).map { a.getJSONObject(it).let { o -> Pair(o.optString("name"), if (o.isNull("level")) null else o.optInt("level")) } } }
+    }.getOrDefault(emptyList())
 }

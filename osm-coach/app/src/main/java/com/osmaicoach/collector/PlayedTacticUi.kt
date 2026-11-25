@@ -78,7 +78,7 @@ internal fun PlayedTable(slot: Int, plan: JSONObject) {
                 TextButton(onClick = { editing = f }) { Text(if (pv == null) "Confirmar" else "Corrigir", fontSize = 12.sp) }
             }
         }
-        Text("Só entra o que foi lido da tela de Tática do OSM, do Resultado ou confirmado por você. O que não foi lido fica desconhecido: o resultado do jogo não é atribuído à sugerida.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+        Text("Só entra o que foi LIDO da tela de Tática do OSM, do Resultado ou confirmado por você. Campo que não foi lido de novo vale a última leitura (a tática fica como está até você mudar); sem nenhuma leitura anterior, fica desconhecido e o resultado não é atribuído à sugerida.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
     }
     val f = editing
     if (f != null) {

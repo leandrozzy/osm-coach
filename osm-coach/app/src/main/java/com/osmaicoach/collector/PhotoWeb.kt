@@ -280,13 +280,16 @@ object PhotoWeb {
             var done = 0
             for (p in queue) {
                 if (usedToday(ctx) >= BUDGET) { block(ctx); Diag.log("Fotos: cota do dia usada ($BUDGET), volto amanhã"); break }
-                val terms = searchTerms(p.name)
+                // jogador já identificado no cadastro real: busca pelo NOME COMPLETO real ("Anton Ari Einarsson"), não pela abreviação do jogo ("A. Einarsson")
+                val real = runCatching { WorldOcr.realPlayer(ctx, p.slotId, p.name) }.getOrNull()
+                val nm = real?.fullName?.takeIf { it.isNotBlank() } ?: p.name
+                val terms = searchTerms(nm)
                 if (terms.isEmpty()) continue
-                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() } ?: real?.iso
                 var cands: List<Cand> = emptyList()
                 var stop = false; var again = false; var zero = false
                 for ((ti, term) in terms.withIndex()) {
-                    val (code, body, hdr) = get("$HOST/players/profiles?search=" + java.net.URLEncoder.encode(term, "UTF-8"), apiKey)
+                    val (code, body, hdr) = Live.run("Foto (API-Football): " + p.name.take(22)) { get("$HOST/players/profiles?search=" + java.net.URLEncoder.encode(term, "UTF-8"), apiKey) }
                     addUsed(ctx)
                     if (code == 429) { Diag.log("Fotos: limite por minuto, espero e tento de novo"); delay(65_000L); again = true; break }
                     if (code == 401 || code == 403) { Diag.log("Fotos: chave recusada pela API ($code)"); block(ctx); stop = true; break }
@@ -301,7 +304,7 @@ object PhotoWeb {
                 }
                 if (stop) break
                 if (again) continue
-                val pk = pick(p.name, p.age, iso, cands)
+                val pk = pick(nm, p.age, iso, cands)
                 val e = JSONObject().put("s", pk.state).put("at", System.currentTimeMillis())
                 if (pk.cand != null) {
                     val img = pk.cand.photo?.let { get(it, null).second }
@@ -319,6 +322,20 @@ object PhotoWeb {
             }
             if (done > 0) UiBus.bump()
         } finally { running = false }
+    }
+
+    /**
+     * Foto pelo cadastro real: o Reep traz o ID do jogador na API-Football; a imagem sai de media.api-sports.io SEM consumir a cota diária (não é consulta à API) e SEM chave.
+     * Salva como as outras fotos (`photos/<nameKey>.png`, vale para os 4 slots); nunca sobrescreve foto existente (manual vale mais). Devolve se salvou.
+     */
+    suspend fun saveFromBaseId(ctx: Context, nameKey: String, apifId: String): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (!apifId.all { it.isDigit() } || apifId.isEmpty() || file(ctx.filesDir, nameKey) != null) return@withContext file(ctx.filesDir, nameKey) != null
+        val img = Live.run("Foto (cadastro real): $nameKey".take(40)) { get("https://media.api-sports.io/football/players/$apifId.png", null).second } ?: return@withContext false
+        val ok = img.size in 1500..600_000 && runCatching { BitmapFactory.decodeByteArray(img, 0, img.size) }.getOrNull()?.also { it.recycle() } != null
+        if (!ok) return@withContext false
+        File(dir(ctx.filesDir), "$nameKey.png").writeBytes(img)
+        val ix = idx(ctx.filesDir); ix.put(nameKey, JSONObject().put("s", "ok").put("at", System.currentTimeMillis()).put("id", apifId.toInt()).put("src", "base")); saveIdx(ctx.filesDir, ix)
+        Diag.log("Foto de $nameKey ← cadastro real (API-Football #$apifId)"); UiBus.bump(); true
     }
 
     /** Chave nova: libera o bloqueio do dia (401/403 da chave antiga). Os "sem acerto" NÃO são limpos: só voltam depois de tentar todos. */
