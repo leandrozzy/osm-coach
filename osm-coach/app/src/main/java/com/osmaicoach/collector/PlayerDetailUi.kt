@@ -179,6 +179,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                             if (p.forSale != true && !out && info?.red != true && info?.injured != true && info?.yellow != true && trainText == null) Chip("✅ Disponível", C.OK)
                         }
                     }
+                    WorldRealBox(slot, p.name)   // identidade real (Base Mundial), camada separada do jogo
                     DSection("Informações") {
                         KV("Setor / posição", "${cat} • ${p.posCode ?: "?"}")
                         KV("Idade", p.age?.let { "$it anos" } ?: "?")

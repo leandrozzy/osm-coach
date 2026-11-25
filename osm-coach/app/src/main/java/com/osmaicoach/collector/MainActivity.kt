@@ -1741,7 +1741,7 @@ internal fun App() {
     LaunchedEffect(tab, openSlot, openTab) {
         ui.edit().putInt("tab", tab).putInt("slot", openSlot).putInt("slotTab", openTab).apply()
     }
-    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "🎨" to "Artes", "⚙️" to "Ajustes")
+    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "🎨" to "Artes", "🌐" to "Base", "⚙️" to "Ajustes")
     // Botão Voltar do Android: fecha o slot aberto, depois volta para Hoje (em vez de fechar o app).
     BackHandler(enabled = openSlot > 0) { openSlot = 0 }
     BackHandler(enabled = openSlot == 0 && tab != 0) { tab = 0 }
@@ -1765,7 +1765,7 @@ internal fun App() {
                         selected = tab == i,
                         onClick = { tab = i; openSlot = 0 },
                         icon = {
-                            DsIcon(listOf("home", "cal", "slots", "dir", "art", "gear")[i], 26.dp, if (tab == i) DS.ON_LIME else C.MUTED)
+                            DsIcon(listOf("home", "cal", "slots", "dir", "art", "globe", "gear")[i], 26.dp, if (tab == i) DS.ON_LIME else C.MUTED)
                         },
                         label = {
                             val newArts = if (i == 4) Arts.unseenCount(ctx).also { UiBus.version } else 0
@@ -1782,7 +1782,7 @@ internal fun App() {
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (tab) {
-                0 -> TodayTab(onGoSettings = { tab = 5 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
+                0 -> TodayTab(onGoSettings = { tab = 6 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
                 1 -> AgendaTab()
                 2 -> if (openSlot > 0) {
                     key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it }) { openSlot = 0 } }
@@ -1791,6 +1791,7 @@ internal fun App() {
                     key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it }) { openSlot = 0 } }
                 } else DirectorTab { slot, t -> openSlot = slot; openTab = t }
                 4 -> ArtsTab()
+                5 -> WorldTab()
                 else -> SettingsTab()
             }
         }

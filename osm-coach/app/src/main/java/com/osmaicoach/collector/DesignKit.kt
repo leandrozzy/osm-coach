@@ -399,7 +399,7 @@ internal fun iconFor(e: String): String? = when (e.trim().trimEnd('️')) {
     "⏰", "⏱", "🕘", "🕒" -> "clock"; "✅", "✔", "✓" -> "check"; "⚠", "❗", "🔔" -> "warn"; "⚡" -> "bolt"; "📊" -> "chart"; "📈" -> "trend"
     "👥", "👕", "👤" -> "users"; "🏋", "🏃" -> "whistle"; "⚔" -> "swords"; "🔑" -> "key"; "🧪" -> "flask"; "👁", "🔎", "🔍", "🕵", "🛰" -> "eye"
     "🎯", "📋" -> "target"; "🏆", "🥇" -> "trophy"; "❤", "💪" -> "heart"; "💰", "💎", "🪙" -> "coin"; "🧤" -> "glove"; "🛡" -> "shieldc"; "ℹ" -> "info"
-    "🏟" -> "shield"; "🖼", "📷" -> "img"; "🧠", "🤖" -> "bolt"; "🌡" -> "info"; "🚀" -> "go"; "💬" -> "list"; "🎉" -> "trophy"; "🔮" -> "eye"
+    "🏟" -> "shield"; "🖼", "📷" -> "img"; "🧠", "🤖" -> "bolt"; "🌐", "🌍" -> "globe"; "🌡" -> "info"; "🚀" -> "go"; "💬" -> "list"; "🎉" -> "trophy"; "🔮" -> "eye"
     else -> null
 }
 

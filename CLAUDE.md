@@ -33,7 +33,7 @@ Código ativo: `osm-coach/` (applicationId `com.osmaicoach.collector`, minSdk 30
     confere alarmes a cada minuto). Diagnóstico em Ajustes: log de eventos de aviso (`Notifier.fireLog`) e status do `Push`; botão para a Inicialização automática da ASUS/ROG.
   - IA: `Ai.kt` (`Settings`, `AiClient`, `Processor`, `MetaRefresh`): Gemini, Groq/compatível, OpenRouter, Mistral, Claude.
     Chaves ficam em SharedPreferences `settings` (nunca no código/repositório).
-  - UI/avisos: `MainActivity` (abas Hoje (com Coins no fim), Agenda, Slots, Diretor, Artes, Ajustes; a Coins deixou de ser aba; a antiga aba Sessões virou "Capturas e leitura com IA" em Ajustes → Dados), `OsmUi`, `Illustrations`,
+  - UI/avisos: `MainActivity` (abas Hoje (com Coins no fim), Agenda, Slots, Diretor, Artes, **Base** (Central Mundial, índice 5), Ajustes (índice 6); a Coins deixou de ser aba; a antiga aba Sessões virou "Capturas e leitura com IA" em Ajustes → Dados), `OsmUi`, `Illustrations`,
     `EvolutionUi`, `Notifier` (alarmes/notificações), `Export` (diagnóstico JSON), `Health`, `Runtime` (`AppScope`, `Diag`).
 - `osm-coach/app/src/test/java/com/osmaicoach/collector/` — ~30 arquivos de teste JUnit; `Fx.kt` tem os fixtures
   (`Fx.line`, `Fx.ocr`) para simular OCR.
@@ -89,6 +89,12 @@ Nada aqui foi validado no aparelho salvo quando dito; o histórico diz o que foi
 - **Ambiente**: Gradle precisa de `ANDROID_HOME=/opt/android-sdk` (commandlinetools + `platforms;android-35` + `build-tools;35.0.0`); o daemon cai na 1ª execução: rodar de novo.
 - **Sempre dizer o que não foi validado no aparelho** (OCR real, notificações, gestos, rede do aparelho, layout Compose real).
 
+
+## Base Mundial (branch `design`)
+Aba "Base" + banco **separado** `world_football.db` (não mexe no Room v1). Detalhes, fontes, licenças e limites em [docs/BASE_MUNDIAL.md](docs/BASE_MUNDIAL.md).
+Regras: dado real ≠ atributo OSM (só `football_osm_entity_mappings` liga os dois); o gancho `WorldOcr.fromExtraction` em `Repo.apply` é isolado e nunca bloqueia o OCR;
+nunca fundir homônimos/time B/clubes de países diferentes; foto só com licença livre conferida; hosts só da allowlist `WorldHttp.HOSTS`; sem chaves no repositório.
+Lógica de negócio usa `WorldSql` (testes com `JdbcSql`). NADA da Base foi validado no aparelho.
 
 ## Histórico
 
