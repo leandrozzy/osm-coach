@@ -75,7 +75,7 @@ $$;
 create or replace function wf_match_players(p_full text, p_surname text, p_last text, lim int default 120) returns setof wf_players language sql stable as $$
   select * from wf_players
    where name_fold = p_full or tail2 = p_surname or tail1 = p_last or tail1 = p_surname
-   order by (name_fold = p_full) desc, similarity(name_fold, p_full) desc
+   order by (name_fold = p_full) desc, (tm_id is not null or apif_id is not null) desc, similarity(name_fold, p_full) desc    -- profissionais conhecidos (Transfermarkt/API-Football) primeiro
    limit least(lim, 250);
 $$;
 

@@ -6,7 +6,7 @@ package com.osmaicoach.collector
  * margem sobre o 2º candidato e nenhuma contradição relevante. Nunca une homônimos, equipe B/principal ou clubes de países diferentes.
  */
 object WorldIdentity {
-    const val ALGO = "id-v4"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
+    const val ALGO = "id-v5"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
     class Config(val veryHigh: Int = 98, val probable: Int = 90, val ambiguous: Int = 75, val margin: Int = 6, val minSignals: Int = 2)
     val DEFAULT = Config()
 
@@ -65,7 +65,7 @@ object WorldIdentity {
     fun rankClubs(o: ClubObs, cands: List<ClubC>): List<Ranked<ClubC>> = cands.map { c -> matchClub(o, listOf(c)).let { Ranked(c, it.score, it.reasons) } }.sortedWith(compareByDescending<Ranked<ClubC>> { it.score }.thenByDescending { it.c.prominence })
 
     // ---------------------------------------------------------------- jogadores
-    class PlayerC(val id: Long, val name: String, val fullName: String? = null, val aliases: List<String> = emptyList(), val birthYear: Int? = null, val nationality: String? = null, val position: String? = null)
+    class PlayerC(val id: Long, val name: String, val fullName: String? = null, val aliases: List<String> = emptyList(), val birthYear: Int? = null, val nationality: String? = null, val position: String? = null, val pro: Boolean = false)
     /** `ageNow` = idade mostrada no jogo (camada OSM: só evidência suave); `year` = ano de referência da leitura. */
     class PlayerObs(val name: String, val ageNow: Int? = null, val year: Int = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR), val nationality: String? = null, val position: String? = null, val independent: Int = 1)
 
@@ -119,7 +119,14 @@ object WorldIdentity {
             }
             val gp = posGroup(o.position); val cp = posGroup(c0.position)
             // o código de posição do jogo (DD, MC…) nem sempre combina com a posição do cadastro (meia × ala): com idade E país batendo pesa pouco
-            if (gp != null && cp != null) { if (gp == cp) { sig++; score += 5; why.add("mesma posição") } else { score -= if (ageNatOk(c0)) 2 else 8; why.add("posição diferente") } }
+            if (gp != null && cp != null) {
+                if (gp == cp) { sig++; score += 5; why.add("mesma posição") }
+                // goleiro × jogador de linha nunca é o mesmo jogador (E. Martínez GOL virou uma atacante de mesmo nome, 26/11)
+                else if (gp == "G" || cp == "G") { score -= 30; contra = true; why.add("goleiro × linha: posição incompatível") }
+                else { score -= if (ageNatOk(c0)) 2 else 8; why.add("posição diferente") }
+            }
+            // cadastro de jogador PROFISSIONAL conhecido (Transfermarkt/API-Football): desempata homônimos (as jogadoras e amadores não têm esses IDs)
+            if (c0.pro) { score += 5; why.add("cadastro profissional (Transfermarkt/API-Football)") }
             // jogador só com SOBRENOME no jogo ("Dumfries"): sozinho o nome vale pouco, mas idade + nacionalidade + posição batendo JUNTAS é evidência forte
             if (name < 90 && sig >= 3 && !contra) { score += 13; why.add("sobrenome + idade + nacionalidade + posição batem") }
             else if (name < 90 && name >= 60 && !contra && uniqueAgeNat && ageNatOk(c0)) { score += 15; why.add("único candidato com a mesma idade e nacionalidade") }

@@ -354,7 +354,7 @@ private fun ExcludeButton(kind: String, key: String, raw: String, onDone: () -> 
 internal fun PickReal(kind: String, key: String, raw: String) {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     var text by remember(key) { mutableStateOf(raw) }; var busy by remember(key) { mutableStateOf(false) }; var msg by remember(key) { mutableStateOf("") }
-    var players by remember(key) { mutableStateOf<List<WorldCatalog.PlayerCand>>(emptyList()) }; var clubs by remember(key) { mutableStateOf<List<WorldCatalog.ClubCand>>(emptyList()) }
+    var msg2 by remember(key) { mutableStateOf("") }; var players by remember(key) { mutableStateOf<List<WorldCatalog.PlayerCand>>(emptyList()) }; var clubs by remember(key) { mutableStateOf<List<WorldCatalog.ClubCand>>(emptyList()) }
     val game = rememberLoaded(null as GameCtx?, 0, key) {
         val db = AndroidSql(WorldDb.get(ctx).readableDatabase)
         val row = db.rows("SELECT context,league FROM football_ocr_observations WHERE kind=? AND norm=? ORDER BY at DESC LIMIT 1", kind, key).firstOrNull()
@@ -371,6 +371,8 @@ internal fun PickReal(kind: String, key: String, raw: String) {
         val db = AndroidSql(WorldDb.get(ctx).w)
         val net = runCatching { if (kind == "club") WorldRemote.pullClub(ctx, db, text, force = true) else WorldRemote.pullPlayer(ctx, db, text, force = true) }.getOrDefault(false)
         render(g)                                                                  // 2º: com o que veio do cadastro real
+        // 3º: nenhum candidato bom no Supabase → 2ª fonte (API-Football, chave do usuário); a pesquisa manual sempre pode usá-la
+        if (kind == "player" && players.none { it.score >= 75 }) { val k = runCatching { WorldApif.search(ctx, db, text, force = true) }.getOrDefault(-1); if (k > 0) render(g) else if (k < 0 && !WorldApif.enabled(ctx)) msg2 = "Dica: coloque a chave da API-Football em Ajustes → Fotos de jogadores para o app procurar também lá." }
         val n = if (kind == "club") clubs.size else players.size
         msg = if (!net) "Sem conexão com o Supabase: mostrando só o que já está no aparelho." else if (n == 0) "Nada parecido com esse nome. Tente outra grafia." else ""
         busy = false } }
@@ -385,6 +387,7 @@ internal fun PickReal(kind: String, key: String, raw: String) {
         Button(onClick = { search(game) }, enabled = !busy, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (busy) "Procurando…" else "Procurar de novo com este nome", fontWeight = FontWeight.ExtraBold) }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp), color = C.PRIMARY, trackColor = DS.ELEVATED)
         if (msg.isNotEmpty()) Text(msg, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+        if (msg2.isNotEmpty()) Text(msg2, fontSize = 12.sp, color = C.GOLD, modifier = Modifier.padding(top = 4.dp))
         fun scoreColor(sc: Int) = if (sc >= 90) C.OK else if (sc >= 75) C.GOLD else C.MUTED
         for (c in players) {
             val p = c.real

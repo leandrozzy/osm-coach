@@ -100,6 +100,14 @@ object WorldOsm {
             }
             Live.on("osm", "Base: lendo o que o OSM mostrou")
             migrateLeague(sql)
+            // 26/11: o cadastro trazia JOGADORAS (Soccerdonna) e homônimos sem cadastro profissional que confundiam a identificação (E. Martínez → atacante, R. Dias → Patrícia Dias). Uma vez:
+            // some da cópia local quem veio do Supabase sem ID de Transfermarkt/API-Football (e não foi confirmado por você); o que for preciso volta sob demanda, já filtrado
+            if (Settings.get(ctx, "world_clean_nopro_v1", "") != "1") {
+                sql.exec("DELETE FROM football_pull_hits WHERE kind='player' AND entity_id IN (SELECT id FROM football_players WHERE source_id='supabase' AND tm_id IS NULL AND apif_id IS NULL)", emptyArray())
+                sql.exec("DELETE FROM football_players WHERE source_id='supabase' AND tm_id IS NULL AND apif_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE osm_kind='player' AND algo='manual' AND entity_id IS NOT NULL)", emptyArray())
+                sql.exec("DELETE FROM football_pull_log WHERE kind='player'", emptyArray())
+                Settings.put(ctx, "world_clean_nopro_v1", "1")
+            }
             // regra de identificação nova: reavalia tudo (menos o que você confirmou à mão) e esquece os "não achei" do cadastro para buscar de novo
             if (Settings.get(ctx, "world_algo", "") != WorldIdentity.ALGO) {
                 sql.exec("UPDATE football_ocr_observations SET status='novo'", emptyArray()); sql.exec("DELETE FROM football_pull_log WHERE found=0", emptyArray()); Settings.put(ctx, "world_algo", WorldIdentity.ALGO)

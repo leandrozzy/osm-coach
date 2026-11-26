@@ -171,10 +171,30 @@ def build_clubs_and_comps(src_dir, iso_of, limit=None):
         c["row_hash"] = h([c[k] for k in ("key", "wikidata", "reep_id", "name", "iso2", "level", "kind")]); out_comps.append(c)
     return out_clubs, out_comps
 
+def women_ids(src_dir):
+    """reep_id das jogadoras (quem tem cadastro no Soccerdonna): serve para APAGAR do Supabase o que uma carga anterior gravou."""
+    for r in read_csv("people.csv", src_dir):
+        if g(r, "type") == "player" and g(r, "key_soccerdonna") and g(r, "reep_id"): yield g(r, "reep_id")
+
+def purge_women(supa, ids, size=60):
+    batch, n = [], 0
+    def flush():
+        nonlocal batch, n
+        if batch and supa: supa.call("DELETE", "/rest/v1/wf_players?reep_id=in.(" + ",".join(batch) + ")", prefer="return=minimal")
+        n += len(batch); batch = []
+    for i, rid in enumerate(ids, 1):
+        batch.append(rid)
+        if len(batch) >= size:
+            flush()
+            if (i // size) % 50 == 0: print(f"  jogadoras apagadas: {n}…", flush=True)
+    flush()
+    print(f"jogadoras (Soccerdonna) removidas do Supabase: {n}", flush=True)
+
 def players(src_dir, iso_of, limit=None):
     n = 0
     for r in read_csv("people.csv", src_dir):
         if g(r, "type") != "player": continue
+        if g(r, "key_soccerdonna"): continue         # Soccerdonna = base de futebol FEMININO (Elizabeth Martínez, Patrícia Dias…): fora do escopo do OSM
         n += 1
         if limit and n > limit: return
         name, rp = g(r, "name"), g(r, "reep_id")
@@ -195,10 +215,10 @@ def players(src_dir, iso_of, limit=None):
 class Supa:
     def __init__(self, url, key):
         self.url, self.key = url.rstrip("/"), key
-    def call(self, method, path, body=None, retries=5):
+    def call(self, method, path, body=None, retries=5, prefer="return=representation"):
         data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
         for i in range(retries):
-            hdr = {"apikey": self.key, "Content-Type": "application/json", "Prefer": "return=representation"}
+            hdr = {"apikey": self.key, "Content-Type": "application/json", "Prefer": prefer}
             if not self.key.startswith("sb_"):   # chaves novas (sb_secret_…) não são JWT: só apikey; as legadas (eyJ…) também em Authorization
                 hdr["Authorization"] = f"Bearer {self.key}"
             req = urllib.request.Request(self.url + path, data=data, method=method, headers=hdr)
@@ -239,7 +259,7 @@ def push(supa, fn, rows, size, label, stats):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default="countries,competitions,clubs,players")
+    ap.add_argument("--only", default="countries,competitions,clubs,players", help="inclua purge_women para apagar do Supabase as jogadoras já carregadas")
     ap.add_argument("--from-dir"); ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--limit", type=int)
     a = ap.parse_args()
     only = set(a.only.split(","))
@@ -258,6 +278,7 @@ def main():
             clubs, comps = build_clubs_and_comps(a.from_dir, iso_of, a.limit)
             if "competitions" in only: push(supa, "wf_upsert_competitions", comps, 300, "competições", stats)
             if "clubs" in only: push(supa, "wf_upsert_clubs", clubs, 200, "clubes", stats)
+        if "purge_women" in only: purge_women(supa, women_ids(a.from_dir))
         if "players" in only: push(supa, "wf_upsert_players", players(a.from_dir, iso_of, a.limit), 300, "jogadores", stats)
     except Exception as e:
         status, msg = "erro", str(e)[:400]; print("ERRO:", msg, file=sys.stderr)

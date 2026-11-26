@@ -94,3 +94,27 @@ class Round3PromptTest {
         assertTrue(GptGuide.INSTRUCTIONS.contains("0V 0E 0D"))
     }
 }
+
+class Round3WorldTest {
+    private val y = 2026
+    @Test fun goalkeeperNeverMatchesAForwardWithTheSameInitialAndSurname() {              // E. Martínez (GOL, 34) × Elizabeth Noemi Martínez (atacante, 1992)
+        val woman = WorldIdentity.PlayerC(1, "Elizabeth Noemi Martínez", null, emptyList(), 1992, "Argentina", "forward", pro = false)
+        val man = WorldIdentity.PlayerC(2, "Emiliano Martínez", null, emptyList(), 1992, "Argentina", "goalkeeper", pro = true)
+        val obs = WorldIdentity.PlayerObs("E. Martínez", ageNow = 34, year = y, nationality = "Argentina", position = "GR")
+        val r = WorldIdentity.matchPlayer(obs, listOf(woman, man))
+        assertEquals(2L, r.best?.id)
+        val onlyWoman = WorldIdentity.matchPlayer(obs, listOf(woman))
+        assertTrue("sem o goleiro, a atacante não pode ficar confirmada: ${onlyWoman.status}", onlyWoman.status != WorldIdentity.Status.CONFIRMED && onlyWoman.status != WorldIdentity.Status.PROBABLE)
+    }
+    @Test fun professionalRecordBreaksTheTieBetweenSameSurnameAndAge() {                  // Dias: Rúben (profissional) × Patrícia
+        val patricia = WorldIdentity.PlayerC(1, "Patrícia Dias", null, emptyList(), 1998, "Portugal", "defender", pro = false)
+        val ruben = WorldIdentity.PlayerC(2, "Rúben Dias", null, emptyList(), 1997, "Portugal", "defender", pro = true)
+        val r = WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Dias", ageNow = 29, year = y, nationality = "Portugal", position = "DO"), listOf(patricia, ruben))
+        assertEquals(2L, r.best?.id)
+    }
+    @Test fun apiFootballProfilesAreParsed() {
+        val body = """{"response":[{"player":{"id":1100,"name":"D. Calvert-Lewin","firstname":"Dominic","lastname":"Calvert-Lewin","age":29,"birth":{"date":"1997-03-16"},"nationality":"England","height":"187 cm","position":"Attacker"}}]}"""
+        val h = WorldApif.parse(body).single()
+        assertEquals("1100", h.id); assertEquals("Dominic Calvert-Lewin", h.name); assertEquals("1997-03-16", h.dob); assertEquals(187, h.heightCm)
+    }
+}

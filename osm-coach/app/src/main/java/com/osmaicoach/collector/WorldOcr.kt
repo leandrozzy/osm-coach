@@ -73,8 +73,8 @@ object WorldOcr {
 
     internal fun playerCandidates(db: WorldSql, pk: WorldNorm.PlayerKey): List<WorldIdentity.PlayerC> {
         if (pk.surname.isEmpty()) return emptyList()
-        val rows = db.q("SELECT id,name,full_name,birth_year,COALESCE(nationality,nationality_iso),position FROM football_players WHERE surname_key=? OR name_key=? OR id IN (SELECT entity_id FROM football_pull_hits h WHERE h.kind='player' AND h.key=?) LIMIT 300", pk.surname, pk.full, pk.full) {
-            WorldIdentity.PlayerC(it.getLong(0), it.getString(1), it.getString(2), emptyList(), if (it.isNull(3)) null else it.getInt(3), it.getString(4), it.getString(5))
+        val rows = db.q("SELECT id,name,full_name,birth_year,COALESCE(nationality,nationality_iso),position,tm_id,apif_id FROM football_players WHERE surname_key=? OR name_key=? OR id IN (SELECT entity_id FROM football_pull_hits h WHERE h.kind='player' AND h.key=?) LIMIT 300", pk.surname, pk.full, pk.full) {
+            WorldIdentity.PlayerC(it.getLong(0), it.getString(1), it.getString(2), emptyList(), if (it.isNull(3)) null else it.getInt(3), it.getString(4), it.getString(5), !it.getString(6).isNullOrBlank() || !it.getString(7).isNullOrBlank())
         }
         return if (pk.initial.isNotEmpty() && pk.given.isNotEmpty()) rows.filter { WorldNorm.playerKey(it.name).initial.let { i -> i.isEmpty() || i == pk.initial } || WorldNorm.fold(it.fullName ?: "").startsWith(pk.initial) } else rows
     }
@@ -129,7 +129,12 @@ object WorldOcr {
             natIso = { slot, key -> runCatching { natIso(ctx, slot, key) }.getOrNull() },
             pullClub = { name -> if (!remote) !wanted else if (pulls++ > 300) false else WorldRemote.pullClub(ctx, sql, name) },
             pullPlayer = { name -> if (!remote) !wanted else if (pulls++ > 300) false else WorldRemote.pullPlayer(ctx, sql, name) },
-            enrich = { name -> !wanted && budget(ctx) && run { val hits = runCatching { WorldWikidata.searchPlayers(ctx, db, name) }.getOrNull().orEmpty(); hits.forEach { runCatching { WorldWikidata.savePlayer(db, WorldImport.Countries.index(sql), it) } }; hits.isNotEmpty() } }
+            // 2ª fonte quando o Supabase não tem o jogador (ou só tem candidato fraco): API-Football (chave do usuário) e, sem Supabase, o Wikidata
+            enrich = { name ->
+                val api = remote && WorldApif.enabled(ctx) && runCatching { WorldApif.search(ctx, sql, name) }.getOrDefault(-1) > 0
+                val wiki = !wanted && budget(ctx) && run { val hits = runCatching { WorldWikidata.searchPlayers(ctx, db, name) }.getOrNull().orEmpty(); hits.forEach { runCatching { WorldWikidata.savePlayer(db, WorldImport.Countries.index(sql), it) } }; hits.isNotEmpty() }
+                api || wiki
+            }
         )
         val n = evaluate(sql, env, pendingGroups(sql, max))
         if (n > 0) UiBus.bump()
@@ -160,7 +165,7 @@ object WorldOcr {
         fun cands(): List<WorldIdentity.PlayerC> = playerCandidates(db, pk).let { a -> if (full == null) a else (a + playerCandidates(db, WorldNorm.playerKey(rawShort))).distinctBy { it.id } }
         var r = WorldIdentity.matchPlayer(obs, cands())
         // sem candidato forte localmente: busca no Wikidata (assíncrona, limitada, sem bloquear o OCR) e reavalia
-        if ((r.status == WorldIdentity.Status.UNRESOLVED || r.status == WorldIdentity.Status.AMBIGUOUS) && pk.given.isNotEmpty() && env.enrich(raw)) r = WorldIdentity.matchPlayer(obs, cands())
+        if ((r.status == WorldIdentity.Status.UNRESOLVED || r.status == WorldIdentity.Status.AMBIGUOUS || r.score < 90) && pk.surname.length >= 3 && env.enrich(raw)) r = WorldIdentity.matchPlayer(obs, cands())
         val ev = r.reasons.joinToString("; ") + " • margem ${r.margin} • $independent observação(ões) independente(s)"
         setMapping(db, KIND_PLAYER, norm, slot, r.best?.id, statusName(r.status), r.score, ev, independent)
         if (r.status == WorldIdentity.Status.CONFIRMED && r.best != null) {
