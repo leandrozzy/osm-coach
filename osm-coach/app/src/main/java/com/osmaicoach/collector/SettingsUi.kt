@@ -596,7 +596,7 @@ internal fun SettingsTab() {
             val wr = rememberLoaded(0 to emptyList<PhotoWeb.Missing>(), pTick, UiBus.version) { PhotoWeb.wikiReport(ctx) }
             val wrManual = rememberLoaded(0, pTick, UiBus.version) { PhotoWeb.items(ctx).count { it.source == "manual" } }
             var pickFor by remember { mutableStateOf<String?>(null) }
-            val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 val k = pickFor; pickFor = null
                 if (uri != null && k != null) {
                     android.widget.Toast.makeText(ctx, "Processando a foto…", android.widget.Toast.LENGTH_SHORT).show()
@@ -616,7 +616,7 @@ internal fun SettingsTab() {
                 Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Text("${m.name} (S${m.slot})", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     Text(m.reason, fontSize = 12.sp, color = C.MUTED)
-                    GhostButton("📷 Escolher foto") { pickFor = m.key; pickPhoto.launch("image/*") }
+                    GhostButton("📷 Escolher foto") { pickFor = m.key; pickPhoto.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
                 }
             }
             if (wr.second.size > 40) Text("+ ${wr.second.size - 40} outros: a lista mostra 40 por vez.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))

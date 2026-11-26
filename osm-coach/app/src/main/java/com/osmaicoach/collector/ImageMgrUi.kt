@@ -31,7 +31,7 @@ internal fun ImageManagerFold() {
     var shown by remember { mutableStateOf(25) }
     var pickFor by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<Triple<String, String, suspend () -> String>?>(null) }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val k = pickFor; pickFor = null
         if (uri != null && k != null) {
             android.widget.Toast.makeText(ctx, "Processando a foto…", android.widget.Toast.LENGTH_SHORT).show()
@@ -71,7 +71,7 @@ internal fun ImageManagerFold() {
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = { pickFor = it.key; pick.launch("image/*") }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("📷 Trocar", fontSize = 12.sp) }
+                OutlinedButton(onClick = { pickFor = it.key; pick.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("📷 Trocar", fontSize = 12.sp) }
                 OutlinedButton(onClick = { AppScope.scope.launch(Dispatchers.IO) { PhotoWeb.retryPhoto(ctx, it.key); PhotoWeb.run(ctx, force = true) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("🔁 Buscar de novo", fontSize = 12.sp) }
                 if (it.source in listOf("manual", "wiki", "api"))
                     OutlinedButton(onClick = { AppScope.scope.launch(Dispatchers.IO) { PhotoWeb.removePhoto(ctx, it.key) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)) { Text("🗑 Remover", fontSize = 12.sp) }
@@ -134,7 +134,7 @@ internal fun CrestManagerFold() {
     var adding by remember { mutableStateOf(false) }
     var cleanup by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val name = pickFor; pickFor = null
         if (uri != null && name != null) {
             AppScope.scope.launch(Dispatchers.IO) {
@@ -175,7 +175,7 @@ internal fun CrestManagerFold() {
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = { pickFor = e.name; pick.launch("image/*") }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(if (e.source == "nenhum" || e.source == "bloqueado") "📷 Adicionar" else "📷 Trocar", fontSize = 12.sp) }
+                OutlinedButton(onClick = { pickFor = e.name; pick.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(if (e.source == "nenhum" || e.source == "bloqueado") "📷 Adicionar" else "📷 Trocar", fontSize = 12.sp) }
                 if (e.source == "bloqueado") OutlinedButton(onClick = { CrestAdmin.unblock(ctx, e.name) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("↩ Desbloquear", fontSize = 12.sp) }
                 else OutlinedButton(onClick = { delete = e }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)) { Text("🗑 Excluir", fontSize = 12.sp) }
             }
@@ -205,7 +205,7 @@ internal fun CrestManagerFold() {
             onDismissRequest = { adding = false },
             title = { Text("Adicionar escudo") },
             text = { OutlinedTextField(newName, { newName = it }, singleLine = true, label = { Text("Nome do clube (como aparece no jogo)") }, modifier = Modifier.fillMaxWidth()) },
-            confirmButton = { TextButton(enabled = Txt.key(newName).length >= 3, onClick = { adding = false; pickFor = newName.trim(); pick.launch("image/*") }) { Text("Escolher imagem") } },
+            confirmButton = { TextButton(enabled = Txt.key(newName).length >= 3, onClick = { adding = false; pickFor = newName.trim(); pick.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }) { Text("Escolher imagem") } },
             dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancelar") } }
         )
     }

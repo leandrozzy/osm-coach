@@ -116,7 +116,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
     val info = rememberLoaded<PlayerInfo?>(null, rememberTick(4000L), UiBus.version to p.nameKey) { loadPlayerInfo(ctx, slot, p) }
     var tool by remember { mutableStateOf(0) }
     var confirmRemove by remember { mutableStateOf(false) }
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             android.widget.Toast.makeText(ctx, "Processando a foto de ${p.name}…", android.widget.Toast.LENGTH_SHORT).show()
             AppScope.scope.launch(Dispatchers.IO) {
@@ -142,7 +142,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                     // cabeçalho: foto grande + nome + força
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val img = remember(p.nameKey, UiBus.version) { PhotoWeb.bitmapAny(ctx.filesDir, p.nameKey)?.asImageBitmap() }
-                        val m = Modifier.size(104.dp).clip(CircleShape).border(2.dp, catColor(cat), CircleShape).clickable { pickPhoto.launch("image/*") }
+                        val m = Modifier.size(104.dp).clip(CircleShape).border(2.dp, catColor(cat), CircleShape).clickable { pickPhoto.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
                         if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = m.background(Color.White))
                         else Canvas(m) {
                             val w = size.width; val h = size.height
@@ -225,7 +225,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                             if (ph.at > 0) KV("Salva", "${ago(ph.at)} • ${ph.bytes / 1024} KB")
                         }
                         Row2 {
-                            Act("📷 Alterar foto") { pickPhoto.launch("image/*") }
+                            Act("📷 Alterar foto") { pickPhoto.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
                             Act("🔁 Buscar de novo") { AppScope.scope.launch(Dispatchers.IO) { PhotoWeb.retryPhoto(ctx, p.nameKey); PhotoWeb.run(ctx, force = true) }; android.widget.Toast.makeText(ctx, "Buscando outra foto…", android.widget.Toast.LENGTH_SHORT).show() }
                         }
                         Row2 {

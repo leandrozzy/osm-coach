@@ -913,8 +913,15 @@ object Parsers {
         if (t.contains("jornada")) return false
         val l = o.tokens.count { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.44f..0.49f && it.yc in 0.10f..0.97f }
         val r = o.tokens.count { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.50f..0.56f && it.yc in 0.10f..0.97f }
-        return l >= 5 && r >= 5
+        if (l >= 5 && r >= 5) return true
+        // fim da página (só a lista de notas): o OCR perde várias bolinhas vermelhas/verdes das notas, mas os nomes "9. Fulano" nas duas bordas continuam (diagnóstico 25/11: caía em OTHER_OSM e o fim nunca era visto)
+        return notesLines(o, left = true) >= 4 && notesLines(o, left = false) >= 4 && l + r >= 2
     }
+
+    private val RX_NOTE_NAME = Regex("^[\\(\\[]?\\s*\\d?\\s*\\d{1,2}\\s*\\.\\s*\\p{L}{3,}")
+    /** Linhas "N. Nome" da lista de notas de um dos lados (esquerda = casa, direita = visitante). */
+    fun notesLines(o: OcrResult, left: Boolean): Int = o.lines.count { (if (left) it.xc < 0.2f else it.xc > 0.8f) && it.yc in 0.10f..0.99f && RX_NOTE_NAME.containsMatchIn(it.text.trim()) }
+    fun notesPage(o: OcrResult): Boolean = notesLines(o, true) >= 4 && notesLines(o, false) >= 4
 
     private val RX_MINUTE = Regex("^(\\d{1,3})\\s*['’′]$")
     private val RX_SHIRT = Regex("^\\d{1,2}\\.\\s*")

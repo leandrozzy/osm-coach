@@ -436,7 +436,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         val pd: Pending = when (type) {
             ScreenType.RESULT -> {
                 val r = ex.matchReport ?: return
-                (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (gap) it.endSeen = true } }
+                // a página das notas não tem o cabeçalho com a rodada: continua a MESMA leitura (antes abria uma leitura nova a cada quadro e nunca chegava ao fim)
+                (cur?.takeIf { r.round == null || it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty() || Parsers.notesPage(ocr)) { it.ratings = true; if (gap) it.endSeen = true } }
             }
             ScreenType.CALENDAR -> {
                 // o fim do calendário é sempre "Última rodada" + "Resumo da época": o quadro anterior é a última rodada

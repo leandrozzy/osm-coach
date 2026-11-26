@@ -70,3 +70,20 @@ class Round3CrestTest {
         assertTrue(CrestAdmin.isBlocked(fd, "25 anniversary"))                         // lixo de banner nunca volta
     }
 }
+
+class Round3PhotoTest {
+    @Test fun transparentPngWithoutFaceNeverTurnsBlack() {
+        val w = 64; val h = 64
+        val px = IntArray(w * h) { 0x00000000 }                                  // transparente, RGB preto (o caso do PNG sem fundo)
+        for (y in 20..44) for (x in 20..44) px[y * w + x] = 0xFFC08060.toInt()    // "jogador" opaco
+        val f = PhotoFit.fit(px, w, h, 32)
+        val corner = f.px[0]
+        assertEquals(PhotoFit.BG, corner)
+        assertTrue("fundo preto", ((corner shr 16) and 255) > 200)
+    }
+    @Test fun notesPageIsRecognizedEvenWhenTheRatingCirclesAreMissed() {
+        val lines = (1..6).flatMap { i -> listOf(Fx.line("$i. Jogador$i", 0.04f, 0.1f + 0.1f * i, 0.06f), Fx.line("${i + 10}. Rival$i", 0.96f, 0.1f + 0.1f * i, 0.06f)) } +
+            listOf(Fx.line("5", 0.47f, 0.45f, 0.02f), Fx.line("8", 0.53f, 0.45f, 0.02f))
+        assertTrue(Parsers.isMatchResult(Fx.ocr(*lines.toTypedArray())))
+    }
+}
