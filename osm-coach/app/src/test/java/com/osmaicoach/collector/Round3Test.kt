@@ -87,3 +87,10 @@ class Round3PhotoTest {
         assertTrue(Parsers.isMatchResult(Fx.ocr(*lines.toTypedArray())))
     }
 }
+
+class Round3PromptTest {
+    @Test fun guideInstructionsExplainExpectationAndNoZeroedStats() {
+        assertTrue(GptGuide.INSTRUCTIONS.contains("EXPECTATIVA DA TEMPORADA"))
+        assertTrue(GptGuide.INSTRUCTIONS.contains("0V 0E 0D"))
+    }
+}

@@ -106,6 +106,38 @@ object ArtsGpt {
             return parts.joinToString("; ")
         }
         val squadMine = squad("MY", 5); val squadRiv = squad("RIVAL", 3)
+        fun numOf(x: String?) = x?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }
+        val posNow = numOf(f[K.LEAGUE_POS]?.value)
+        val objective = numOf(f[K.MY_OBJECTIVE]?.value)
+        /** "V 2×0 Rival (casa)" dos últimos jogos lidos: fatos reais para a arte (nada de campanha zerada quando ninguém jogou). */
+        fun lastGames(n: Int) = ms.takeLast(n).joinToString("; ") { m -> "${m.result} ${m.scoreMine}×${m.scoreOpp} ${repo.realClub(m.opponent) ?: m.opponent ?: "?"}" + (if (m.home == true) " (casa)" else if (m.home == false) " (fora)" else "") }
+        val campanha = if (ms.isEmpty()) "a temporada ainda não teve jogos lidos (NÃO escreva campanha, vitórias, gols nem aproveitamento: ainda não existem)" else "${v}V ${e}E ${d}D, aproveitamento $aprov%, gols ${ms.sumOf { it.scoreMine ?: 0 }} × ${ms.sumOf { it.scoreOpp ?: 0 }}"
+        /** Gols do jogo (os DOIS lados, com minuto e autor quando lidos), como na capa de jornal. */
+        suspend fun goalsBlock(m: MatchEntity, opp: String): String {
+            val j = repo.dao.plan(slot, "mr_R${m.round}")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+            val mineHome = j?.takeIf { it.has("mineHome") }?.optBoolean("mineHome") ?: m.home
+            val goals = ArrayList<Triple<String?, String, Boolean?>>()
+            val evs = j?.optJSONArray("events")
+            if (evs != null) for (i in 0 until evs.length()) {
+                val ev = evs.optString(i)
+                if (!ev.contains(" gol de ")) continue
+                val who = ev.substringAfter(" gol de ").substringBefore(" (").trim()
+                if (who.isBlank()) continue
+                val min = Regex("^\\s*(\\d+(?:\\+\\d+)?)").find(ev)?.groupValues?.get(1)
+                val ours = if (mineHome == null) null else (ev.contains("(casa)") == mineHome)
+                if (goals.any { it.first == min && it.third == ours && Txt.sim(Txt.key(it.second), Txt.key(who)) >= 0.6f }) continue
+                goals.add(Triple(min, who, ours))
+            }
+            suspend fun gt(g: Triple<String?, String, Boolean?>): String { val r = runCatching { WorldOcr.realPlayer(ctx, slot, g.second) }.getOrNull(); return (g.first?.let { "$it' " } ?: "") + (r?.let { x -> x.fullName ?: x.name } ?: g.second) }
+            suspend fun side(list: List<Triple<String?, String, Boolean?>>, total: Int): String {
+                val parts = ArrayList<String>(); for (g in list) parts.add(gt(g))
+                repeat((total - list.size).coerceAtLeast(0)) { parts.add("gol sem autor identificado") }
+                return if (parts.isEmpty()) "nenhum gol" else parts.joinToString("; ")
+            }
+            val ours = goals.filter { it.third == true }.sortedBy { it.first?.substringBefore('+')?.toIntOrNull() ?: 999 }
+            val theirs = goals.filter { it.third == false }.sortedBy { it.first?.substringBefore('+')?.toIntOrNull() ?: 999 }
+            return "- $team (${m.scoreMine ?: 0} gol(s)): ${side(ours, m.scoreMine ?: 0)}.\n- $opp (${m.scoreOpp ?: 0} gol(s)): ${side(theirs, m.scoreOpp ?: 0)}.\n"
+        }
         val sb = StringBuilder()
         fun head(kind: String, fmt: String = "vertical 1080x1350") =
             sb.append("ARTE NOVA E INDEPENDENTE: ignore o conteúdo, os nomes e o estilo das imagens anteriores desta conversa.\nCrie um pôster de futebol $fmt: $kind. Siga as instruções do projeto (realista, estádio à noite, futebol de campo, escudos e nomes exatos). Gere uma composição NOVA e criativa, diferente das anteriores.\n\n")
@@ -199,17 +231,34 @@ object ArtsGpt {
             }
             "GOLEADA" -> {
                 val m = last ?: return null
+                val opp = repo.realClub(m.opponent) ?: m.opponent ?: return null
                 head("GOLEADA")
-                sb.append("$team ${m.scoreMine} × ${m.scoreOpp} ${repo.realClub(m.opponent)}, rodada ${m.round}. Clube: $club. Cena de comemoração com torcida e sinalizadores.\n")
+                sb.append("$team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}" + (if (m.home == true) " (em casa)" else if (m.home == false) " (fora)" else "") + ". Clube: $club.\n")
+                sb.append("GOLS (mostre quem marcou, com minuto quando informado):\n" + goalsBlock(m, opp))
+                sb.append("Cite pelo NOME os autores informados; para \"gol sem autor identificado\" escreva só \"gol do <clube>\". Nunca invente nome nem minuto.\n")
+                if (squadMine.isNotEmpty()) sb.append("Elenco do $team (nomes reais, para rostos e camisas): $squadMine.\n")
+                sb.append("Cena: comemoração intensa dos jogadores e da torcida, sinalizadores, placar enorme e o escudo do $team. Manchete curta sobre a goleada (use só o placar e os fatos acima).\n")
             }
             "STREAK" -> {
                 val n = ms.reversed().takeWhile { it.result == "V" }.size
                 head("SEQUÊNCIA DE VITÓRIAS")
-                sb.append("$team: $n vitórias seguidas, aproveitamento $aprov%. Clube: $club. Cena de festa da torcida.\n")
+                sb.append("$team: $n vitórias seguidas, aproveitamento $aprov%. Clube: $club.\n")
+                sb.append("As vitórias da sequência: ${lastGames(maxOf(1, minOf(n, 6)))}.\n")
+                if (squadMine.isNotEmpty()) sb.append("Craques do $team (nomes reais): $squadMine.\n")
+                sb.append("Cena: time embalado, jogadores comemorando juntos, torcida em festa, uma chama/energia nas cores do clube. Texto: manchete sobre a sequência (\"$n seguidas\") e uma linha fina com 1 ou 2 placares acima. Não invente adversários nem placares.\n")
             }
             "LEADER", "TITLE", "OBJECTIVE" -> {
                 head(if (c.kind == "LEADER") "LÍDER DA LIGA" else if (c.kind == "TITLE") "CAMPEÃO" else "OBJETIVO ALCANÇADO")
-                sb.append("$club. Campanha: ${v}V ${e}E ${d}D. Cena: taça dourada e estádio em festa.\n")
+                sb.append("$club. Campanha: $campanha.\n")
+                posNow?.let { sb.append("Posição atual na tabela: ${it}º lugar.\n") }
+                if (c.kind == "OBJECTIVE" && objective != null) sb.append("Meta da diretoria: ${objective}º lugar ou melhor — ALCANÇADA" + (posNow?.let { " (${it}º)" } ?: "") + ".\n")
+                if (ms.isNotEmpty()) sb.append("Últimos jogos: ${lastGames(5)}.\n")
+                if (squadMine.isNotEmpty()) sb.append("Craques do $team (nomes reais, para rostos e camisas): $squadMine.\n")
+                sb.append(when (c.kind) {
+                    "LEADER" -> "Cena: taça dourada ao fundo, o time na ponta da tabela. Manchete sobre a liderança (use só a posição e o aproveitamento acima).\n"
+                    "TITLE" -> "Cena: elenco levantando a taça de campeão, confete dourado, estádio em festa. Manchete de campeão.\n"
+                    else -> "Cena: elenco comemorando de braços erguidos, faixa de \"meta cumprida\". Manchete sobre o objetivo alcançado (cite a meta e a posição).\n"
+                })
             }
             "BUY", "PLAYER" -> {
                 val key = c.key ?: return null
@@ -223,11 +272,41 @@ object ArtsGpt {
                 head("CRAQUES DO TIME")
                 sb.append("Clube: $club. Craques (nomes reais): " + squad("MY", 4) + ". Rostos fiéis aos jogadores reais, camisa oficial do $team.\n")
             }
-            "MOMENT", "CAMP", "SEASON", "EXPECT" -> {
-                val l5 = ms.takeLast(5)
-                head(when (c.kind) { "MOMENT" -> "MOMENTO DO TIME"; "EXPECT" -> "EXPECTATIVA DA TEMPORADA"; "SEASON" -> "RESUMO DA TEMPORADA"; else -> "CAMPANHA" })
-                sb.append("Clube: $club. Campanha: ${v}V ${e}E ${d}D, aproveitamento $aprov%, gols ${ms.sumOf { it.scoreMine ?: 0 }} × ${ms.sumOf { it.scoreOpp ?: 0 }}. Últimos jogos: ${l5.joinToString(" ") { it.result.orEmpty() }}.\n")
-                sb.append(if (bad) "Tom: o time não está bem; mostre recuperação e \"vamos melhorar\", nunca humilhação.\n" else "Tom: confiante.\n")
+            "EXPECT" -> {
+                // EXPECTATIVA = o que o clube QUER ALCANÇAR (a meta), não balanço de resultados: meta da diretoria, força do elenco entre os rivais da liga e os craques
+                val rows = League.table(repo.dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }, "va").filter { it.value != null }
+                val rank = rows.sortedByDescending { it.value }.indexOfFirst { League.key(it.club) == League.key(teamRaw) || League.key(it.club) == League.key(team) }.takeIf { it >= 0 }?.plus(1)
+                val tier = if (rank == null) null else if (rank <= maxOf(1, rows.size / 4)) "FAVORITO" else if (rank <= rows.size * 6 / 10) "NA BRIGA" else "AZARÃO"
+                head("EXPECTATIVA DA TEMPORADA")
+                sb.append("Clube: $club.\n")
+                sb.append("EXPECTATIVA = o que o $team QUER ALCANÇAR nesta temporada (a META e a ambição), não um balanço de resultados.\n")
+                sb.append("Fatos da expectativa:\n")
+                sb.append(if (objective != null) "- Meta da diretoria: terminar em ${objective}º lugar ou melhor.\n" else "- O jogo não informou uma meta numérica: expresse só a ambição de começo de temporada (sem inventar posição).\n")
+                if (rank != null) sb.append("- O elenco é o ${rank}º mais valioso entre ${rows.size} clubes da competição (${when (tier) { "FAVORITO" -> "candidato ao topo"; "NA BRIGA" -> "time para brigar pela parte de cima"; else -> "azarão que quer surpreender" }}).\n")
+                if (my != null) sb.append("- Força geral do time: $my.\n")
+                if (posNow != null && ms.isNotEmpty()) sb.append("- Posição atual: ${posNow}º lugar.\n")
+                sb.append("- Campanha: $campanha.\n")
+                if (squadMine.isNotEmpty()) sb.append("Craques que vão buscar a meta (nomes reais, para rostos e camisas corretos): $squadMine.\n")
+                sb.append("Cena: o elenco posado de braços cruzados e olhar determinado, tomando o estádio vazio ao amanhecer ou à noite, com o escudo do $team grande e a taça/objetivo como destaque simbólico. Tom: ambicioso e esperançoso" + (if (tier == "AZARÃO") ", de quem quer surpreender" else if (tier == "FAVORITO") ", de favorito que quer o topo" else "") + ".\n")
+                sb.append("Texto na imagem: uma MANCHETE sobre o que o time quer conquistar (a meta" + (objective?.let { ", ex.: \"META: TOP $it\"" } ?: "") + ") e uma linha fina com 2 ou 3 fatos acima. NÃO escreva \"Campanha 0V 0E 0D\", \"Aproveitamento 0%\" nem \"Gols 0 × 0\": jogos que não aconteceram não viram texto.\n")
+            }
+            "MOMENT" -> {
+                head("MOMENTO DO TIME")
+                sb.append("Clube: $club. Campanha: $campanha.\n")
+                if (ms.isNotEmpty()) sb.append("Últimos jogos (do mais antigo ao mais recente): ${lastGames(5)}.\n")
+                posNow?.let { sb.append("Posição atual: ${it}º lugar.\n") }
+                if (squadMine.isNotEmpty()) sb.append("Craques (nomes reais): $squadMine.\n")
+                sb.append(if (bad) "Tom: o time não está bem; mostre recuperação e \"vamos melhorar\", jogadores unidos, nunca humilhação.\n" else "Tom: confiante, time em boa fase.\n")
+                sb.append("Cena: o elenco no vestiário/túnel ou aquecendo, com a sequência de resultados (V/E/D) em círculos coloridos e uma manchete sobre o MOMENTO atual (use só os resultados acima).\n")
+            }
+            "CAMP", "SEASON" -> {
+                head(if (c.kind == "SEASON") "RESUMO DA TEMPORADA" else "CAMPANHA")
+                sb.append("Clube: $club. Campanha: $campanha.\n")
+                posNow?.let { sb.append("Posição na tabela: ${it}º lugar" + (objective?.let { o -> " (meta: ${o}º)" } ?: "") + ".\n") }
+                if (ms.isNotEmpty()) sb.append("Jogos: ${lastGames(6)}.\n")
+                if (squadMine.isNotEmpty()) sb.append("Destaques do elenco (nomes reais): $squadMine.\n")
+                sb.append(if (c.kind == "SEASON") "Cena: balanço da temporada, gráfico simples de vitórias/empates/derrotas, o time reunido, escudo grande. Manchete sobre como foi a temporada (use só os números acima).\n" else "Cena: placar de campanha com V/E/D e gols, jogadores em ação. Manchete sobre a campanha até aqui (use só os números acima).\n")
+                sb.append(if (bad) "Tom: honesto e de recuperação (\"vamos melhorar\"), nunca humilhação.\n" else "Tom: confiante.\n")
             }
             else -> return null
         }

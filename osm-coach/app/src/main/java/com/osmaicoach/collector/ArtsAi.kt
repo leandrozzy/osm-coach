@@ -101,7 +101,7 @@ object ArtsAi {
                 "ultra realistic, sharp, no text, no letters, no logos, no watermark. The trophy fills the upper two thirds of the frame and the bottom third is dark"
             "EXPECT" -> "$STYLE. Inside a large football stadium seen from the touchline at dusk: green grass pitch with white lines in the foreground, tall stands all around " +
                 "and bright floodlight towers, golden hour light beams cutting through mist over the pitch, hopeful and epic atmosphere, $colors tones. " +
-                "Stadium interior only, no mountains, no landscape, no hills. The bottom third of the frame is dark"
+                "A golden trophy glowing faintly on the centre circle in the distance as a symbol of the season's goal. Stadium interior only, no mountains, no landscape, no hills. The bottom third of the frame is dark"
             "MATCHDAY" -> "$STYLE. Football stadium tunnel entrance at night, two lines of fictional players in silhouette walking out toward bright floodlights, " +
                 "smoke and lens flare, $colors glow. The bottom third of the frame is dark smoke"
             "COMPARE" -> "$STYLE. Two fictional football players facing each other tense in a night stadium, close shot, different colored jerseys, floodlights, " +
