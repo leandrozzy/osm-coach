@@ -250,16 +250,6 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                             Act("⚖ Comparar") { tool = 1 }
                             Act("💰 Preço de venda") { tool = 2 }
                         }
-                        Row2 {
-                            Act("🎨 Criar arte") {
-                                AppScope.scope.launch(Dispatchers.IO) {
-                                    val now = System.currentTimeMillis()
-                                    val it = runCatching { Arts.make(ctx, Arts.Cand("player|$slot|${p.nameKey}|$now", slot, "PLAYER", "Destaque: ${p.name}", now, p.nameKey)) }.getOrNull()
-                                    withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, if (it != null) "Arte criada: veja a aba Artes." else (ArtsAi.lastError ?: "Não consegui criar a arte."), android.widget.Toast.LENGTH_LONG).show() }
-                                }
-                                onDone()
-                            }
-                        }
                     }
                     DSection("Correções") {
                         var newName by remember { mutableStateOf(p.name) }
