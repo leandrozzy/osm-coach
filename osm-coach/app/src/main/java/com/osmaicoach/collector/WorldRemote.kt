@@ -63,6 +63,15 @@ object WorldRemote {
     fun cloudMessage(ctx: Context): String = Settings.get(ctx, K_CLOUD_MSG, "")
     fun cloudDue(ctx: Context): Boolean = System.currentTimeMillis() - (Settings.get(ctx, K_CLOUD_AT, "0").toLongOrNull() ?: 0L) > 22 * 3_600_000L
 
+    /** Estado da atualização automática no Supabase (função wf_sync_status): totais por fonte, fila, progresso e últimas execuções. Falha = quase sempre schema_sync.sql ainda não rodado. */
+    fun cloudStatus(ctx: Context): Result<JSONObject> = runCatching {
+        val (code, body) = get(ctx, "/rest/v1/rpc/wf_sync_status", 20_000)
+        if (code == -1) error("Supabase não configurado")
+        if (code == 404) error("falta rodar supabase/schema_sync.sql no SQL Editor")
+        if (code !in 200..299 || body == null) error("HTTP $code")
+        JSONObject(body)
+    }
+
     /** Linhas da fila: nomes que o app NÃO conseguiu ligar a nenhum cadastro (a função busca na API-Football e no Wikidata). Só nome, idade e posição saem do aparelho. */
     internal fun wantedRows(db: WorldSql, max: Int = 120): JSONArray {
         val arr = JSONArray(); val seen = HashSet<String>()

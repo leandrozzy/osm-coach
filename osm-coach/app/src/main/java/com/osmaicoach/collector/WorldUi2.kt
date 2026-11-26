@@ -49,13 +49,9 @@ internal fun WorldCoverageView(nav: WorldNav) {
 internal fun WorldSyncView() {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     val tick = rememberTick(1000L); tick.let { }
-    val jobs = rememberWorld(emptyList<WorldQuery.Job>()) { WorldQuery.jobs(AndroidSql(it.readableDatabase), 15) }
-    val srcs = rememberWorld(emptyList<WorldQuery.Source>()) { WorldQuery.sources(AndroidSql(it.readableDatabase)) }
     val size = rememberWorld(0L) { it.fileSize(ctx) }
-    val img = rememberWorld(null as WorldOsm.ImgStat?) { WorldOsm.imageStat(ctx) }
     val net = WorldSync.unmetered(ctx)
     val running = WorldSync.running
-    var busyImg by remember { mutableStateOf(false) }
     WorldPage {
         WorldCard(tint = if (running != null) C.INFO else C.BORDER) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -72,7 +68,6 @@ internal fun WorldSyncView() {
                 if (c.analyzed > 0) Text("${fmtN(c.analyzed)} lidos • ${fmtN(c.inserted)} novos • ${fmtN(c.updated)} atualizados • ${fmtN(c.deduped)} duplicados", fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
             }
             if (WorldSync.lastMessage.isNotEmpty()) Text(WorldSync.lastMessage, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-            (WorldSync.cloudNote.ifBlank { WorldRemote.cloudMessage(ctx) }).takeIf { it.isNotBlank() }?.let { Text("☁ $it", fontSize = 12.5.sp, color = C.INFO, modifier = Modifier.padding(top = 4.dp)) }
             Text("Rede: ${if (net) "Wi‑Fi ✓" else "dados móveis (consultas pequenas, tudo bem)"} • cópia local: ${fmtBytes(size)}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { WorldSync.requestRun(ctx) }, modifier = Modifier.weight(1f), enabled = running == null) { Text("Sincronizar agora", fontWeight = FontWeight.ExtraBold) }
@@ -80,31 +75,73 @@ internal fun WorldSyncView() {
                 if (WorldSync.paused) OutlinedButton(onClick = { WorldSync.resume(ctx) }, modifier = Modifier.weight(1f)) { Text("Retomar") } else OutlinedButton(onClick = { WorldSync.pause() }, modifier = Modifier.weight(1f), enabled = running != null) { Text("Pausar") }
             }
         }
-        img?.let { im ->
-            val rows = listOf(Triple("Bandeiras", im.flagsHave, im.flagsNeed), Triple("Escudos", im.crestsHave, im.crestsNeed), Triple("Fotos de jogadores", im.photosHave, im.photosNeed)).filter { it.third > 0 }
-            DsSection("Imagens baixadas no celular")
-            WorldCard {
-                Text("Só dos países, clubes e jogadores que aparecem nos seus slots: tem / precisa. Elas também vão para o Supabase e voltam de lá em outras instalações.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
-                if (rows.isEmpty()) Text("Ainda não há o que baixar.", fontSize = 13.sp, color = C.MUTED)
-                for ((l, h, n) in rows) WorldBar(l, h, n)
-                if (WorldSync.imagesNote.isNotEmpty()) Text(WorldSync.imagesNote + " (o app envia ao Supabase o que baixa e busca lá antes de ir à internet)", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-                if (rows.isNotEmpty()) OutlinedButton(onClick = { busyImg = true; scope.launch(Dispatchers.IO) { runCatching { WorldOsm.prefetchImages(ctx, 12) }; busyImg = false } }, enabled = !busyImg, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (busyImg) "Baixando…" else "Baixar imagens que faltam") }
+        CloudBlock(ctx, running)
+    }
+}
+
+/** Tudo sobre a nuvem em um lugar: conexão, quantos itens de cada fonte, fila, progresso da atualização automática e o histórico das execuções (da própria função world-sync). */
+@Composable
+private fun CloudBlock(ctx: android.content.Context, running: String?) {
+    var st by remember { mutableStateOf<Result<org.json.JSONObject>?>(null) }
+    var stats by remember { mutableStateOf<Result<WorldRemote.Stats>?>(null) }
+    val note = WorldSync.cloudNote
+    LaunchedEffect(note, running) {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            stats = runCatching { WorldRemote.stats(ctx).getOrThrow() }
+            st = WorldRemote.cloudStatus(ctx)
+        }
+    }
+    DsSection("Nuvem (Supabase)")
+    val s = stats?.getOrNull(); val j = st?.getOrNull()
+    WorldCard(tint = (if (s != null) C.WIN else C.BORDER).copy(alpha = 0.5f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) { Text("Banco na nuvem", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp); DsChip(if (s != null) "conectado" else if (stats == null) "verificando…" else "sem conexão", if (s != null) C.WIN else C.MUTED) }
+        if (s != null) Text("${fmtN(s.countries)} países • ${fmtN(s.competitions)} competições • ${fmtN(s.clubs)} clubes • ${fmtN(s.players)} jogadores • ${fmtN(s.images)} imagens", fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
+        else stats?.exceptionOrNull()?.let { Text(it.message ?: "falhou", fontSize = 12.sp, color = C.MUTED) }
+        (note.ifBlank { WorldRemote.cloudMessage(ctx) }).takeIf { it.isNotBlank() }?.let { Text("☁ $it", fontSize = 12.sp, color = C.INFO, modifier = Modifier.padding(top = 4.dp)) }
+    }
+    if (st != null && j == null) {
+        WorldCard(tint = C.WARN.copy(alpha = 0.5f)) { Text("Atualização automática ainda não ativa: ${st?.exceptionOrNull()?.message}. Veja supabase/README.md (passos 1 a 4).", fontSize = 12.5.sp) }
+        return
+    }
+    if (j == null) return
+    fun line(o: org.json.JSONObject?, label: String, k: String) = o?.takeIf { it.has(k) }?.let { "$label ${fmtN(it.optLong(k))}" }
+    val c = j.optJSONObject("clubs"); val p = j.optJSONObject("players")
+    DsSection("De onde vêm os dados")
+    WorldCard {
+        Text("Clubes (${fmtN(c?.optLong("total") ?: 0)})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Text(listOfNotNull(line(c, "Reep", "reep"), line(c, "com ID Wikidata", "wikidata"), line(c, "API-Football", "apif"), line(c, "novos pela atualização automática", "added_by_sync")).joinToString(" • "), fontSize = 12.sp, color = C.MUTED)
+        Text("Jogadores (${fmtN(p?.optLong("total") ?: 0)})", fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        Text(listOfNotNull(line(p, "Reep", "reep"), line(p, "com ID Wikidata", "wikidata"), line(p, "com ID API-Football", "apif"), line(p, "com ID Transfermarkt", "transfermarkt"), line(p, "novos pela atualização automática", "added_by_sync")).joinToString(" • "), fontSize = 12.sp, color = C.MUTED)
+        Text("Fila de nomes que o app não achou: ${fmtN(j.optLong("wanted_pending"))} esperando • ${fmtN(j.optLong("wanted_done"))} resolvidos • ${fmtN(j.optLong("wanted_none"))} sem resultado", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+    }
+    val tasks = j.optJSONObject("tasks")
+    DsSection("Atualização automática")
+    WorldCard {
+        fun task(name: String, label: String): String {
+            val t = tasks?.optJSONObject(name) ?: return "$label: ainda não começou"
+            val cur = t.optString("cursor").takeIf { it.isNotBlank() && it != "null" }?.let { it.substringBefore(':').uppercase() + " (lote ${it.substringAfter(':').toIntOrNull()?.div(1500)?.plus(1) ?: 1})" }
+            val cycles = t.optJSONObject("info")?.optInt("cycles", 0) ?: 0
+            val err = t.optJSONObject("info")?.optString("error")?.takeIf { it.isNotBlank() }
+            return "$label: parou em ${cur ?: "—"}${if (cycles > 0) " • $cycles volta(s) completa(s)" else ""}${err?.let { " • último erro: $it" } ?: ""}"
+        }
+        Text(task("wikidata_clubs", "Clubes (Wikidata)"), fontSize = 12.5.sp)
+        Text(task("wikidata_players", "Jogadores (Wikidata)"), fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
+        val q = tasks?.optJSONObject("apif_quota")?.optJSONObject("info")
+        Text("API-Football hoje: ${q?.optInt("used", 0) ?: 0} de 90 consultas", fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("Roda sozinha de 3 em 3 horas no Supabase; cada execução avança alguns países e continua de onde parou.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+    }
+    DsSection("Histórico da nuvem")
+    val runs = j.optJSONArray("runs")
+    if (runs == null || runs.length() == 0) Text("Nenhuma execução ainda. Toque em “Atualizar fontes na nuvem”.", fontSize = 13.sp, color = C.MUTED)
+    else for (i in 0 until runs.length()) {
+        val r = runs.getJSONObject(i)
+        WorldCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(r.optString("started_at").take(16).replace('T', ' '), Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                DsChip(r.optString("status").ifBlank { "?" }, if (r.optString("status") == "ok") C.WIN else C.WARN)
             }
+            Text("${fmtN(r.optLong("rows_changed"))} itens novos ou completados", fontSize = 12.sp, color = C.MUTED)
         }
-        DsSection("Supabase (base completa)")
-        val sb = srcs.firstOrNull { it.id == WorldSources.SUPABASE }
-        val cache = rememberWorld(LongArray(3)) { db -> longArrayOf(db.count("football_clubs"), db.count("football_players"), db.count("football_ocr_observations", "status='novo'")) }
-        WorldCard(tint = statusColor(sb?.status ?: "aguardando configuração").copy(alpha = 0.5f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("Banco na nuvem", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp); DsChip(sb?.status ?: "aguardando configuração", statusColor(sb?.status ?: "aguardando configuração")) }
-            Text(sb?.notes ?: "Configure a URL e a chave em Fontes de Dados → Configurar.", fontSize = 12.sp, color = C.MUTED)
-            Text("No aparelho (cópia do que o OSM mostrou): ${fmtN(cache[0])} clubes • ${fmtN(cache[1])} jogadores" + (if (cache[2] > 0) " • ${fmtN(cache[2])} leituras esperando rede" else ""), fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-            Text("O app não baixa a base inteira: pede só os nomes lidos e, 1x por dia, só o que mudou.", fontSize = 11.5.sp, color = C.MUTED)
-        }
-        DsSection("Histórico")
-        val hist = jobs.filter { running != null || it.status != "sincronizando" }
-        if (hist.isEmpty()) Text("Nenhuma sincronização ainda.", fontSize = 13.sp, color = C.MUTED)
-        for (j in hist) WorldCard { Row(verticalAlignment = Alignment.CenterVertically) { Text(WorldSources.def(j.source)?.name?.substringBefore(" —") ?: j.source, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); DsChip(j.status, statusColor(j.status)) }
-            Text("${j.started?.let { fmtTime(it) } ?: ""} • ${fmtN(j.analyzed)} lidos • ${fmtN(j.inserted)} novos${if (j.failed > 0) " • ${j.failed} descartados" else ""}", fontSize = 12.sp, color = C.MUTED); j.message?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.5.sp, color = C.MUTED) } }
     }
 }
 

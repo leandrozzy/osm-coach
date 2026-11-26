@@ -5,11 +5,11 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
 select cron.unschedule('world-sync-daily') where exists (select 1 from cron.job where jobname = 'world-sync-daily');
-select cron.schedule('world-sync-daily', '17 5 * * *', $$
+select cron.schedule('world-sync-daily', '17 */3 * * *', $$
   select net.http_post(
     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/world-sync',
     headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer <ANON_KEY>', 'apikey', '<ANON_KEY>'),
     body := '{}'::jsonb, timeout_milliseconds := 150000);
 $$);
 -- Conferir: select jobname, schedule, active from cron.job;   •   histórico: select status, return_message, start_time from cron.job_run_details order by start_time desc limit 5;
--- Cada execução faz um pedaço (2 países de clubes + 2 de jogadores + fila da API-Football) e retoma de onde parou: a base cresce todo dia, sem você fazer nada.
+-- Roda de 3 em 3 horas (8x/dia). Cada execução faz um pedaço (2 países de clubes + 2 de jogadores + fila da API-Football) e retoma de onde parou: a base cresce todo dia, sem você fazer nada.

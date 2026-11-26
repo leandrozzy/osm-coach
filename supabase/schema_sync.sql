@@ -80,12 +80,27 @@ begin
   return jsonb_build_object('inserted', ins, 'updated', upd, 'unchanged', skip);
 end $$;
 
--- ---------- status legível pelo app (chave anon): o que já rodou, fila, última atualização ----------
+-- ---------- status legível pelo app (chave anon): totais, quantos de cada fonte, fila, progresso e últimas execuções ----------
 create or replace function wf_sync_status() returns jsonb language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
     'wanted_pending', (select count(*) from wf_wanted where status = 'novo'),
     'wanted_done', (select count(*) from wf_wanted where status = 'feito'),
-    'tasks', coalesce((select jsonb_object_agg(task, jsonb_build_object('cursor', cursor, 'at', updated_at, 'info', info)) from wf_sync_state), '{}'::jsonb));
+    'wanted_none', (select count(*) from wf_wanted where status = 'sem'),
+    'clubs', jsonb_build_object(
+      'total', (select count(*) from wf_clubs),
+      'reep', (select count(*) from wf_clubs where reep_id is not null),
+      'wikidata', (select count(*) from wf_clubs where wikidata is not null),
+      'apif', (select count(*) from wf_clubs where key like 'apif:%'),
+      'added_by_sync', (select count(*) from wf_clubs where row_hash = 'sync')),
+    'players', jsonb_build_object(
+      'total', (select count(*) from wf_players),
+      'reep', (select count(*) from wf_players where reep_id not like 'wd:%' and reep_id not like 'apif:%'),
+      'wikidata', (select count(*) from wf_players where wikidata is not null),
+      'apif', (select count(*) from wf_players where apif_id is not null),
+      'transfermarkt', (select count(*) from wf_players where tm_id is not null),
+      'added_by_sync', (select count(*) from wf_players where row_hash = 'sync')),
+    'tasks', coalesce((select jsonb_object_agg(task, jsonb_build_object('cursor', cursor, 'at', updated_at, 'info', info)) from wf_sync_state where task <> 'lock'), '{}'::jsonb),
+    'runs', coalesce((select jsonb_agg(r) from (select started_at, finished_at, rows_changed, status, message from wf_runs where source = 'world-sync' order by id desc limit 8) r), '[]'::jsonb));
 $$;
 
 grant execute on function wf_merge_clubs(jsonb), wf_merge_players(jsonb) to service_role;

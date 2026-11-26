@@ -6,7 +6,7 @@
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const APIF = Deno.env.get("API_FOOTBALL_KEY") ?? "";
-const BUDGET_MS = 110_000;          // limite da função é ~150 s: para antes
+const BUDGET_MS = 125_000;          // limite da função é ~150 s: para antes
 const APIF_DAILY = 90;              // plano gratuito = 100/dia; sobra margem
 const WD_PAGE = 1500;
 const T0 = Date.now();
@@ -190,7 +190,7 @@ async function wikidataSweep(kind: "clubs" | "players", isos: string[], names: M
   let [iso, off] = (st.cursor ?? `${isos[0]}:0`).split(":"); let offset = Number(off) || 0;
   let idx = Math.max(0, isos.indexOf(iso)); const info: any = { ...st.info, last: [] };
   let did = 0, added = 0;
-  while (did < slices && left() > 70_000) {
+  while (did < slices && left() > 40_000) {
     iso = isos[idx];
     try {
       const r = kind === "clubs" ? await wikidataClubs(iso, offset) : await wikidataPlayers(iso, offset, names.get(iso) ?? null);
@@ -208,10 +208,10 @@ Deno.serve(async (req) => {
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info", "Content-Type": "application/json" };
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
-    // trava de 8 min: o botão do app (chave anon pública) não consegue disparar trabalho em excesso
+    // trava de 3 min: o botão do app (chave anon pública) não consegue disparar trabalho em excesso
     const lock = await getState("lock"); const until = Number(lock.info.until ?? 0);
     if (Date.now() < until) return new Response(JSON.stringify({ ok: true, busy: true, retry_in_s: Math.ceil((until - Date.now()) / 1000) }), { headers: cors });
-    await setState("lock", null, { until: Date.now() + 8 * 60_000 });
+    await setState("lock", null, { until: Date.now() + 3 * 60_000 });
     const run = await db("wf_runs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ source: "world-sync", status: "rodando" }) });
     const ctr: any[] = await db("wf_countries?select=iso2,name_en&order=iso2.asc");
     const names = new Map<string, string>(ctr.map((c) => [c.iso2.toLowerCase(), c.name_en])); const byName = new Map<string, string>(ctr.map((c) => [fold(c.name_en), c.iso2.toLowerCase()]));
@@ -220,8 +220,13 @@ Deno.serve(async (req) => {
     const isos = [...prio, ...[...names.keys()].filter((x) => !prio.includes(x))];
     const out: Record<string, unknown> = {};
     out.apif = await apifQueue(byName);
-    if (left() > 75_000) out.clubs = await wikidataSweep("clubs", isos, names, 2);
-    if (left() > 75_000) out.players = await wikidataSweep("players", isos, names, 2);
+    // alterna fatias de clubes e de jogadores enquanto houver tempo (cada fatia = 1 país, até 1500 linhas)
+    const acc = { clubs: { slices: 0, changed: 0, next: "" }, players: { slices: 0, changed: 0, next: "" } };
+    for (let round = 0; round < 4; round++) {
+      if (left() > 40_000) { const r = await wikidataSweep("clubs", isos, names, 1); acc.clubs.slices += r.slices; acc.clubs.changed += r.changed; acc.clubs.next = r.next; }
+      if (left() > 40_000) { const r = await wikidataSweep("players", isos, names, 1); acc.players.slices += r.slices; acc.players.changed += r.changed; acc.players.next = r.next; }
+    }
+    out.clubs = acc.clubs; out.players = acc.players;
     const changed = Number((out.clubs as any)?.changed ?? 0) + Number((out.players as any)?.changed ?? 0) + Number((out.apif as any)?.players ?? 0) + Number((out.apif as any)?.clubs ?? 0);
     await db(`wf_runs?id=eq.${run[0].id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ finished_at: new Date().toISOString(), rows_changed: changed, status: "ok", message: JSON.stringify(out).slice(0, 400) }) });
     await setState("lock", null, { until: 0 });
