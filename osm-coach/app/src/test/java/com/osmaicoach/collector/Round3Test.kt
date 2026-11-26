@@ -34,3 +34,39 @@ class Round3DedupeTest {
         assertFalse(SquadDedupe.samePlayer("fat", 24, 82, "fatima", 24, 82))   // 3 letras só com 1 letra a mais
     }
 }
+
+class Round3IdentityTest {
+    private val y = 2026
+    @Test fun uniqueCandidateWithSameAgeAndCountryIsProbableEvenIfPositionDiffers() {      // Ledezma, 25/11
+        val c = listOf(
+            WorldIdentity.PlayerC(1, "Richard Ledezma", null, emptyList(), 2000, "Mexico", "midfielder"),
+            WorldIdentity.PlayerC(2, "Luis Raquel Ledezma", null, emptyList(), 1959, null, null),
+            WorldIdentity.PlayerC(3, "Juan Pablo Ledezma", null, emptyList(), 2005, "Costa Rica", null),
+            WorldIdentity.PlayerC(4, "Iván Ledezma", null, emptyList(), 1995, "Chile", "midfielder"))
+        val r = WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Ledezma", ageNow = 26, year = y, nationality = "Mexico", position = "DD"), c)
+        assertEquals(1L, r.best?.id); assertTrue("${r.status} ${r.score}", r.score >= 90)
+    }
+    @Test fun pavardWithPortugueseDefenderCodeIsConfirmed() {
+        val c = listOf(WorldIdentity.PlayerC(1, "Benjamin Pavard", null, emptyList(), 1996, "France", "full-back"))
+        val r = WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Pavard", ageNow = 30, year = y, nationality = "France", position = "DO", independent = 2), c)
+        assertTrue("${r.status} ${r.score}", r.score >= 95)
+    }
+    @Test fun twoCandidatesWithSameAgeAndCountryDoNotGetTheUniqueBonus() {
+        val c = listOf(
+            WorldIdentity.PlayerC(1, "Ana Silva", null, emptyList(), 2000, "Brazil", null), WorldIdentity.PlayerC(2, "Bia Silva", null, emptyList(), 2000, "Brazil", null))
+        val r = WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Silva", ageNow = 26, year = y, nationality = "Brazil"), c)
+        assertTrue(r.status != WorldIdentity.Status.CONFIRMED && r.status != WorldIdentity.Status.PROBABLE)
+    }
+}
+
+class Round3CrestTest {
+    @Test fun excludedSpellingOfARealClubStillShowsItsCrest() {
+        val fd = java.nio.file.Files.createTempDirectory("crest").toFile()
+        val dir = java.io.File(fd, "crests").apply { mkdirs() }
+        java.io.File(dir, "blocked.json").writeText("""{"vfbstuttgartii":1,"25anniversary":1}""")
+        assertTrue(CrestAdmin.isBlocked(fd, "VfB Stuttgart II"))                       // sem Classificação lida: continua excluído
+        java.io.File(dir, "trusted.json").writeText("""{"VfB Stuttgart ll":1}""")        // a Classificação trouxe o clube (OCR leu "ll")
+        assertFalse(CrestAdmin.isBlocked(fd, "VfB Stuttgart II"))
+        assertTrue(CrestAdmin.isBlocked(fd, "25 anniversary"))                         // lixo de banner nunca volta
+    }
+}

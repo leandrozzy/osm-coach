@@ -69,7 +69,7 @@ object WorldIdentity {
     /** `ageNow` = idade mostrada no jogo (camada OSM: só evidência suave); `year` = ano de referência da leitura. */
     class PlayerObs(val name: String, val ageNow: Int? = null, val year: Int = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR), val nationality: String? = null, val position: String? = null, val independent: Int = 1)
 
-    private val POS = mapOf("gk" to "G", "gol" to "G", "goalkeeper" to "G", "goleiro" to "G", "gl" to "G", "def" to "D", "defender" to "D", "df" to "D", "de" to "D", "dc" to "D", "dd" to "D", "dl" to "D", "mid" to "M", "midfielder" to "M", "mei" to "M", "mc" to "M", "mco" to "M", "mcd" to "M", "mf" to "M", "mo" to "M",
+    private val POS = mapOf("gk" to "G", "gol" to "G", "goalkeeper" to "G", "goleiro" to "G", "gl" to "G", "def" to "D", "defender" to "D", "df" to "D", "de" to "D", "do" to "D", "dr" to "D", "dd" to "D", "dc" to "D", "dd" to "D", "dl" to "D", "mid" to "M", "midfielder" to "M", "mei" to "M", "mc" to "M", "mco" to "M", "mcd" to "M", "mf" to "M", "mo" to "M",
         "gr" to "G", "zag" to "D", "ld" to "D", "le" to "D", "lb" to "D", "rb" to "D", "cb" to "D", "dm" to "M", "cm" to "M", "am" to "M", "lm" to "M", "rm" to "M", "md" to "M", "me" to "M", "mdc" to "M", "vol" to "M", "lw" to "A", "rw" to "A", "cf" to "A", "st" to "A", "ss" to "A", "sa" to "A", "ac" to "A", "winger" to "A",
         "att" to "A", "attacker" to "A", "forward" to "A", "ata" to "A", "pl" to "A", "ee" to "A", "ed" to "A", "fw" to "A", "striker" to "A")
     fun posGroup(p: String?): String? = p?.let { WorldNorm.fold(it).split(' ').firstNotNullOfOrNull { w -> POS[w] } ?: when { it.contains("keep", true) -> "G"; it.contains("back", true) || it.contains("defen", true) -> "D"; it.contains("mid", true) -> "M"; it.contains("wing", true) || it.contains("forw", true) || it.contains("strik", true) || it.contains("attack", true) -> "A"; else -> null } }
@@ -79,6 +79,14 @@ object WorldIdentity {
         if (ok.full.isEmpty()) return Result(null, 0, Status.UNRESOLVED, 0, listOf("nome vazio"))
         val oNat = o.nationality?.let { WorldNorm.fold(it) }
         class Sc(val c: PlayerC, val score: Int, val why: List<String>, val signals: Int, val contra: Boolean)
+        // quantos candidatos batem em IDADE + NACIONALIDADE (o que o jogo mostra de forma confiável): se só UM bate, nome parcial + idade + país já é evidência forte
+        fun ageNatOk(c: PlayerC): Boolean {
+            if (oNat == null || o.ageNow == null || c.birthYear == null || c.nationality == null) return false
+            val cn = WorldNorm.fold(c.nationality)
+            val nat = cn == oNat || cn.contains(oNat) || oNat.contains(cn) || (cn == "united kingdom" && oNat in setOf("england", "scotland", "wales", "northern ireland", "inglaterra", "escocia", "gales"))
+            return nat && kotlin.math.abs((o.year - c.birthYear) - o.ageNow) <= 1
+        }
+        val uniqueAgeNat = cands.count { ageNatOk(it) } == 1
         val scored = cands.map { c ->
             val keys = (listOf(c.name, c.fullName) + c.aliases).filterNotNull().map { WorldNorm.playerKey(it) }
             var name = 0
@@ -110,9 +118,11 @@ object WorldIdentity {
                 if (kotlin.math.abs(age - o.ageNow) <= 1) { sig++; score += 8; why.add("idade compatível") } else if (kotlin.math.abs(age - o.ageNow) >= 4) { score -= 20; contra = true; why.add("idade incompatível") }
             }
             val gp = posGroup(o.position); val cp = posGroup(c0.position)
-            if (gp != null && cp != null) { if (gp == cp) { sig++; score += 5; why.add("mesma posição") } else { score -= 8; why.add("posição diferente") } }
+            // o código de posição do jogo (DD, MC…) nem sempre combina com a posição do cadastro (meia × ala): com idade E país batendo pesa pouco
+            if (gp != null && cp != null) { if (gp == cp) { sig++; score += 5; why.add("mesma posição") } else { score -= if (ageNatOk(c0)) 2 else 8; why.add("posição diferente") } }
             // jogador só com SOBRENOME no jogo ("Dumfries"): sozinho o nome vale pouco, mas idade + nacionalidade + posição batendo JUNTAS é evidência forte
             if (name < 90 && sig >= 3 && !contra) { score += 13; why.add("sobrenome + idade + nacionalidade + posição batem") }
+            else if (name < 90 && name >= 60 && !contra && uniqueAgeNat && ageNatOk(c0)) { score += 15; why.add("único candidato com a mesma idade e nacionalidade") }
             Sc(c, score.coerceIn(0, 100), why, sig, contra)
         }.sortedByDescending { it.score }
         val top = scored.firstOrNull() ?: return Result(null, 0, Status.UNRESOLVED, 0, listOf("sem candidatos"))

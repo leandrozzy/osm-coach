@@ -156,6 +156,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(i: Intent?) {
         val slot = i?.getIntExtra("slot", 0) ?: 0
+        if (i != null && i.hasExtra("main")) { Route.main = i.getIntExtra("main", -1); Route.nonce++ }
         if (slot in 1..4) {
             Route.tab = i?.getIntExtra("tab", 4) ?: 4
             Route.slot = slot
@@ -1756,6 +1757,7 @@ internal fun App() {
     BackHandler(enabled = openSlot == 0 && tab != 0) { tab = 0 }
     // Toque numa notificação: abre o slot na aba certa.
     LaunchedEffect(Route.nonce) {
+        if (Route.main >= 0) { tab = Route.main; openSlot = 0; Route.main = -1 }
         if (Route.slot > 0) {
             tab = 2
             openSlot = Route.slot

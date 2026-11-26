@@ -299,6 +299,11 @@ class FramePipeline private constructor(private val ctx: Context) {
                 val all = listOf("formation", "playStyle", "pressure", "mentality", "tempo", "marking", "offside", "tackle", "advAttack", "advMid", "advDef")
                 val have = all.count { k -> merged.optString(k).isNotBlank() }   // só o que ESTA passada leu (a última leitura de antes não conta)
                 Diag.setRead(if (have >= all.size) 2 else 1, ScreenType.TACTIC.name)
+                // os 11 campos lidos = fim da tela de Tática: avisa AGORA (antes só ao sair da página); uma vez por rodada
+                if (have >= all.size && tacticAnnounced[slot] != round) {
+                    tacticAnnounced[slot] = round
+                    tacticSummary(slot, now)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, now) }
+                }
             }
         }
         pending = Pending(slot, ScreenType.TACTIC, null)
@@ -323,6 +328,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         return "⚠ S$slot: " + w.joinToString(" • ")
     }
     private val autoTacticAt = HashMap<Int, Long>()
+    private val tacticAnnounced = HashMap<Int, Int>()
     private val lastNote = HashMap<Int, Pair<String, Long>>()
 
     /** Aviso por cima do jogo; o mesmo texto não se repete em menos de 1 min por slot (avisos diferentes passam sempre). */
@@ -401,6 +407,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         var ratings = false
         var maxRound = 0
         var lastSet: Set<String> = emptySet()
+        var lastLines: List<Pair<String, Float>> = emptyList()
         var moved = false
         var still = 0
         /** Último quadro mostrava goleiros (última seção do Plantel). */
@@ -456,7 +463,13 @@ class FramePipeline private constructor(private val ctx: Context) {
         // quadro "igual" = as MESMAS linhas nas MESMAS alturas (texto + altura em faixas de 0,02): rolar uma linha desloca todas as alturas,
         // então um quadro que só ganhou 1 jogador novo embaixo NÃO é igual (antes valia ≥85% dos nomes e o plantel "terminava" no 1º goleiro)
         val names = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) + "@" + Math.round(it.yc * 50f) }.toSet()
-        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.6f   // o OCR oscila entre quadros parados
+        // fim da página: o dedo arrasta e a tela só "sobe 1 milímetro" (borda elástica) e volta: as linhas mudam ≤0,02 de altura. Compara texto + altura com essa tolerância
+        val curLines = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) to it.yc }.filter { it.first.length >= 2 }
+        val sameLines = pd.lastLines.isNotEmpty() && curLines.isNotEmpty() &&
+            curLines.count { c -> pd.lastLines.any { l -> l.first == c.first && Math.abs(l.second - c.second) <= 0.02f } }.toFloat() / curLines.size >= 0.75f &&
+            pd.lastLines.count { l -> curLines.any { c -> l.first == c.first && Math.abs(l.second - c.second) <= 0.02f } }.toFloat() / pd.lastLines.size >= 0.75f
+        val same = sameLines || (pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.6f)   // o OCR oscila entre quadros parados
+        pd.lastLines = curLines
         if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
         pd.still = if (same) pd.still + 1 else 0
         // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).

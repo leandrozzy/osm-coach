@@ -334,7 +334,7 @@ private fun OsmCountryDetail(iso: String, nav: WorldNav) {
 
 // ------------------------------------------------------------------ escolher o cadastro certo (manual vale mais)
 /** O que o JOGO mostrou do item (idade, posição, país, liga): vira evidência na lista de candidatos. */
-private class GameCtx(val age: Int?, val pos: String?, val iso: String?, val league: String?)
+private class GameCtx(val age: Int?, val pos: String?, val iso: String?, val league: String?, val full: String? = null)
 
 @Composable
 private fun ExcludeButton(kind: String, key: String, raw: String, onDone: () -> Unit = {}) {
@@ -360,7 +360,7 @@ internal fun PickReal(kind: String, key: String, raw: String) {
         val row = db.rows("SELECT context,league FROM football_ocr_observations WHERE kind=? AND norm=? ORDER BY at DESC LIMIT 1", kind, key).firstOrNull()
         val c = runCatching { org.json.JSONObject(row?.get(0) ?: "{}") }.getOrDefault(org.json.JSONObject())
         val iso = c.optString("nameKey").takeIf { it.isNotBlank() && it != "null" }?.let { WorldCatalog.gameNationalities(ctx)[it] }
-        GameCtx(c.optInt("age", -1).takeIf { it > 0 }, c.optString("pos").takeIf { it.isNotBlank() && it != "null" }, iso, row?.get(1)?.takeIf { it.isNotBlank() && it != "-" && it != "null" })
+        GameCtx(c.optInt("age", -1).takeIf { it > 0 }, c.optString("pos").takeIf { it.isNotBlank() && it != "null" }, iso, row?.get(1)?.takeIf { it.isNotBlank() && it != "-" && it != "null" }, c.optString("full").takeIf { it.isNotBlank() && it != "null" })
     }
     fun render(g: GameCtx?) {
         val rd = AndroidSql(WorldDb.get(ctx).readableDatabase)
@@ -374,7 +374,7 @@ internal fun PickReal(kind: String, key: String, raw: String) {
         val n = if (kind == "club") clubs.size else players.size
         msg = if (!net) "Sem conexão com o Supabase: mostrando só o que já está no aparelho." else if (n == 0) "Nada parecido com esse nome. Tente outra grafia." else ""
         busy = false } }
-    LaunchedEffect(key, game != null) { if (game != null) search(game) }          // ao abrir, já procura com o nome lido
+    LaunchedEffect(key, game != null) { if (game != null) { game.full?.let { f -> if (text == raw) text = f }; search(game) } }          // ao abrir, já procura com o nome lido
     DsSection("Escolher o cadastro certo")
     WorldCard {
         game?.let { g ->

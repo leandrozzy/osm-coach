@@ -34,7 +34,10 @@ object CrestAdmin {
         val k = Txt.key(team ?: "")
         if (k.isEmpty()) return true
         if (NOT_CLUB.containsMatchIn(Txt.norm(team ?: "").trim()) || NOT_CLUB.containsMatchIn(k)) return true
-        return k in readSet(blockedFile(filesDir))
+        if (k !in readSet(blockedFile(filesDir))) return false
+        // clube REAL (está na Classificação lida): excluir por engano uma grafia dele não pode tirar o escudo dele de toda parte (Hoje sem escudo e o Slot com, 26/11)
+        val lk = look(team ?: "")
+        return readSet(trustedFile(filesDir)).none { look(it) == lk }
     }
 
     fun isManual(filesDir: File, team: String?): Boolean = Txt.key(team ?: "") in readSet(manualFile(filesDir))

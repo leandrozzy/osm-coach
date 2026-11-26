@@ -29,7 +29,8 @@ object SlotWidget {
         val club: String = "", val rival: String? = null, val `when`: String = "", val state: Int = STATE_NONE,
         val at: Long? = null, val short: String = "", val icon: String = "",
         val strMe: Int? = null, val strOpp: Int? = null, val win: Int? = null, val draw: Int? = null, val loss: Int? = null,
-        val formMe: String? = null, val formOpp: String? = null, val round: String? = null, val home: Boolean? = null, val pos: String? = null
+        val formMe: String? = null, val formOpp: String? = null, val round: String? = null, val home: Boolean? = null, val pos: String? = null,
+        val comp: String? = null
     )
     const val STATE_OK = 0; const val STATE_WAIT = 1; const val STATE_OLD = 2; const val STATE_NONE = 3
 
@@ -93,7 +94,7 @@ object SlotWidget {
             strMe = sum?.myStr, strOpp = sum?.rivalStr, win = sum?.win?.win, draw = sum?.win?.draw, loss = sum?.win?.loss,
             formMe = sum?.myForm?.takeIf { it.isNotBlank() }, formOpp = sum?.rivalForm?.takeIf { it.isNotBlank() },
             round = if (sum?.roundDone != null && sum.roundTotal != null) "J${(sum.roundDone.toIntOrNull() ?: 0) + 1}/${sum.roundTotal}" else f[K.ROUND]?.value?.filter { it.isDigit() }?.takeIf { it.isNotEmpty() }?.let { "J$it" },
-            home = sum?.home, pos = f[K.LEAGUE_POS]?.value?.takeIf { FieldMerge.known(it) })
+            home = sum?.home, pos = f[K.LEAGUE_POS]?.value?.takeIf { FieldMerge.known(it) }, comp = sum?.competition?.takeIf { it.isNotBlank() })
     }
 
     suspend fun loadRows(ctx: Context, now: Long = System.currentTimeMillis()): List<Row> {
@@ -224,8 +225,21 @@ object SlotWidget {
     }
 
     /** 2×2: o próximo jogo (escudos, forças, chances, hora). */
-    fun small(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 110): RemoteViews {
+    fun small(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 110, evs: List<Ev> = emptyList()): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_small)
+        // 2 colunas: o evento mais próximo da agenda (jogo, treino ou obra) com a contagem
+        val up = evs.filter { it.at >= now }.minByOrNull { it.at }
+        if (up != null && up.kind != 0) {
+            v.setTextViewText(R.id.s_head, until(up.at, now).removePrefix("em ")); v.setTextColor(R.id.s_head, urgencyColor(up.at, now))
+            v.setInt(R.id.s_badge, "setBackgroundResource", R.drawable.w_badge_ok); v.setTextViewText(R.id.s_badge, up.slot.toString()); v.setTextColor(R.id.s_badge, 0xFF0B111B.toInt())
+            setCrest(ctx, v, R.id.s_crest_me, up.club, 96); v.setViewVisibility(R.id.s_crest_opp, android.view.View.GONE)
+            v.setTextViewText(R.id.s_vs, "${up.icon} ${up.title}")
+            v.setImageViewBitmap(R.id.s_prob, null); v.setTextViewText(R.id.s_probtxt, up.sub); v.setTextColor(R.id.s_probtxt, C_MUTED)
+            v.setTextViewText(R.id.s_time, "${clock(up.at)} • ${day(up.at)}")
+            rows.firstOrNull { it.slot == up.slot }?.let { click(ctx, v, R.id.s_root, it, 800) }
+            return v
+        }
+        v.setViewVisibility(R.id.s_crest_opp, android.view.View.VISIBLE)
         val h = hero(rows)
         if (h == null) { v.setTextViewText(R.id.s_head, "OSM AI Coach"); v.setTextColor(R.id.s_head, C_TEXT); v.setTextViewText(R.id.s_probtxt, "sem clube nos slots"); return v }
         val old = h.stale
@@ -285,7 +299,7 @@ object SlotWidget {
 
     private fun ago(ms: Long): String { val m = ms / 60_000L; return if (m < 60) "há ${maxOf(1, m)} min" else if (m < 48 * 60) "há ${m / 60} h" else "há ${m / (24 * 60)} d" }
 
-    fun large(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250, evs: List<Ev> = emptyList()): RemoteViews {
+    fun large(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250, evs: List<Ev> = emptyList(), done: List<Done> = emptyList()): RemoteViews {
         val v = RemoteViews(ctx.packageName, R.layout.widget_large)
         // destaque = o evento MAIS PRÓXIMO da agenda (jogo, treino ou obra); sem nenhum futuro, o atrasado mais recente
         val upcoming = evs.filter { it.at >= now }
@@ -323,21 +337,7 @@ object SlotWidget {
             v.setChronometerCountDown(R.id.h_chrono, true)
             v.setChronometer(R.id.h_chrono, android.os.SystemClock.elapsedRealtime() + (target - now), null, true)
         } else v.setViewVisibility(R.id.h_chrono, android.view.View.GONE)
-        // lista da Agenda (só com 4 colunas): o que já passou e ainda espera você; sem nada atrasado, "tudo em dia"
-        if (wDp >= 250) {
-            v.setViewVisibility(R.id.e_box, android.view.View.VISIBLE)
-            val late = overdue.filter { it !== heroEv }.sortedBy { it.at }.take(3)
-            val ids = listOf(intArrayOf(R.id.e1, R.id.e1_icon, R.id.e1_title, R.id.e1_when), intArrayOf(R.id.e2, R.id.e2_icon, R.id.e2_title, R.id.e2_when), intArrayOf(R.id.e3, R.id.e3_icon, R.id.e3_title, R.id.e3_when))
-            if (late.isEmpty()) {
-                v.setViewVisibility(ids[0][0], android.view.View.VISIBLE); v.setViewVisibility(ids[1][0], android.view.View.GONE); v.setViewVisibility(ids[2][0], android.view.View.GONE)
-                v.setTextViewText(ids[0][1], "👍"); v.setTextViewText(ids[0][2], "Tudo em dia: nada atrasado na agenda"); v.setTextViewText(ids[0][3], "✓"); v.setTextColor(ids[0][3], C_GREEN)
-            } else for ((i, id) in ids.withIndex()) {
-                val e = late.getOrNull(i)
-                if (e == null) { v.setViewVisibility(id[0], android.view.View.GONE); continue }
-                v.setViewVisibility(id[0], android.view.View.VISIBLE)
-                v.setTextViewText(id[1], e.icon); v.setTextViewText(id[2], "S${e.slot} • ${e.title}"); v.setTextViewText(id[3], ago(now - e.at)); v.setTextColor(id[3], C_RED)
-            }
-        } else v.setViewVisibility(R.id.e_box, android.view.View.GONE)
+        bindPanels(ctx, v, rows, evs, done, now, wDp, heroEv)
         if (h != null) {
             v.setTextViewText(R.id.h_slot, h.slot.toString()); v.setInt(R.id.h_slot, "setBackgroundResource", badgeFor(h.state))
             v.setTextColor(R.id.h_slot, if (h.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
@@ -353,29 +353,99 @@ object SlotWidget {
             v.setTextViewText(R.id.h_status, if (st.isNotEmpty()) st else h.icon + " " + h.short)
             v.setTextColor(R.id.h_status, stateColor(h.state))
             click(ctx, v, R.id.h_card, h, 900)
-        }
-        for ((i, r) in rows.withIndex()) {
-            val id = LIST[i]
-            v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
-            v.setTextColor(id[1], if (r.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
-            v.setTextViewText(id[3], r.club.ifBlank { "sem clube" })
-            v.setTextViewText(id[4], if (r.rival != null && r.at != null) "× ${r.rival} • ${clock(r.at)}" else r.short.ifBlank { "abra o OSM com a captura ligada" })
-            v.setTextViewText(id[5], if (r.state == STATE_NONE) "livre" else short(r))
-            v.setTextColor(id[5], if (r.state == STATE_NONE || r.stale) C_MUTED else urgencyColor(r.at, now))
-            v.setTextViewText(id[6], if (r.stale) staleText(r, now) else listOfNotNull(r.round, r.pos).joinToString(" • "))
-            v.setTextColor(id[6], if (r.stale) C_RED else C_MUTED)
-            setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club, 64)
-            click(ctx, v, id[0], r, 700)
-        }
-        v.setTextViewText(R.id.l_footer, upd(now))
+            v.setTextViewText(R.id.h_comp, listOfNotNull(h.comp?.let { "🏆 $it" }, h.round, h.pos?.let { "${it}º" }).joinToString(" • "))
+            if (h.home != null) { v.setViewVisibility(R.id.h_where, android.view.View.VISIBLE); v.setTextViewText(R.id.h_where, if (h.home == true) "🏠 CASA" else "✈ FORA") } else v.setViewVisibility(R.id.h_where, android.view.View.GONE)
+        } else { v.setViewVisibility(R.id.h_where, android.view.View.GONE); v.setTextViewText(R.id.h_comp, "") }
+        v.setTextViewText(R.id.h_now, SimpleDateFormat("EEE dd/MM • HH:mm", Locale("pt", "BR")).format(Date(now)))
+        v.setTextViewText(R.id.l_footer, upd(now).removePrefix("atualizado "))
         return v
     }
 
+    /** Eventos da agenda que já passaram: pendentes de conferência (horário vencido, o app ainda não leu a tela) e os últimos resultados já lidos (concluídos de verdade). */
+    class Done(val at: Long, val slot: Int, val icon: String, val title: String, val sub: String, val state: Int)   // state: 0 concluído e confirmado, 1 vencido/pendente, 2 dado desatualizado
+
+    suspend fun loadDone(ctx: Context, rows: List<Row>, evs: List<Ev>, now: Long): List<Done> = runCatching {
+        val out = ArrayList<Done>()
+        for (e in evs.filter { it.at < now }) {
+            val stale = rows.firstOrNull { it.slot == e.slot }?.stale == true
+            out.add(Done(e.at, e.slot, e.icon, e.title, when (e.kind) { 0 -> "aguardando leitura do resultado"; 1 -> "terminou • colete e ponha o próximo"; else -> "terminou • colete a obra" }, if (stale) 2 else 1))
+        }
+        val repo = Repo(ctx)
+        val fmt = SimpleDateFormat("dd/MM/yy", Locale("pt", "BR"))
+        for (s in 1..4) {
+            val played = repo.dao.matchesOf(s).filter { it.scoreMine != null && it.scoreOpp != null && it.date != null }
+                .mapNotNull { m -> runCatching { fmt.parse(m.date!!)?.time }.getOrNull()?.let { t -> Pair(t + 12 * 3_600_000L, m) } }.filter { it.first <= now }.sortedByDescending { it.first }.take(2)
+            for ((t, m) in played) {
+                val r = if (m.scoreMine!! > m.scoreOpp!!) "V" else if (m.scoreMine == m.scoreOpp) "E" else "D"
+                out.add(Done(t, s, "⚽", "Jogo J${m.round ?: "?"} • ${m.opponent ?: "?"}", "$r ${m.scoreMine}×${m.scoreOpp} ${if (m.home == true) "(casa)" else if (m.home == false) "(fora)" else ""} • resultado lido".replace("  ", " "), 0))
+            }
+        }
+        out.sortedWith(compareBy<Done> { if (it.state == 0) 1 else 0 }.thenByDescending { it.at })
+    }.getOrDefault(emptyList())
+
+    private fun bindPanels(ctx: Context, v: RemoteViews, rows: List<Row>, evs: List<Ev>, done: List<Done>, now: Long, wDp: Int, heroEv: Ev?) {
+        val vis = android.view.View.VISIBLE; val gone = android.view.View.GONE
+        // esquerda: o PRÓXIMO evento de cada slot (jogo, treino ou obra), o do destaque marcado
+        for ((i, r) in rows.withIndex()) {
+            val id = LIST[i]
+            val mine = evs.filter { it.slot == r.slot && it.at >= now }.minByOrNull { it.at }
+            v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
+            v.setTextColor(id[1], if (r.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
+            v.setTextViewText(id[3], r.club.ifBlank { "sem clube" })
+            v.setTextViewText(id[4], when {
+                mine == null -> if (r.state == STATE_NONE) "slot livre" else r.short.ifBlank { "abra o OSM com a captura ligada" }
+                mine.kind == 0 -> "⚽ ${mine.title.removePrefix("Jogo ")} • ${clock(mine.at)}"
+                else -> "${mine.icon} ${mine.title} • ${clock(mine.at)}"
+            })
+            v.setTextViewText(id[5], mine?.let { short(Row(0, "", "", "", false, 0, null, `when` = until(it.at, now))) } ?: "—")
+            v.setTextColor(id[5], if (mine == null || r.stale) C_MUTED else urgencyColor(mine.at, now))
+            v.setTextViewText(id[6], if (r.stale) staleText(r, now) else if (mine != null) day(mine.at) else "")
+            v.setTextColor(id[6], if (r.stale) C_RED else C_MUTED)
+            setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club, 64)
+            v.setInt(id[0], "setBackgroundResource", if (heroEv != null && heroEv.slot == r.slot) R.drawable.w_tile_hero else R.drawable.w_tile)
+            click(ctx, v, id[0], r, 700)
+        }
+        // direita (só com 4+ colunas): eventos que já passaram
+        val wide = wDp >= 250
+        v.setViewVisibility(R.id.r_panel, if (wide) vis else gone)
+        val pending = done.filter { it.state != 0 }
+        val statusColor = { st: Int -> when (st) { 0 -> C_GREEN; 1 -> C_RED; else -> C_AMBER } }
+        if (wide) {
+            val ids = listOf(intArrayOf(R.id.rp1, R.id.rp1_st, R.id.rp1_ic, R.id.rp1_t, R.id.rp1_s, R.id.rp1_w), intArrayOf(R.id.rp2, R.id.rp2_st, R.id.rp2_ic, R.id.rp2_t, R.id.rp2_s, R.id.rp2_w),
+                intArrayOf(R.id.rp3, R.id.rp3_st, R.id.rp3_ic, R.id.rp3_t, R.id.rp3_s, R.id.rp3_w), intArrayOf(R.id.rp4, R.id.rp4_st, R.id.rp4_ic, R.id.rp4_t, R.id.rp4_s, R.id.rp4_w))
+            val shown = (pending + done.filter { it.state == 0 }).take(4)
+            v.setViewVisibility(R.id.rp_ok, if (pending.isEmpty()) vis else gone)
+            // tudo certo: o polegar (animado: o ViewFlipper do brilho acima + a mensagem); mostra também os últimos concluídos
+            val rowsToShow = if (pending.isEmpty()) shown.take(0) else shown
+            for ((i, id) in ids.withIndex()) {
+                val d = rowsToShow.getOrNull(i)
+                if (d == null) { v.setViewVisibility(id[0], gone); continue }
+                v.setViewVisibility(id[0], vis)
+                v.setTextViewText(id[1], when (d.state) { 0 -> "✅"; 1 -> "⏰"; else -> "⚠" }); v.setTextViewText(id[2], d.icon)
+                v.setTextViewText(id[3], "S${d.slot} • ${d.title}"); v.setTextViewText(id[4], d.sub); v.setTextColor(id[4], statusColor(d.state))
+                v.setTextViewText(id[5], ago(now - d.at).removePrefix("há ").let { "há $it" })
+            }
+            val extra = (pending + done.filter { it.state == 0 }).size - rowsToShow.size
+            if (extra > 0 && pending.isNotEmpty()) { v.setViewVisibility(R.id.rp_more, vis); v.setTextViewText(R.id.rp_more, "+$extra • abrir a Agenda") } else v.setViewVisibility(R.id.rp_more, gone)
+            v.setOnClickPendingIntent(R.id.r_panel, PendingIntent.getActivity(ctx, 950, Intent(ctx, MainActivity::class.java).setAction("com.osmaicoach.collector.WIDGET_OPEN").setData(Uri.parse("osmcoach://main/1")).putExtra("main", 1).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+        }
+        // rodapé: o que o app SABE (nada de "em dia" com pendência ou dado velho)
+        val stale = rows.count { it.state == STATE_OLD }
+        val warn = pending.isNotEmpty() || stale > 0
+        v.setInt(R.id.f_bar, "setBackgroundResource", if (warn) R.drawable.w_status_warn else R.drawable.w_status_ok)
+        v.setTextViewText(R.id.f_icon, if (warn) "⚠" else "✅")
+        v.setTextViewText(R.id.f_status, when {
+            pending.isNotEmpty() -> "${pending.size} pendência(s) na agenda" + if (stale > 0) " • $stale slot(s) com dado velho" else ""
+            stale > 0 -> "Dado velho em $stale slot(s): abra o OSM com a captura"
+            else -> "Agenda em dia! Nenhum evento vencido sem conferência."
+        })
+    }
+
     /** Escolhe o layout pelo tamanho atual do widget (dp) — funciona do Android 11 em diante (opções do widget), sem depender do modo responsivo do Android 12. */
-    fun views(ctx: Context, rows: List<Row>, now: Long, wDp: Int, hDp: Int, evs: List<Ev> = emptyList()): RemoteViews = when {
-        wDp >= 200 && hDp >= 210 -> large(ctx, rows, now, wDp, evs)
+    fun views(ctx: Context, rows: List<Row>, now: Long, wDp: Int, hDp: Int, evs: List<Ev> = emptyList(), done: List<Done> = emptyList()): RemoteViews = when {
+        wDp >= 200 && hDp >= 210 -> large(ctx, rows, now, wDp, evs, done)
         wDp >= 200 -> wide(ctx, rows, now)
-        else -> small(ctx, rows, now, wDp)
+        else -> small(ctx, rows, now, wDp, evs)
     }
 
     fun intentFor(ctx: Context, r: Row): Intent = Intent(ctx, MainActivity::class.java)
@@ -391,10 +461,11 @@ object SlotWidget {
         val now = System.currentTimeMillis()
         val rows = loadRows(ctx, now)
         val evs = loadEvents(ctx)
+        val done = loadDone(ctx, rows, evs, now)
         for (id in all) {
             val o = mgr.getAppWidgetOptions(id)
             val w = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250); val h = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 120))
-            runCatching { mgr.updateAppWidget(id, views(ctx, rows, now, w, h, evs)) }
+            runCatching { mgr.updateAppWidget(id, views(ctx, rows, now, w, h, evs, done)) }
         }
     }
 

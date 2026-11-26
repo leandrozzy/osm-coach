@@ -52,9 +52,11 @@ object CrestWeb {
         all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }?.let { return it }
         // time reserva (II): usa o escudo da equipe principal quando não existe um próprio (o escudo é o mesmo)
         val lk = CrestAdmin.look(team ?: "")
-        if (lk.length >= 9 && lk.endsWith("ii") && !lk.endsWith("iii")) {
-            val base = lk.dropLast(2)
-            return all.firstOrNull { f -> CrestAdmin.look(f.name.removeSuffix(".png")) == base }
+        // mesmo clube com o numeral de reserva lido de outro jeito (II/I/III/sem): o escudo é o mesmo; compara o nome SEM os traços finais
+        fun baseOf(x: String) = x.trimEnd('i').takeIf { it.length >= 6 } ?: x
+        if (lk.length >= 8) {
+            val base = baseOf(lk)
+            return all.firstOrNull { f -> val fl = CrestAdmin.look(f.name.removeSuffix(".png")); baseOf(fl) == base && (fl.length - fl.trimEnd('i').length) <= 3 }
         }
         return null
     }
