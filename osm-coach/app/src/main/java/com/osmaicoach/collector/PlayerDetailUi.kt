@@ -116,7 +116,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
     val info = rememberLoaded<PlayerInfo?>(null, rememberTick(4000L), UiBus.version to p.nameKey) { loadPlayerInfo(ctx, slot, p) }
     var tool by remember { mutableStateOf(0) }
     var confirmRemove by remember { mutableStateOf(false) }
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             android.widget.Toast.makeText(ctx, "Processando a foto de ${p.name}…", android.widget.Toast.LENGTH_SHORT).show()
             AppScope.scope.launch(Dispatchers.IO) {
@@ -142,8 +142,8 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                     // cabeçalho: foto grande + nome + força
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val img = remember(p.nameKey, UiBus.version) { PhotoWeb.bitmapAny(ctx.filesDir, p.nameKey)?.asImageBitmap() }
-                        val m = Modifier.size(104.dp).clip(CircleShape).border(2.dp, catColor(cat), CircleShape).clickable { pickPhoto.launch("image/*") }
-                        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = m)
+                        val m = Modifier.size(104.dp).clip(CircleShape).border(2.dp, catColor(cat), CircleShape).clickable { pickPhoto.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
+                        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = m.background(Color.White))
                         else Canvas(m) {
                             val w = size.width; val h = size.height
                             drawRect(Color(0xFFF3F5F9)); val ink = Color(0xFFB4BDD0)
@@ -179,6 +179,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                             if (p.forSale != true && !out && info?.red != true && info?.injured != true && info?.yellow != true && trainText == null) Chip("✅ Disponível", C.OK)
                         }
                     }
+                    WorldRealBox(slot, p.name)   // identidade real (Base Mundial), camada separada do jogo
                     DSection("Informações") {
                         KV("Setor / posição", "${cat} • ${p.posCode ?: "?"}")
                         KV("Idade", p.age?.let { "$it anos" } ?: "?")
@@ -224,7 +225,7 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                             if (ph.at > 0) KV("Salva", "${ago(ph.at)} • ${ph.bytes / 1024} KB")
                         }
                         Row2 {
-                            Act("📷 Alterar foto") { pickPhoto.launch("image/*") }
+                            Act("📷 Alterar foto") { pickPhoto.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
                             Act("🔁 Buscar de novo") { AppScope.scope.launch(Dispatchers.IO) { PhotoWeb.retryPhoto(ctx, p.nameKey); PhotoWeb.run(ctx, force = true) }; android.widget.Toast.makeText(ctx, "Buscando outra foto…", android.widget.Toast.LENGTH_SHORT).show() }
                         }
                         Row2 {
@@ -248,16 +249,6 @@ internal fun PlayerDetailDialog(slot: Int, p: PlayerEntity, d: SlotData, trainTe
                         Row2 {
                             Act("⚖ Comparar") { tool = 1 }
                             Act("💰 Preço de venda") { tool = 2 }
-                        }
-                        Row2 {
-                            Act("🎨 Criar arte") {
-                                AppScope.scope.launch(Dispatchers.IO) {
-                                    val now = System.currentTimeMillis()
-                                    val it = runCatching { Arts.make(ctx, Arts.Cand("player|$slot|${p.nameKey}|$now", slot, "PLAYER", "Destaque: ${p.name}", now, p.nameKey)) }.getOrNull()
-                                    withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, if (it != null) "Arte criada: veja a aba Artes." else (ArtsAi.lastError ?: "Não consegui criar a arte."), android.widget.Toast.LENGTH_LONG).show() }
-                                }
-                                onDone()
-                            }
                         }
                     }
                     DSection("Correções") {

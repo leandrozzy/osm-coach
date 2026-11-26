@@ -41,7 +41,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -60,7 +59,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -134,18 +132,21 @@ import org.json.JSONObject
 
 // Cores do OSM: azul-marinho de estádio à noite, azul vivo dos botões e o amarelo dos destaques.
 internal object C {
-    val BG = Color(0xFF081A3C)
-    val SURFACE = Color(0xFF0F2347)
-    val SURFACE2 = Color(0xFF16325F)
-    val PRIMARY = Color(0xFF2AB4FF)
-    val GOLD = Color(0xFFFFC21A)
-    val OK = Color(0xFF3DDC84)
-    val BAD = Color(0xFFFF5C5C)
-    val WARN = Color(0xFFFFB74D)
-    val MUTED = Color(0xFF9FB4D3)
+    val BG = DS.BG
+    val SURFACE = DS.SURFACE
+    val SURFACE2 = DS.ELEVATED
+    val PRIMARY = DS.LIME          // ação primária e destaque (texto escuro sobre ele)
+    val INFO = DS.CYAN             // análise
+    val GOLD = DS.AMBER            // atenção
+    val OK = DS.GREEN
+    val BAD = DS.RED
+    val WARN = DS.AMBER
+    val MUTED = DS.TEXT2
+    val BORDER = DS.BORDER
+    val TEXT = DS.TEXT
     val WIN = Color(0xFF2EA043)
-    val DRAW = Color(0xFFF2C94C)
-    val LOSS = Color(0xFFE5484D)
+    val DRAW = DS.AMBER
+    val LOSS = DS.RED
 }
 
 class MainActivity : ComponentActivity() {
@@ -155,6 +156,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(i: Intent?) {
         val slot = i?.getIntExtra("slot", 0) ?: 0
+        if (i != null && i.hasExtra("main")) { Route.main = i.getIntExtra("main", -1); Route.nonce++ }
         if (slot in 1..4) {
             Route.tab = i?.getIntExtra("tab", 4) ?: 4
             Route.slot = slot
@@ -187,6 +189,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Health.install(applicationContext)
         Diag.init(applicationContext)
+        SlotWidget.attach(applicationContext)
         Settings.migrate(applicationContext)
         AppScope.scope.launch { Repo(applicationContext).purgeLegacy() }
         Notifier.ensureChannels(applicationContext)
@@ -197,17 +200,22 @@ class MainActivity : ComponentActivity() {
         KeepAliveService.start(applicationContext)
         // Ao recriar a tela (girar o celular) o intent antigo continua aqui: não reabre o slot da notificação.
         if (savedInstanceState == null) handleIntent(intent)
+        // app aberto do zero (fechado antes): sempre começa em Hoje; recriação da tela (girar, memória) e volta do OSM continuam onde estava
+        if (savedInstanceState == null) getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putInt("tab", 0).putInt("slot", 0).putInt("slotTab", 0).apply()
         setContent {
             val font = remember { osmFontFamily() }
             val base = androidx.compose.material3.Typography()
             fun f(t: androidx.compose.ui.text.TextStyle) = t.copy(fontFamily = font)
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = C.PRIMARY, secondary = C.GOLD, background = C.BG, surface = C.SURFACE,
-                    onSurface = Color.White, onBackground = Color.White, surfaceVariant = C.SURFACE2,
-                    onPrimary = Color.White, secondaryContainer = C.SURFACE2,
-                    onSecondary = Color(0xFF0B1C3E), onSecondaryContainer = Color.White, onSurfaceVariant = Color(0xFFC9D8F0),
-                    primaryContainer = C.SURFACE2, onPrimaryContainer = Color.White, outline = Color(0xFF3F6AA8)
+                    primary = C.PRIMARY, secondary = C.INFO, tertiary = C.GOLD, background = C.BG, surface = C.SURFACE,
+                    onSurface = C.TEXT, onBackground = C.TEXT, surfaceVariant = C.SURFACE2,
+                    onPrimary = DS.ON_LIME, secondaryContainer = C.SURFACE2,
+                    onSecondary = DS.ON_LIME, onSecondaryContainer = C.TEXT, onSurfaceVariant = C.MUTED,
+                    primaryContainer = C.SURFACE2, onPrimaryContainer = C.TEXT, outline = C.BORDER, error = C.BAD
+                ),
+                shapes = androidx.compose.material3.Shapes(
+                    extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(DS.RADIUS_CONTROL), medium = RoundedCornerShape(DS.RADIUS_CARD), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(28.dp)
                 ),
                 typography = base.copy(
                     displayLarge = f(base.displayLarge), displayMedium = f(base.displayMedium), displaySmall = f(base.displaySmall),
@@ -221,7 +229,7 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.material3.LocalTextStyle provides f(base.bodyLarge)
                 ) {
                     androidx.compose.runtime.CompositionLocalProvider(
-                        androidx.compose.material3.LocalContentColor provides Color.White
+                        androidx.compose.material3.LocalContentColor provides C.TEXT
                     ) {
                         OsmAppBackground(Modifier.fillMaxSize()) { App() }
                     }
@@ -331,12 +339,22 @@ object UiBus {
     private var lastBump = 0L
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
-    /** Chamado pela captura depois de gravar algo (campos, escudos, bandeiras): a tela recarrega sozinha, sem botão de atualizar. No máx. 1× a cada 1,2 s. */
-    fun bump() {
+    private var pending = false
+
+    /**
+     * Chamado pela captura depois de gravar algo (campos, escudos, bandeiras): a tela recarrega sozinha, sem botão de atualizar. No máx. 1× a cada 1,2 s,
+     * MAS o último aviso nunca se perde: se chegar dentro da janela, fica agendado para o fim dela (antes era descartado e a tela ficava velha até o usuário mexer).
+     */
+    @Synchronized fun bump() {
         val now = System.currentTimeMillis()
-        if (now - lastBump < 1200L) return
+        val wait = 1200L - (now - lastBump)
+        if (wait > 0) {
+            if (!pending) { pending = true; main.postDelayed({ synchronized(this) { pending = false; lastBump = System.currentTimeMillis() }; version++; SlotWidget.requestRefresh() }, wait) }
+            return
+        }
         lastBump = now
         main.post { version++ }
+        SlotWidget.requestRefresh()
     }
 }
 
@@ -533,15 +551,21 @@ internal fun <T> rememberLoaded(initial: T, tick: Int, key: Any?, loader: suspen
 /** Título pequeno de grupo (AVISOS, PREFERÊNCIAS…): separa o que é de cada assunto numa lista longa. */
 @Composable
 internal fun SectionLabel(text: String, hint: String? = null) {
-    Column(Modifier.padding(top = 18.dp, bottom = 2.dp, start = 4.dp)) {
-        Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY, letterSpacing = 1.2.sp)
-        if (hint != null) Text(hint, fontSize = 12.5.sp, color = C.MUTED)
+    Column(Modifier.padding(top = 22.dp, bottom = 4.dp, start = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(5.dp).height(18.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
+            Spacer(Modifier.width(10.dp))
+            Text(text.uppercase(), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, letterSpacing = 1.2.sp)
+        }
+        if (hint != null) Text(hint, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(start = 15.dp, top = 2.dp))
     }
 }
 
 @Composable
 internal fun Title(text: String) {
     Row(Modifier.padding(top = 22.dp, bottom = 8.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(5.dp).height(22.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
+        Spacer(Modifier.width(10.dp))
         Text(text, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
     }
 }
@@ -558,7 +582,7 @@ internal fun KV(label: String, value: String) {
 internal fun Panel(content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(DS.RADIUS_CARD + 4.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) { Column(Modifier.padding(16.dp)) { content() } }
 }
@@ -566,9 +590,9 @@ internal fun Panel(content: @Composable () -> Unit) {
 @Composable
 internal fun Pill(text: String, ok: Boolean? = null) {
     val c = when (ok) {
-        true -> Color(0xFF22C55E)
-        false -> Color(0xFFEF4444)
-        null -> Color(0xFF5FA8FF)
+        true -> C.OK
+        false -> C.BAD
+        null -> C.INFO
     }
     Box(
         Modifier.padding(end = 6.dp, top = 2.dp, bottom = 2.dp).clip(RoundedCornerShape(50))
@@ -602,10 +626,10 @@ internal fun Crest(slot: Int, size: Dp, team: String? = null) {
 @Composable
 internal fun Bar(pct: Int) {
     val f by androidx.compose.animation.core.animateFloatAsState(pct.coerceIn(0, 100) / 100f, androidx.compose.animation.core.tween(800), label = "bar")
-    Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(Color(0x33000000))) {
+    Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)).background(C.SURFACE2)) {
         Box(
             Modifier.fillMaxWidth(f).fillMaxHeight().clip(RoundedCornerShape(50))
-                .background(Brush.horizontalGradient(listOf(Color(0xFF1E6BFF), Color(0xFF3DB2FF), Color(0xFF6EE7FF))))
+                .background(C.INFO)
         )
     }
 }
@@ -641,15 +665,10 @@ internal fun Fold(icon: String, title: String, badge: String? = null, startOpen:
     ) {
         Column(Modifier.animateContentSize()) {
             Row(
-                Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { open = !open }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp))
-                        .background(Brush.linearGradient(listOf(Color(0xFF2B5BB8), Color(0xFF14306E))))
-                        .border(1.dp, Color(0x4072B8FF), RoundedCornerShape(11.dp)),
-                    contentAlignment = Alignment.Center
-                ) { Text(icon, fontSize = 17.sp) }
+                DsTile(icon, C.INFO, 40.dp)
                 Spacer(Modifier.width(12.dp))
                 Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (badge != null) {
@@ -669,8 +688,9 @@ internal fun Fold(icon: String, title: String, badge: String? = null, startOpen:
 @Composable
 internal fun StatTile(icon: String, value: String, label: String, color: Color, modifier: Modifier = Modifier) {
     Column(
-        modifier.clip(RoundedCornerShape(14.dp))
+        modifier.clip(RoundedCornerShape(16.dp))
             .background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
             .padding(vertical = 12.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -736,11 +756,11 @@ internal fun initials(name: String): String {
 
 /** Escudo desenhado para o rival (cor fixa pelo nome, com as iniciais). */
 @Composable
-internal fun RivalShield(name: String?, size: Dp, slot: Int? = null) {
+internal fun RivalShield(name: String?, size: Dp, slot: Int? = null, web: Boolean = true) {
     val ctx = LocalContext.current
     val ver = UiBus.version
     // escudo REAL do rival (recorte do Pré-jogo), só enquanto for o mesmo rival do recorte
-    androidx.compose.runtime.LaunchedEffect(name) { CrestWeb.request(ctx, name) }
+    if (web) androidx.compose.runtime.LaunchedEffect(name) { CrestWeb.request(ctx, name) }
     val real = remember(name, ver) {
         if (name == null) null else runCatching {
             // escudo real da web primeiro; senão o arquivo global por nome do time (calendário/pré-jogo/central: o escudo de um clube não muda)
@@ -779,7 +799,12 @@ internal val REF_COLORS = listOf(Color(0xFF2F8CFF), Color(0xFF3DDC84), Color(0xF
 internal fun RefereeMeter(value: String?, compact: Boolean = false) {
     val lvl = Referee.level(value)
     val name = Referee.norm(value)
-    Column(Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    // rosto real do árbitro do jogo (muito brando … muito rigoroso), com contorno na cor do nível
+    if (lvl != null) Box(Modifier.padding(end = 10.dp).size(if (compact) 52.dp else 84.dp).clip(RoundedCornerShape(18.dp)).background(REF_COLORS[lvl].copy(alpha = 0.16f)).border(1.5.dp, REF_COLORS[lvl], RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+        RefereeFace(lvl, Modifier.fillMaxSize().padding(3.dp))
+    }
+    Column(Modifier.weight(1f)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("🌡", fontSize = if (compact) 13.sp else 16.sp)
             Text(" Árbitro ", fontSize = 13.sp, color = C.MUTED)
@@ -809,6 +834,7 @@ internal fun RefereeMeter(value: String?, compact: Boolean = false) {
                 }
             }
         }
+    }
     }
 }
 
@@ -842,7 +868,7 @@ internal fun MatchupHero(slot: Int, d: SlotData) {
     val human = known(d.fields, K.RIVAL_HUMAN)
     val myStr = known(d.fields, K.MY_STRENGTH)?.toIntOrNull()
     val rivalStr = known(d.fields, K.RIVAL_STRENGTH)?.toIntOrNull()
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).dsHero(C.INFO).padding(16.dp)) {
         Text("📅  Próximo jogo", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
         val sub = listOfNotNull(known(d.fields, K.COMPETITION), known(d.fields, K.ROUND)?.let { "Rodada $it" }).joinToString(" • ")
         if (sub.isNotBlank()) Text(sub, fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
@@ -1027,7 +1053,7 @@ internal fun SeasonEndCard(d: SlotData) {
     val rank = info?.rank
     Box(
         Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF3A2A06), Color(0xFF1A1F33), Color(0xFF0E2A5A))))
+            .background(C.SURFACE2)
             .border(1.dp, Color(0x55FFC83D), RoundedCornerShape(12.dp)).padding(14.dp)
     ) {
         Column(Modifier.fillMaxWidth()) {
@@ -1208,7 +1234,7 @@ internal fun HowItWorks() {
         for ((i, s) in steps.withIndex()) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
-                    Modifier.size(46.dp).clip(RoundedCornerShape(50)).background(Brush.linearGradient(listOf(Color(0xFF1F6BFF), Color(0xFF00B4D8)))),
+                    Modifier.size(46.dp).clip(RoundedCornerShape(50)).background(Brush.linearGradient(listOf(C.SURFACE2, C.SURFACE2))),
                     contentAlignment = Alignment.Center
                 ) { Text(s.first, fontSize = 20.sp, color = Color.White) }
                 Text(s.second, fontSize = 11.5.sp, color = C.MUTED, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
@@ -1231,7 +1257,7 @@ internal fun RivalChangedCard(changes: List<RivalWatch.Change>, onGenerate: () -
     )
     Column(
         Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(16.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xFF4A2A06), Color(0xFF2A1A08))))
+            .background(C.SURFACE2)
             .border(1.5.dp, Color(0xFFFFB020).copy(alpha = glow), RoundedCornerShape(16.dp)).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1256,7 +1282,7 @@ internal fun RivalChangedCard(changes: List<RivalWatch.Change>, onGenerate: () -
         }
         Box(
             Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp))
-                .background(Brush.horizontalGradient(listOf(Color(0xFFFFC21A), Color(0xFFFF9500)))).clickable { onGenerate() }.padding(vertical = 12.dp),
+                .background(C.GOLD).clickable { onGenerate() }.padding(vertical = 12.dp),
             contentAlignment = Alignment.Center
         ) { Text("⚡ Gerar nova tática", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF2A1A08)) }
     }
@@ -1443,9 +1469,9 @@ internal suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     val imgMap = runCatching { repo.dao.plan(slot, "natimg3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     FlagWeb.ensureAll(ctx)
     val countriesMap = runCatching { SlotRules.playerCountries(repo, slot, ctx.filesDir) }.getOrDefault(emptyMap())
-    val isoMap = (runCatching { repo.dao.plan(slot, "natiso2")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()) +
+    val isoMap = (runCatching { repo.dao.plan(slot, "natiso4")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()) +
         runCatching { FlagManual.all(repo) }.getOrDefault(emptyMap())   // bandeira escolhida à mão vale mais
-    val bankMap = runCatching { repo.dao.plan(0, "natbank")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
+    val bankMap = runCatching { repo.dao.plan(0, "natbank3")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val richMap = runCatching { repo.dao.plan(slot, "natrich")?.json?.let { j -> JSONObject(j).let { o -> o.keys().asSequence().associateWith { k -> o.optString(k) } } } }.getOrNull().orEmpty()
     val leagueRichV = runCatching { Atlas.leagueMatch(repo, f[K.COMPETITION]?.value)?.let { n -> Atlas.richOf(repo, Atlas.Kind.LEAGUE, n) } }.getOrNull()
     val eveList = runCatching { buildEve(repo, slot, f, tplan) }.getOrDefault(emptyList())
@@ -1629,6 +1655,9 @@ internal suspend fun loadToday(ctx: Context): TodayData {
         runCatching {
             val f = repo.fieldMap(s)
             if (Hints.slotFree(f)) return@runCatching null
+            // slot sem competição (livre, procurando, pré-época) ou com a competição/batalha encerrada: treino e obra de antes não valem mais
+            if (known(f, K.SLOT_STATE) in listOf("vazio", "procurando", "preepoca")) return@runCatching null
+            if (Hints.competitionOver(repo, s, f, now)) return@runCatching null
             val team = known(f, K.TEAM) ?: known(f, K.HUB_TITLE) ?: "Slot $s"
             val screen = repo.dao.plan(s, "trainscreen")?.json?.let { JSONObject(it) }
             Work.of(s, team, screen, repo.timers(s), f).takeIf { it.hasData }
@@ -1641,10 +1670,10 @@ internal suspend fun loadToday(ctx: Context): TodayData {
     }
     runCatching { needs.addAll(Fresh.global(repo.timers(0), repo.seenMap(0), now)) }
     val acc = runCatching {
-        Accuracy.of((1..4).flatMap { sl -> Accuracy.parse(sl, repo.dao.tacticLogs(sl).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }) })
+        Accuracy.of((1..4).flatMap { sl -> Accuracy.parse(sl, repo.dao.tacticLogs(sl).mapNotNull { runCatching { JSONObject(it.json) }.getOrNull() }.filter { PlayedTactic.confirmedOrLegacy(it) }) })
     }.getOrNull()
     val res = runCatching {
-        Results.of((1..4).flatMap { sl -> repo.dao.tacticLogs(sl).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() } })
+        Results.of((1..4).flatMap { sl -> repo.dao.tacticLogs(sl).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() }.filter { PlayedTactic.attributable(it) } })
     }.getOrNull()
     runCatching {
         // log ao vivo: o que o app está pedindo agora, por slot, e por quê (só quando muda)
@@ -1666,12 +1695,15 @@ internal suspend fun loadToday(ctx: Context): TodayData {
 
 @Composable
 internal fun ChipButton(text: String, colors: List<Color>, onClick: () -> Unit) {
+    val txt = if (DS.luminance(colors.first()) > 0.35) DS.ON_LIME else C.TEXT
     Box(
-        Modifier.clip(RoundedCornerShape(50))
+        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(50))
             .background(Brush.horizontalGradient(colors))
+            .border(1.dp, if (colors.first() == C.SURFACE2) C.BORDER else Color.Transparent, RoundedCornerShape(50))
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 7.dp)
-    ) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1) }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) { Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = txt, maxLines = 1) }
 }
 
 /**
@@ -1686,14 +1718,14 @@ internal fun OsmButton(modifier: Modifier = Modifier) {
     val active = tick >= 0 && Control.activeSession(ctx) != null
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (active) {
-            ChipButton("■ Encerrar", listOf(Color(0xFFD32F2F), Color(0xFFFF5C5C))) {
+            ChipButton("■ Encerrar", listOf(C.BAD, C.BAD)) {
                 AppScope.scope.launch { Control.end(ctx.applicationContext) }
                 Toast.makeText(ctx, "Captura encerrada. Processando em segundo plano…", Toast.LENGTH_SHORT).show()
             }
             Spacer(Modifier.width(6.dp))
-            ChipButton("⚽ OSM ↗", listOf(Color(0xFF1F6BFF), Color(0xFF00B4D8))) { openOsm(ctx) }
+            ChipButton("⚽ OSM ↗", listOf(C.SURFACE2, C.SURFACE2)) { openOsm(ctx) }
         } else {
-            ChipButton("▶ OSM + captura", listOf(Color(0xFF1F6BFF), Color(0xFF00B4D8))) {
+            ChipButton("▶ OSM + captura", listOf(DS.LIME, DS.LIME)) {
                 if (serviceEnabled(ctx) && Diag.serviceConnected) {
                     scope.launch {
                         Control.start(ctx)
@@ -1719,16 +1751,17 @@ internal fun App() {
     LaunchedEffect(tab, openSlot, openTab) {
         ui.edit().putInt("tab", tab).putInt("slot", openSlot).putInt("slotTab", openTab).apply()
     }
-    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "🎨" to "Artes", "⚙️" to "Ajustes")
+    val items = listOf("🏠" to "Hoje", "📅" to "Agenda", "⚽" to "Slots", "🧠" to "Diretor", "🎨" to "Artes", "🌐" to "Base", "⚙️" to "Ajustes")
     // Botão Voltar do Android: fecha o slot aberto, depois volta para Hoje (em vez de fechar o app).
     BackHandler(enabled = openSlot > 0) { openSlot = 0 }
     BackHandler(enabled = openSlot == 0 && tab != 0) { tab = 0 }
     // Toque numa notificação: abre o slot na aba certa.
     LaunchedEffect(Route.nonce) {
+        if (Route.main >= 0) { tab = Route.main; openSlot = 0; Route.main = -1 }
         if (Route.slot > 0) {
             tab = 2
             openSlot = Route.slot
-            openTab = Route.tab
+            if (Route.tab >= 0) openTab = Route.tab
             Route.slot = 0
         }
     }
@@ -1737,22 +1770,21 @@ internal fun App() {
         topBar = { BrandBar() },
         floatingActionButton = { if (openSlot == 0) OsmButton() },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF071530), tonalElevation = 0.dp) {
+            NavigationBar(containerColor = C.SURFACE, tonalElevation = 0.dp, modifier = Modifier.border(1.dp, C.BORDER)) {
                 items.forEachIndexed { i, (icon, name) ->
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i; openSlot = 0 },
                         icon = {
-                            val vec = when (i) { 0 -> Icons.Outlined.Home; 1 -> Icons.Outlined.DateRange; 2 -> Icons.Outlined.List; 3 -> Icons.Outlined.Person; 4 -> Icons.Outlined.Create; else -> Icons.Outlined.Settings }
-                            Icon(vec, contentDescription = name, modifier = Modifier.size(26.dp))
+                            DsIcon(listOf("home", "cal", "slots", "dir", "art", "globe", "gear")[i], 26.dp, if (tab == i) DS.ON_LIME else C.MUTED)
                         },
                         label = {
                             val newArts = if (i == 4) Arts.unseenCount(ctx).also { UiBus.version } else 0
-                            Text(if (newArts > 0) "$name ($newArts)" else name, fontSize = 13.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+                            Text(if (newArts > 0) "$name ($newArts)" else name, fontSize = 12.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
                         },
                         colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                            indicatorColor = C.PRIMARY.copy(alpha = 0.20f), selectedTextColor = C.PRIMARY, unselectedTextColor = C.MUTED,
-                            selectedIconColor = C.PRIMARY, unselectedIconColor = C.MUTED
+                            indicatorColor = C.PRIMARY, selectedTextColor = C.PRIMARY, unselectedTextColor = C.MUTED,
+                            selectedIconColor = DS.ON_LIME, unselectedIconColor = C.MUTED
                         )
                     )
                 }
@@ -1761,15 +1793,16 @@ internal fun App() {
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (tab) {
-                0 -> TodayTab(onGoSettings = { tab = 5 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
+                0 -> TodayTab(onGoSettings = { tab = 6 }, onOpenSlot = { slot, t -> tab = 2; openSlot = slot; openTab = t })
                 1 -> AgendaTab()
                 2 -> if (openSlot > 0) {
-                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
+                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it }) { openSlot = 0 } }
                 } else SlotsTab { slot, t -> openSlot = slot; openTab = t }
                 3 -> if (openSlot > 0) {
-                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }) { openSlot = 0 } }
+                    key(openSlot) { SlotScreen(openSlot, openTab, { openTab = it }, { openSlot = it }) { openSlot = 0 } }
                 } else DirectorTab { slot, t -> openSlot = slot; openTab = t }
                 4 -> ArtsTab()
+                5 -> WorldTab()
                 else -> SettingsTab()
             }
         }
@@ -2021,17 +2054,17 @@ internal fun BrandBar() {
     val col = if (ready) C.OK else C.BAD
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(androidx.compose.ui.graphics.ImageBitmap.imageResource(R.drawable.g_logo), contentDescription = null, modifier = Modifier.size(46.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
+            Image(androidx.compose.ui.graphics.ImageBitmap.imageResource(R.drawable.g_logo), contentDescription = "OSM AI Coach", modifier = Modifier.size(44.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.High)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row {
-                    Text("OSM AI ", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("Coach", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = C.PRIMARY)
+                    Text("OSM AI ", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
+                    Text("COACH", fontSize = 23.sp, fontWeight = FontWeight.ExtraBold, color = C.TEXT, letterSpacing = 0.5.sp)
                     // versão instalada (CI: 5.0.<nº da execução>): serve para conferir se o APK é o mais novo
                     val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty() }
-                    if (ver.isNotBlank()) Text("  v$ver", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.align(Alignment.Bottom).padding(bottom = 3.dp))
+                    if (ver.isNotBlank()) Text("  v$ver", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.align(Alignment.Bottom).padding(bottom = 3.dp))
                 }
-                Text("Assistente tático e analítico para o OSM", fontSize = 12.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("TÁTICO E ANALÍTICO", fontSize = 11.5.sp, color = C.PRIMARY, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, maxLines = 1)
             }
             Row(
                 Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f)).border(1.dp, col.copy(alpha = 0.5f), RoundedCornerShape(50))
@@ -2043,89 +2076,96 @@ internal fun BrandBar() {
                 Text(if (ready) "Online" else "Parado", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = col)
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x662AB4FF), Color.Transparent))))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(C.BORDER))
+        LiveStrip()
     }
 }
 
 /** Título de página como nas referências: ícone, título grande com traço ciano e um chip à direita. */
 @Composable
 internal fun PageTitle(icon: String, title: String, chip: String? = null) {
-    Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(icon, fontSize = 26.sp)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
-            Box(Modifier.padding(top = 2.dp).width(44.dp).height(3.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY))
-        }
-        if (chip != null) Box(
-            Modifier.clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, Color(0x552AB4FF), RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 8.dp)
-        ) { Text(chip, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
-    }
+    HeroHeader(icon, title, null, chip)
 }
 
 
 /** "Para fazer agora": só o que precisa de você, em ordem de urgência, de todos os slots. */
-@Composable
-internal fun TodoCard(data: TodayData, onOpenSlot: (Int, Int) -> Unit) {
-    val now = System.currentTimeMillis()
-    class Todo(val slot: Int, val icon: String, val title: String, val sub: String, val urgency: Int, val tab: Int)
-    val todo = ArrayList<Todo>()
+/** Uma pendência do Hoje (puro, testável). */
+internal class TodoItem(val slot: Int, val icon: String, val title: String, val sub: String, val urgency: Int, val tab: Int)
+
+/** Todas as pendências, da mais urgente para a menos (mesmas regras de antes). */
+internal fun todoItems(data: TodayData, now: Long): List<TodoItem> {
+    val todo = ArrayList<TodoItem>()
     for (s in data.slots) {
         if (s.ended || s.state != null) continue
         val at = s.nextAt
-        if (s.needsResult) todo.add(Todo(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
+        if (s.needsResult) todo.add(TodoItem(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
         if (at != null && at > now && (s.tacticStale || s.rivalGaps) && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
-            todo.add(Todo(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
+            todo.add(TodoItem(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
         else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
-            todo.add(Todo(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
-        if (s.rivalChanged.isNotEmpty()) todo.add(Todo(s.slot, "⚠", "O rival mudou a tática", "Gere a tática de novo antes do jogo", 6, 4))
-        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(if (s.mountDiff.isNotEmpty()) Todo(s.slot, "📋", "Ajustar a tática montada no OSM", "Li a Tática do jogo e está diferente da gerada: " + s.mountDiff.joinToString(" • "), 3, 4)
-            else Todo(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
+            todo.add(TodoItem(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
+        if (s.rivalChanged.isNotEmpty()) todo.add(TodoItem(s.slot, "⚠", "Revisar tática", (if (at != null && at > now) (if (s.compType?.contains("atalha", true) == true) "batalha em " else "jogo em ") + countdownShort(at) + " · " else "") + "rival mudou: " + s.rivalChanged.take(2).joinToString(", ") { c -> c.label.lowercase() + " " + c.from + "→" + c.to }, 6, 4))
+        if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(if (s.mountDiff.isNotEmpty()) TodoItem(s.slot, "📋", "Ajustar a tática montada no OSM", "Li a Tática do jogo e está diferente da gerada: " + s.mountDiff.joinToString(" • "), 3, 4)
+            else TodoItem(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
     }
     for (w in data.work) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }
-        if (idle.isNotEmpty()) todo.add(Todo(w.slot, "🏋", "Treinador parado: " + idle.joinToString { Timers.roleLabel(it.role) }, "Treino parado é evolução perdida", 3, 6))
+        if (idle.isNotEmpty()) todo.add(TodoItem(w.slot, "🏋", "Treinador parado: " + idle.joinToString { Timers.roleLabel(it.role) }, "Treino parado é evolução perdida", 3, 6))
     }
     // "Reler Pré-jogo e Análise do rival" já cobre essas duas telas: não repete como "Atualizar: Pré-jogo/Análise" no mesmo slot
     val reread = todo.filter { it.title.startsWith("Reler Pré-jogo") }.map { it.slot }.toSet()
     for (n in data.needs.filter { it.urgency >= 1 && !(it.slot in reread && (it.type == ScreenType.PREGAME || it.type == ScreenType.REPORT)) }) {
-        todo.add(Todo(n.slot, "🔄", "Atualizar: " + (Fresh.NAME[n.type] ?: n.type.name), n.reason.substringBefore(":").replaceFirstChar { it.uppercase() }, 2, 0))
+        todo.add(TodoItem(n.slot, "🔄", "Atualizar: " + (Fresh.NAME[n.type] ?: n.type.name), n.reason.substringBefore(":").replaceFirstChar { it.uppercase() }, 2, 0))
     }
-    val sorted = todo.sortedWith(compareByDescending<Todo> { it.urgency }.thenBy { it.slot })
-    Column(Modifier.fillMaxWidth().padding(top = 14.dp).osmPanel().padding(vertical = 8.dp)) {
-        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Para fazer agora", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-            if (sorted.isNotEmpty()) Pill("${sorted.size}", false)
-        }
-        if (sorted.isEmpty()) {
-            Text("✅ Tudo em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
-        }
-        for (t in sorted.take(6)) {
-            Row(
-                Modifier.fillMaxWidth().clickable { onOpenSlot(t.slot, t.tab) }.padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) { Text(t.icon, fontSize = 18.sp) }
+    return todo.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenBy { it.slot })
+}
+
+/** UMA ação prioritária por slot (a mais urgente), slots urgentes primeiro; slot sem pendência fica de fora (aparece compacto como "em dia"). */
+internal fun priorityPerSlot(items: List<TodoItem>): List<TodoItem> =
+    items.groupBy { it.slot }.values.map { it.first() }.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenBy { it.slot })
+
+@Composable
+internal fun TodoCard(data: TodayData, only: Int? = null, onOpenSlot: (Int, Int) -> Unit) {
+    val now = System.currentTimeMillis()
+    val all = todoItems(data, now).filter { only == null || it.slot == only }
+    val sorted = priorityPerSlot(all)
+    val readySlots = data.slots.filter { !it.ended && it.state == null && sorted.none { t -> t.slot == it.slot } }.map { it.slot }
+    DsSection(if (only != null) "Prioridades do S$only" else "Prioridades do dia", if (sorted.isNotEmpty()) "${sorted.size}" else null)
+    if (sorted.isEmpty()) {
+        Text("✅ Todos os slots em dia. Nada precisa de você agora.", fontSize = 14.sp, color = C.OK, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(DS.RADIUS_CARD)).background(C.OK.copy(alpha = 0.1f)).border(1.dp, C.OK.copy(alpha = 0.4f), RoundedCornerShape(DS.RADIUS_CARD)).padding(14.dp))
+    }
+    val tones = listOf(C.PRIMARY, C.INFO, C.GOLD)
+    for ((i, t) in sorted.take(6).withIndex()) {
+        val tone = tones[i % tones.size]
+        val shape = RoundedCornerShape(DS.RADIUS_CARD)
+        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(tone.copy(alpha = 0.08f)).border(1.dp, tone.copy(alpha = 0.45f), shape).clickable { onOpenSlot(t.slot, t.tab) }.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DsTile(t.icon, tone)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(t.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(t.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(t.title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(t.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("S${t.slot}", fontSize = 13.sp, color = C.GOLD, fontWeight = FontWeight.ExtraBold)
-                Text("  ›", fontSize = 18.sp, color = C.MUTED)
+                DsChip("S${t.slot}", C.GOLD)
+            }
+            Box(Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 44.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(DS.ELEVATED).border(1.dp, tone.copy(alpha = 0.6f), RoundedCornerShape(DS.RADIUS_CONTROL)), contentAlignment = Alignment.Center) {
+                Text("Abrir →", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tone)
             }
         }
-        if (sorted.size > 6) Text("+ ${sorted.size - 6} outras pendências", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+    }
+    if (readySlots.isNotEmpty() && sorted.isNotEmpty()) Text("✅ " + readySlots.joinToString(" • ") { "S$it" } + " em dia", fontSize = 13.sp, color = C.OK, modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp))
+    val extra = all.size - sorted.size
+    if (extra > 0) Fold("📋", "Outras pendências", "$extra") {
+        for (t in all.filter { a -> sorted.none { it === a } }) Text("S${t.slot} · ${t.title} — ${t.sub}", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(vertical = 3.dp).clickable { onOpenSlot(t.slot, t.tab) })
     }
 }
 
 /** Círculo com a força do time (como no pré-jogo do OSM). */
 @Composable
 internal fun StrengthBadge(value: Int?, size: Dp = 34.dp, highlight: Boolean = false) {
-    val col = if (highlight) C.PRIMARY else Color(0x992AB4FF)
+    val col = if (highlight) C.PRIMARY else C.BORDER
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(50)).background(Color(0xFF0A1830)).border(2.dp, col, RoundedCornerShape(50)),
+        Modifier.size(size).clip(RoundedCornerShape(50)).background(C.SURFACE).border(2.dp, col, RoundedCornerShape(50)),
         contentAlignment = Alignment.Center
     ) { Text(value?.toString() ?: "?", fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.ExtraBold, color = if (value == null) C.MUTED else Color.White) }
 }
@@ -2138,24 +2178,24 @@ internal fun MetricBar(label: String, pct: Int, valueText: String, color: Color,
             Text(label, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(valueText, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = color)
         }
-        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(Color(0xFF14264A))) {
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(C.SURFACE2)) {
             Box(Modifier.fillMaxWidth(pct.coerceIn(0, 100) / 100f).height(6.dp).clip(RoundedCornerShape(50)).background(color))
         }
     }
 }
 
-/** Botão grande ciano → azul, como nas referências. */
+/** Botão primário: verde-lima sólido, texto escuro, alvo de toque ≥ 48 dp. */
 @Composable
 internal fun CtaButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-            .background(Brush.horizontalGradient(if (enabled) listOf(Color(0xFF19C3FF), Color(0xFF1B6BFF)) else listOf(Color(0xFF28406B), Color(0xFF28406B))))
-            .clickable(enabled = enabled) { onClick() }.padding(vertical = 14.dp),
+        modifier.fillMaxWidth().heightIn(min = DS.TOUCH).clip(RoundedCornerShape(DS.RADIUS_CONTROL))
+            .background(if (enabled) DS.LIME else C.SURFACE2)
+            .clickable(enabled = enabled) { onClick() }.padding(vertical = 13.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-            Text("  ›", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(text, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (enabled) DS.ON_LIME else C.MUTED)
+            Text("  ›", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = if (enabled) DS.ON_LIME else C.MUTED)
         }
     }
 }
@@ -2164,7 +2204,7 @@ internal fun CtaButton(text: String, modifier: Modifier = Modifier, enabled: Boo
 @Composable
 internal fun GhostButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.3.dp, Color(0x802AB4FF), RoundedCornerShape(14.dp))
+        modifier.fillMaxWidth().heightIn(min = DS.TOUCH).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(DS.RADIUS_CONTROL))
             .clickable { onClick() }.padding(vertical = 13.dp),
         contentAlignment = Alignment.Center
     ) { Text(text, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = C.PRIMARY) }
@@ -2177,19 +2217,22 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
     val at = s.nextAt?.takeIf { it > now && !s.ended && s.state == null }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).osmPanel().clickable { onOpen() }.padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Brush.horizontalGradient(listOf(Color(0xFF1E88E5), Color(0xFF1565C0)))).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                Text("S${s.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(C.PRIMARY).padding(horizontal = 10.dp, vertical = 5.dp)) {
+                Text("S${s.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = DS.ON_LIME)
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(s.title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (s.known) Color.White else C.MUTED)
+                Text(s.title, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (s.known) Color.White else C.MUTED)
                 val kind = when (s.compType) { "Batalha" -> "⚔ Batalha"; "Copa" -> "🏆 Copa"; else -> null }
                 val flagE = Flags.emojiOfCompetition(s.competition)
                 val sub = listOfNotNull(kind, s.competition?.let { c -> if (flagE != null) "$flagE $c" else c }, if (s.roundDone != null && s.roundTotal != null) "Rodada ${s.roundDone}/${s.roundTotal}" else null).joinToString(" • ")
                 if (sub.isNotBlank() && !(s.ended && s.state == null)) Text(sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            s.win?.takeIf { at != null }?.let { w -> VerdictPill(verdictOf(w.win, w.draw, w.loss)) }
+            val rd = s.roundDone?.filter { it.isDigit() }?.toIntOrNull(); val rt = s.roundTotal?.filter { it.isDigit() }?.toIntOrNull()
+            if (rd != null && rt != null && rt > 0 && !(s.ended && s.state == null)) Ring(rd * 100 / rt, 54.dp, C.INFO, "J$rd")
+            else s.win?.takeIf { at != null }?.let { w -> VerdictPill(verdictOf(w.win, w.draw, w.loss)) }
         }
+        if (at != null && s.win != null && s.state == null && !s.ended) Box(Modifier.padding(top = 8.dp)) { VerdictPill(verdictOf(s.win.win, s.win.draw, s.win.loss)) }
         if (s.state != null || s.ended || at == null) {
             val msg = when {
                 s.state == "vazio" -> "➕ Sem liga ou batalha. Comece uma no OSM; o app acompanha sozinho."
@@ -2199,7 +2242,7 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
                 s.needsResult -> "📊 O jogo já passou: registre o resultado para o app aprender."
                 else -> "📖 Leia o Pré-jogo e o Calendário no OSM para o app saber o próximo jogo."
             }
-            Text(msg, fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0A1830)).padding(12.dp))
+            Text(msg, fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(C.SURFACE).padding(12.dp))
             if (s.needsResult) CtaButton("Registrar resultado", Modifier.padding(top = 12.dp)) { onTab(5) } else CtaButton("Abrir o slot", Modifier.padding(top = 12.dp)) { onTab(0) }
             return@Column
         }
@@ -2207,7 +2250,7 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
         val mineLeft = s.home != false
         val mineCol: @Composable (Modifier) -> Unit = { m ->
             Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { Crest(s.slot, 48.dp, s.title); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
+                Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) { Crest(s.slot, 48.dp, s.title); Box(Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = 2.dp)) { StrengthBadge(s.myStr, 26.dp, true) } }
                 Text(s.title, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
                 Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.clip(RoundedCornerShape(50)).background(C.PRIMARY.copy(alpha = 0.25f)).border(1.dp, C.PRIMARY.copy(alpha = 0.7f), RoundedCornerShape(50)).padding(horizontal = 7.dp, vertical = 1.dp)) {
@@ -2219,13 +2262,14 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
         }
         val rivalCol: @Composable (Modifier) -> Unit = { m ->
             Column(m, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.BottomEnd) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.offset(x = 6.dp, y = 6.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
+                Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) { RivalShield(s.rival, 48.dp, s.slot); Box(Modifier.align(Alignment.BottomEnd).offset(x = 2.dp, y = 2.dp)) { StrengthBadge(s.rivalStr, 26.dp) } }
                 Text(s.rival ?: "rival não lido", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp), color = if (s.rival != null) Color.White else C.WARN)
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        // escudos NA MESMA LINHA: as colunas dos times alinham pelo topo (a do seu time é mais alta por causa da etiqueta VOCÊ); o centro (VS/contagem) fica centralizado
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.Top) {
             if (mineLeft) mineCol(Modifier.weight(1f)) else rivalCol(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.align(Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("VS", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = C.MUTED)
                 Column(
                     Modifier.padding(top = 4.dp).clip(RoundedCornerShape(14.dp)).background(countdownColor(at!!).copy(alpha = 0.14f)).border(1.dp, countdownColor(at).copy(alpha = 0.5f), RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 6.dp),
@@ -2370,6 +2414,7 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
     // dados a cada 5 s (ou na hora, com dado novo); o relógio da tela continua a cada 1 s
     val data = rememberLoaded(TodayCache.last, tick / 5, UiBus.version) { loadToday(ctx) }
     var msg by remember { mutableStateOf("") }
+    var selSlot by rememberSaveable { mutableStateOf<Int?>(null) }
     val enabled = serviceEnabled(ctx)
     val connected = Diag.serviceConnected
     val ready = enabled && connected
@@ -2377,22 +2422,22 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
     val hasKey = Settings.get(ctx, Settings.GEMINI_KEY, "").isNotBlank()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 96.dp)) {
-        PageTitle("🏠", "Hoje", SimpleDateFormat("EEE, d 'de' MMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() })
+        HeroHeader("🏠", "Hoje", SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")).format(Date()).replaceFirstChar { it.uppercase() }, tint = C.PRIMARY)
 
         KilledBanner(ctx, enabled, connected, batteryOk)
         if (!ready || !batteryOk || !hasKey) SetupBanner(ctx, enabled, connected, batteryOk, hasKey, onGoSettings)
 
-        Spacer(Modifier.height(8.dp))
+        NextGameHero(data.slots, selSlot, onOpenSlot)
         if (data.active) {
             Button(
                 onClick = {
                     AppScope.scope.launch { Control.end(ctx.applicationContext) }
                     msg = "Captura encerrada. Processando em segundo plano…"
                 },
-                modifier = Modifier.fillMaxWidth().height(58.dp),
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                shape = RoundedCornerShape(DS.RADIUS_CARD),
                 colors = ButtonDefaults.buttonColors(containerColor = C.BAD)
-            ) { Text("ENCERRAR CAPTURA E PROCESSAR", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+            ) { Text("ENCERRAR CAPTURA E PROCESSAR", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White) }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { if (!openOsm(ctx)) msg = "OSM não encontrado." }, modifier = Modifier.fillMaxWidth()) {
                 Text("Voltar ao OSM (a mesma sessão continua)")
@@ -2414,19 +2459,27 @@ internal fun TodayTab(onGoSettings: () -> Unit, onOpenSlot: (Int, Int) -> Unit) 
                     }
                 },
                 enabled = ready,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(20.dp)
-            ) { Text("▶  Abrir OSM e capturar", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp),
+                shape = RoundedCornerShape(DS.RADIUS_CARD),
+                colors = ButtonDefaults.buttonColors(containerColor = C.PRIMARY, contentColor = DS.ON_LIME, disabledContainerColor = DS.ELEVATED, disabledContentColor = C.MUTED)
+            ) { Text("▶  ABRIR OSM E CAPTURAR", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold) }
             if (!ready) Text("⚙ Ative a leitura (acima) para liberar o botão.", color = C.WARN, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
             if (data.slots.none { it.known }) Panel { HowItWorks() }
         }
         if (msg.isNotBlank()) Text(msg, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
         ProcessCard()
 
-        TodoCard(data, onOpenSlot)
+        DsSection("Meus slots")
+        val sortedSlots = data.slots.sortedBy { sl -> sl.slot }
+        val soonest = sortedSlots.filter { it.nextAt != null && !it.ended && it.state == null }.minByOrNull { it.nextAt!! }?.slot
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // toque no slot = escolhe o que o Hoje mostra (jogo e prioridades dele); toque de novo volta ao geral. Abrir o slot: toque no card do jogo ou em "Detalhe dos slots".
+            for (s in sortedSlots) SlotTile(s, if (selSlot != null) s.slot == selSlot else s.slot == soonest, Modifier.weight(1f)) { selSlot = if (selSlot == s.slot) null else s.slot }
+        }
+        TodoCard(data, selSlot, onOpenSlot)
         NewsCard()
-        Title("Seus slots")
-        for (s in data.slots.sortedBy { sl -> sl.slot }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
+        DsSection("Detalhe dos slots")
+        for (s in sortedSlots.filter { selSlot == null || it.slot == selSlot }) SlotCardV2(s, { onOpenSlot(s.slot, 0) }, { t -> onOpenSlot(s.slot, t) })
         AgendaCard(data)
         data.results?.let { ResultsCard(it) }
         data.accuracy?.let { AccuracyCard(it) }
@@ -2795,7 +2848,8 @@ internal fun DirectorTab(onOpen: (Int, Int) -> Unit) {
     val ctx = LocalContext.current
     // recarga pesada (4 slots): a cada 20 s ou na hora em que chega dado novo (UiBus)
     val tick = rememberTick(20000L)
-    val list = rememberLoaded(emptyList<DirSlot>(), tick, UiBus.version) { loadDirector(ctx) }
+    // slot sem competição rodando (livre, recrutando/procurando adversário): não tem o que gerir, fica fora do Diretor
+    val list = rememberLoaded(emptyList<DirSlot>(), tick, UiBus.version) { loadDirector(ctx).filter { it.s.state != "vazio" && it.s.state != "procurando" } }
     val now = System.currentTimeMillis()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
         PageTitle("🧭", "Diretor", "gestão do clube")
@@ -2924,21 +2978,23 @@ internal fun SlotTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit
             val on = i == selected
             Row(
                 Modifier.clip(RoundedCornerShape(50))
-                    .background(if (on) Brush.horizontalGradient(listOf(Color(0xFF1E9BFF), Color(0xFF1665C8))) else Brush.horizontalGradient(listOf(C.SURFACE, C.SURFACE)))
-                    .border(1.dp, if (on) Color(0x6672B8FF) else Color(0x2272B8FF), RoundedCornerShape(50))
-                    .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 9.dp),
+                    .background(if (on) C.PRIMARY else C.SURFACE)
+                    .border(1.dp, if (on) C.PRIMARY else C.BORDER, RoundedCornerShape(50))
+                    .heightIn(min = 44.dp)
+                    .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(icons.getOrElse(i) { "•" }, fontSize = 14.sp)
+                val tn = listOf("eye", "swords", "users", "cal", "target", "trophy", "clock", "dir", "chart").getOrNull(i)
+                if (tn != null) DsIcon(tn, 18.dp, if (on) DS.ON_LIME else C.MUTED) else Text(icons.getOrElse(i) { "•" }, fontSize = 14.sp)
                 Spacer(Modifier.width(6.dp))
-                Text(t, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) Color.White else C.MUTED, maxLines = 1)
+                Text(t, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) DS.ON_LIME else C.MUTED, maxLines = 1)
             }
         }
     }
 }
 
 @Composable
-internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () -> Unit) {
+internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onSlot: (Int) -> Unit = {}, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val tick = rememberTick(6000L)
     val data = rememberLoaded(SlotData(), tick, Pair(slot, UiBus.version)) { loadSlot(ctx, slot) }
@@ -2948,12 +3004,19 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onBack: () ->
     val tab = if (idle != null) 0 else tab
     val title = if (idle != null) "Slot $slot" else known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(50)).clickable { onBack() }, contentAlignment = Alignment.Center) { Text("‹", fontSize = 30.sp, color = Color.White) }
+        SlotBar(slot, TodayCache.last.slots.associate { it.slot to (if (it.compType == "Batalha") "Batalha" else it.title) }, onSlot)
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp).clip(RoundedCornerShape(24.dp))
+                .background(Brush.linearGradient(listOf(C.INFO.copy(alpha = 0.18f), DS.SURFACE, DS.SURFACE)))
+                .border(1.dp, C.INFO.copy(alpha = 0.4f), RoundedCornerShape(24.dp)).padding(start = 6.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(DS.ELEVATED).border(1.dp, C.BORDER, RoundedCornerShape(16.dp)).clickable { onBack() }, contentAlignment = Alignment.Center) { Text("‹", fontSize = 28.sp, color = Color.White) }
+            Spacer(Modifier.width(8.dp))
             Crest(slot, 44.dp, if (idle != null) null else known(data.fields, K.TEAM))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (idle != null) Text(idle, color = C.GOLD, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 else Row(verticalAlignment = Alignment.CenterVertically) {
                     FlagBadge(Flags.isoFromCompetition(known(data.fields, K.COMPETITION)), data.leagueRich, null, 22.dp, 16.dp)
@@ -3217,7 +3280,9 @@ internal fun SlotSummaryTab(slot: Int, d: SlotData) {
     } else {
         MatchupHero(slot, d)
         if (d.eve.isNotEmpty()) EveCard(d.eve)
+        BattleCard(slot, d)
         StrengthsAttention(d)
+        RivalRadarCard(slot, d)
         CompareCard(d)
         DirectorChat(slot, d)
         Panel { WinCard(d.win) }
@@ -3336,7 +3401,7 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
             }
         }
         Panel {
-            Text("💪 Força do seu time hoje", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            PanelTitle("💪 Força do seu time hoje")
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((lab, k) in listOf("Geral" to K.MY_STRENGTH, "GOL" to K.MY_GOL, "DEF" to K.MY_DEF, "MEI" to K.MY_MID, "ATA" to K.MY_ATK)) {
                     Column(
@@ -3356,13 +3421,17 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
         }
         return
     }
+    DuelBanner(slot, d)
+    RivalRadarCard(slot, d)
     val at = fv(d, K.MATCH_AT).toLongOrNull()
     // IA sempre no topo
-    OutlinedButton(
+    Button(
         onClick = { startReadLatest(ctx, slot) },
         enabled = !ProcessState.running,
-        modifier = Modifier.fillMaxWidth()
-    ) { Text("🤖 Ler a análise do rival com IA agora") }
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+        shape = RoundedCornerShape(DS.RADIUS_CARD),
+        colors = ButtonDefaults.buttonColors(containerColor = C.INFO, contentColor = DS.ON_LIME, disabledContainerColor = DS.ELEVATED, disabledContentColor = C.MUTED)
+    ) { Text("🤖 Ler a análise do rival com IA agora", fontWeight = FontWeight.ExtraBold) }
     ProcessCard()
     Panel {
         RefereeMeter(known(d.fields, K.REFEREE))
@@ -3372,7 +3441,7 @@ internal fun SlotPregame(slot: Int, d: SlotData) {
     }
     SectorDuels(d)
     Panel {
-        Text("🕵 Como o rival joga", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        PanelTitle("🕵 Como o rival joga")
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SettingChip("Formação", known(d.fields, K.RIVAL_FORMATION) ?: "?", Modifier.weight(1f))
             SettingChip("Estilo", known(d.fields, K.RIVAL_PLAN) ?: "?", Modifier.weight(1f))
@@ -3514,7 +3583,7 @@ internal fun fmtM(m: Double?): String = if (m == null) "?" else if (m < 0) "-" +
 internal fun StepHeader(n: Int, icon: String, title: String, badge: String? = null) {
     Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(28.dp).clip(RoundedCornerShape(50)).background(C.PRIMARY), contentAlignment = Alignment.Center) {
-            Text("$n", fontWeight = FontWeight.ExtraBold, color = Color.White, fontSize = 14.sp)
+            Text("$n", fontWeight = FontWeight.ExtraBold, color = DS.ON_LIME, fontSize = 14.sp)
         }
         Text("  $icon $title", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
         if (badge != null) Pill(badge)
@@ -3547,7 +3616,7 @@ internal fun SlotDirector(slot: Int, d: SlotData) {
     // ---- onde o time está
     Box(
         Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF0E2A5A), Color(0xFF16213D))))
+            .background(C.SURFACE2)
             .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp)).padding(14.dp)
     ) {
         Column(Modifier.fillMaxWidth()) {
@@ -3676,7 +3745,7 @@ internal fun SlotDirector(slot: Int, d: SlotData) {
     GenPanel("market_ai", slot, "🤖 Pedir a opinião da IA sobre este plano") { startGeneration(ctx, "market_ai", slot) }
     if (d.marketNote != null) {
         Panel {
-            Text("🤖 Opinião da IA", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            PanelTitle("🤖 Opinião da IA")
             Text(d.marketNote, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
         }
     }
@@ -3806,7 +3875,7 @@ internal fun NoFlagFold() {
             val st = known(f, K.SLOT_STATE)
             if (st == "vazio" || st == "procurando" || st == "preepoca" || Hints.competitionOver(r, s, f, now)) return@flatMap emptyList<Pair<Int, PlayerEntity>>()
             runCatching { SlotRules.playerCountries(r, s, ctx.filesDir) }   // preenche os países já identificáveis (antes só ao abrir o slot)
-            val iso = r.dao.plan(s, "natiso2")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
+            val iso = r.dao.plan(s, "natiso4")?.json?.let { j -> runCatching { JSONObject(j) }.getOrNull() }
             r.playersOf(s).filter { it.owner == "MY" && it.nameKey !in manual && (iso == null || iso.optString(it.nameKey).isBlank()) }.map { s to it }
         }
     }

@@ -41,7 +41,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,7 +58,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -133,9 +131,9 @@ import org.json.JSONObject
 
 @Composable
 internal fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = C.PRIMARY, checkedThumbColor = DS.ON_LIME, uncheckedTrackColor = DS.ELEVATED, uncheckedBorderColor = C.BORDER, uncheckedThumbColor = C.MUTED))
     }
 }
 
@@ -553,6 +551,8 @@ internal fun SettingsTab() {
         PageTitle("⚙", "Ajustes")
         SectionLabel("Avisos", "Como o app te chama quando algo precisa de você")
         NotificationsPanel()
+        SectionLabel("Batalha e testes", "Equipe da batalha e o motor novo em paralelo")
+        BattleLabPanel()
         SectionLabel("Preferências", "Regras do app e táticas da comunidade")
         var spendBc by remember { mutableStateOf(Settings.get(ctx, "spend_bc", "0") == "1") }
         Fold("💎", "Boss Coins", if (spendBc) "gastar" else "preservar") {
@@ -574,6 +574,7 @@ internal fun SettingsTab() {
         GptGuideFold()
         SectionLabel("Imagens", "Fotos dos jogadores, escudos dos clubes e bandeiras")
         ImageManagerFold()
+        CrestManagerFold()
         var photoOn by remember { mutableStateOf(Settings.get(ctx, "web_photos", "1") == "1") }
         var pKey by remember { mutableStateOf(Settings.get(ctx, PhotoWeb.KEY, "")) }
         val pTick = rememberTick(3000L)
@@ -595,7 +596,7 @@ internal fun SettingsTab() {
             val wr = rememberLoaded(0 to emptyList<PhotoWeb.Missing>(), pTick, UiBus.version) { PhotoWeb.wikiReport(ctx) }
             val wrManual = rememberLoaded(0, pTick, UiBus.version) { PhotoWeb.items(ctx).count { it.source == "manual" } }
             var pickFor by remember { mutableStateOf<String?>(null) }
-            val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 val k = pickFor; pickFor = null
                 if (uri != null && k != null) {
                     android.widget.Toast.makeText(ctx, "Processando a foto…", android.widget.Toast.LENGTH_SHORT).show()
@@ -615,7 +616,7 @@ internal fun SettingsTab() {
                 Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Text("${m.name} (S${m.slot})", fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     Text(m.reason, fontSize = 12.sp, color = C.MUTED)
-                    GhostButton("📷 Escolher foto") { pickFor = m.key; pickPhoto.launch("image/*") }
+                    GhostButton("📷 Escolher foto") { pickFor = m.key; pickPhoto.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
                 }
             }
             if (wr.second.size > 40) Text("+ ${wr.second.size - 40} outros: a lista mostra 40 por vez.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
@@ -889,7 +890,7 @@ internal fun SettingsTab() {
         }
         val readOk = serviceEnabled(ctx) && Diag.serviceConnected && batteryUnrestricted(ctx)
         SectionLabel("Sistema", "Leitura das telas do OSM e inteligência artificial")
-        Fold("📱", "Leitura automática", if (readOk) "ok" else "⚠", startOpen = !readOk) {
+        Fold("📱", "Leitura automática", if (readOk) "ok" else "⚠", startOpen = false) {
             StatusLight(serviceEnabled(ctx), "Acessibilidade ativada")
             StatusLight(Diag.serviceConnected && tick >= 0, "Serviço conectado")
             StatusLight(batteryUnrestricted(ctx), "Bateria sem restrição")
@@ -907,7 +908,7 @@ internal fun SettingsTab() {
             ) { Text("Bateria: não otimizar este app") }
         }
         val anyKey = listOf(gKey, cKey, mKey, oKey, clKey).any { it.isNotBlank() }
-        Fold("🤖", "Inteligência artificial", if (!anyKey) "sem chave" else null, startOpen = !anyKey) {
+        Fold("🤖", "Inteligência artificial", if (!anyKey) "sem chave" else null, startOpen = false) {
             val saveAll = {
                 Settings.put(ctx, Settings.GEMINI_KEY, gKey)
                 Settings.put(ctx, Settings.GEMINI_MODEL, gModel.ifBlank { Settings.DEFAULT_GEMINI_MODEL })
@@ -1035,7 +1036,7 @@ internal fun GptGuideFold() {
         val d = (System.currentTimeMillis() - st.at) / 86400000L
         if (d <= 0) "atualizado hoje" else "atualizado há $d dia(s)"
     }
-    Fold("🤖", "Guia para o ChatGPT", if (st.at == 0L) "novo" else if (st.changedSinceSent) "reenviar" else "em dia", startOpen = true) {
+    Fold("🤖", "Guia para o ChatGPT", if (st.at == 0L) "novo" else if (st.changedSinceSent) "reenviar" else "em dia") {
         Text("O guia é um arquivo de texto com tudo que o app leu e serve para as imagens: clubes (nome do jogo → nome real), ligas, seu elenco, melhores do rival e jogos recentes. " +
             "O app o atualiza sozinho 1 vez por semana. Suba no Projeto do ChatGPT (Arquivos do projeto) e reenvie quando aparecer \"reenviar\".", fontSize = 13.sp, color = C.MUTED)
         Text(age + (if (st.clubs > 0) " • ${st.clubs} clubes" else "") + (if (st.at > 0L) (if (st.changedSinceSent) " • 🆕 mudou desde o último envio" else " • ✅ já enviado") else ""), fontSize = 13.5.sp, modifier = Modifier.padding(top = 6.dp))
@@ -1047,5 +1048,29 @@ internal fun GptGuideFold() {
         Text("Link do Projeto ou da conversa (o botão \"ChatGPT\" da aba Artes abre este link):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 10.dp))
         androidx.compose.material3.OutlinedTextField(value = link, onValueChange = { link = it; ArtsGpt.setLink(ctx, it) }, singleLine = true, placeholder = { Text("https://chatgpt.com/g/…") }, modifier = Modifier.fillMaxWidth())
         msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
+    }
+}
+
+/** Equipe de batalha e modo de teste do motor novo: seção própria (antes estavam escondidos dentro de "Avisos"). */
+@Composable
+internal fun BattleLabPanel() {
+    val ctx = LocalContext.current
+    var bTeam by remember { mutableStateOf(Settings.get(ctx, Battle.SETTING, Battle.DEFAULT_TEAM)) }
+    Fold("⚔", "Minha equipe de batalha", bTeam.ifBlank { Battle.DEFAULT_TEAM }) {
+        Text("O nome com que você aparece nas batalhas. O app usa para achar o seu lado (esquerda ou direita) na tela de resultados da batalha. Vale para as próximas leituras; o histórico de batalhas já lidas não muda. Uma batalha nova com outras equipes é reconhecida sozinha.", fontSize = 13.sp, color = C.MUTED)
+        OutlinedTextField(bTeam, { bTeam = it; Settings.put(ctx, Battle.SETTING, it.trim()) }, label = { Text("Minha equipe de batalha") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        Text("Padrão: ${Battle.DEFAULT_TEAM}", fontSize = 12.sp, color = C.MUTED)
+    }
+    var labOn by remember { mutableStateOf(Settings.get(ctx, "lab_on", "0") == "1") }
+    Fold("🧪", "Modo de teste do motor novo", if (labOn) "ligado" else "desligado") {
+        Text("Roda um segundo motor em paralelo só para comparar. A tática recomendada continua sendo a do motor atual; o novo aparece num bloco fechado na aba Tática do slot. Antes de cada jogo o app congela as previsões dos dois (sem refazer depois do resultado). Desligado por padrão.", fontSize = 13.sp, color = C.MUTED)
+        SwitchRow("Ligar o modo de teste", labOn) { labOn = it; Settings.put(ctx, "lab_on", if (it) "1" else "0") }
+        if (labOn) {
+            Text("Objetivo por slot: por padrão maximiza a chance de vitória. Ligue \"empate basta\" para maximizar pontos (3×vitória + empate).", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            for (n in 1..4) {
+                var pts by remember { mutableStateOf(Settings.get(ctx, "lab_obj_S$n", EngineLab.OBJ_WIN) == EngineLab.OBJ_POINTS) }
+                SwitchRow("S$n: empate basta (maximizar pontos)", pts) { pts = it; Settings.put(ctx, "lab_obj_S$n", if (it) EngineLab.OBJ_POINTS else EngineLab.OBJ_WIN) }
+            }
+        }
     }
 }

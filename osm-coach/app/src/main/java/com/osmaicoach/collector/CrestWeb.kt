@@ -40,13 +40,25 @@ object CrestWeb {
 
     /** Arquivo do escudo real (nome exato; senão o nome mais parecido). */
     fun find(filesDir: File, team: String?): File? {
-        val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
+        val k = Txt.key(CrestAdmin.snap(filesDir, team) ?: "").takeIf { it.length >= 3 } ?: return null
+        if (CrestAdmin.isBlocked(filesDir, team)) return null
         val d = dir(filesDir)
         val exact = File(d, "$k.png")
         if (exact.exists()) return exact
         val all = d.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
         val best = all.maxByOrNull { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) } ?: return null
-        return best.takeIf { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.9 }
+        best.takeIf { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.9 }?.let { return it }
+        // mesmo clube lido de outro jeito pelo OCR (5V/SV, I/l/|, 0/O): vale o escudo que já existe (e o escolhido à mão)
+        all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }?.let { return it }
+        // time reserva (II): usa o escudo da equipe principal quando não existe um próprio (o escudo é o mesmo)
+        val lk = CrestAdmin.look(team ?: "")
+        // mesmo clube com o numeral de reserva lido de outro jeito (II/I/III/sem): o escudo é o mesmo; compara o nome SEM os traços finais
+        fun baseOf(x: String) = x.trimEnd('i').takeIf { it.length >= 6 } ?: x
+        if (lk.length >= 8) {
+            val base = baseOf(lk)
+            return all.firstOrNull { f -> val fl = CrestAdmin.look(f.name.removeSuffix(".png")); baseOf(fl) == base && (fl.length - fl.trimEnd('i').length) <= 3 }
+        }
+        return null
     }
 
     /** O time devolvido pela busca é o MESMO clube? (nome parecido, um é início do outro ou todas as palavras de um estão no outro) */
@@ -64,10 +76,12 @@ object CrestWeb {
 
     /** Pede o escudo de um clube (fila única, ritmo de 1 consulta a cada ~2,5 s; o que já existe ou falhou há pouco não repete). */
     fun request(ctx: Context, team: String?) {
-        val t = team?.trim() ?: return
+        val t = CrestAdmin.snap(ctx.filesDir, team?.trim()) ?: return
+        if (CrestAdmin.isBlocked(ctx.filesDir, t)) return           // excluído à mão ou texto de banner ("25 anniversary")
         if (Txt.key(t).length < 3 || Fixtures.notAClub(t)) return   // fase da copa / "a definir" não é clube: o escudo vem quando a vaga for preenchida
         if (Settings.get(ctx, "web_crests", "1") != "1") return
         if (find(ctx.filesDir, t) != null) return
+        if (WorldOcr.isJunkClub(ctx, t)) return       // lixo de OCR (apelido de treinador, texto de faixa): não gasta a cota do TheSportsDB, que faltava para os clubes de verdade
         if (missedRecently(ctx.filesDir, t)) return
         synchronized(lock) {
             if (!queue.add(t)) return
@@ -84,6 +98,12 @@ object CrestWeb {
                 }
             } finally { synchronized(lock) { worker = false } }
         }
+    }
+
+    /** Uma vez por versão: esquece os "não achei" (a enxurrada de consultas de 25/11 marcou escudos que existem como perdidos por 3 dias). */
+    fun resetMissesOnce(ctx: Context) {
+        if (Settings.get(ctx, "crest_miss_reset_v2", "0") == "1") return
+        runCatching { missFile(ctx.filesDir).delete() }; Settings.put(ctx, "crest_miss_reset_v2", "1")
     }
 
     private fun missFile(filesDir: File) = File(dir(filesDir), "_miss.json")
@@ -144,10 +164,12 @@ object CrestWeb {
     fun missing(filesDir: File, names: Collection<String>): List<String> = names.filter { find(filesDir, it) == null && missedRecently(filesDir, it) }
 
     /** true = consultou o TheSportsDB (precisa do intervalo entre pedidos). O repositório football-logos vem 1º: sem limite e em vetor. */
-    private fun fetch(ctx: Context, team: String): Boolean {
+    private fun fetch(ctx: Context, team: String): Boolean { return Live.run("Escudo: " + team.take(28)) { fetchInner(ctx, team) } }
+    private fun fetchInner(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         if (fetchRepo(ctx, team)) return false
-        val queries = variants(team, aliasOf(fd, team)).take(4)
+        // ordem de sempre (apelido manual, nome como o jogo mostra, variações); o NOME REAL do cadastro entra só como ÚLTIMA tentativa (o OCR errou letras: "Wyersar")
+        val queries = (variants(team, aliasOf(fd, team)) + listOfNotNull(WorldOcr.realClubName(ctx, team))).distinct().take(5)
         for (q in queries) {
             val (code, body) = get(SEARCH + java.net.URLEncoder.encode(q, "UTF-8"), true)
             if (code == 429) { Diag.log("Escudo da web: limite de consultas, tento depois"); return true }
@@ -220,7 +242,7 @@ object CrestWeb {
     private fun fetchRepo(ctx: Context, team: String): Boolean {
         val fd = ctx.filesDir
         val idx = loadIndex(fd)
-        val path = variants(team, aliasOf(fd, team)).firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
+        val path = (variants(team, aliasOf(fd, team)) + listOfNotNull(WorldOcr.realClubName(ctx, team))).distinct().firstNotNullOfOrNull { pickPath(it, idx) } ?: return false
         val url = RAW + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
         val (code, body) = get(url, true)
         if (code !in 200..299 || body == null || body.size > MAX_SVG) return false

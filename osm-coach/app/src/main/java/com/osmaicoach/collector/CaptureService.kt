@@ -44,6 +44,7 @@ class CaptureService : AccessibilityService() {
 
     override fun onServiceConnected() {
         Health.install(applicationContext)
+        SlotWidget.attach(applicationContext)
         Health.beat(applicationContext)
         instance = this
         Diag.serviceConnected = true
@@ -150,6 +151,9 @@ class CaptureService : AccessibilityService() {
     private var listView: LinearLayout? = null
     private var headView: TextView? = null
     private var badgeView: TextView? = null
+    private var ringView: View? = null
+    private var statusView: TextView? = null
+    private var ringAnim: android.animation.ObjectAnimator? = null
     private var overlayLp: WindowManager.LayoutParams? = null
     private var hintJob: Job? = null
     private var hintKey = ""
@@ -243,6 +247,7 @@ class CaptureService : AccessibilityService() {
         listView = null
         headView = null
         badgeView = null
+        ringAnim?.cancel(); ringAnim = null; ringView = null; statusView = null
         try {
             (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v)
         } catch (e: Exception) {
@@ -347,6 +352,66 @@ class CaptureService : AccessibilityService() {
         b.visibility = if (n > 0) View.VISIBLE else View.GONE
     }
 
+    /**
+     * Estado visual da bola (só aparência): anel lima = parada, anel ciano pulsando + selo "Capturando" quando uma captura aconteceu nos
+     * últimos 5 s, anel âmbar quando há pendências e nada sendo lido.
+     */
+    private fun updateRing() {
+        val r = ringView ?: return
+        val dp = resources.displayMetrics.density
+        val nowMs = System.currentTimeMillis()
+        val capturing = nowMs - Diag.lastShotAt < 5000L && Diag.lastShotAt > 0L
+        val pending = hints.any { it.action }
+        // leitura de lista (Plantel, Calendário, Mercado, Resultado): estado vem do CONTEÚDO lido (chegou ao fim ou não), nunca do tempo; o tempo só decide quanto a mensagem fica na tela
+        val rs = Diag.readState
+        val recentRead = nowMs - Diag.readAt < 25_000L && Diag.readType == Diag.currentType
+        val reading = rs == 1 && capturing
+        val done = rs == 2 && recentRead
+        val partial = rs == 3 && recentRead
+        val col = when { done -> 0xFFB9F363.toInt(); partial -> 0xFFF5B942.toInt(); capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
+        val spinning = capturing && !done && !partial
+        // lendo/capturando: arco giratório (dá para ver que está trabalhando e quanto tempo ficar na tela); parado: anel cheio; terminou: anel verde + "pulinho"
+        r.background = if (spinning) ArcRing(col, 3.5f * dp) else GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), col) }
+        statusView?.let { s ->
+            s.visibility = if (capturing || done || partial) View.VISIBLE else View.GONE
+            val (txt, bg) = when {
+                done -> "✓ Capturado" to 0xF2B9F363.toInt()
+                partial -> "⚠ Incompleto" to 0xF2F5B942.toInt()
+                reading -> "● Lendo… fique e role" to 0xF239BDF8.toInt()
+                else -> "● Capturando" to 0xF239BDF8.toInt()
+            }
+            s.text = txt
+            (s.background as? GradientDrawable)?.setColor(bg)
+        }
+        if (spinning) {
+            if (ringAnim == null) ringAnim = android.animation.ObjectAnimator.ofFloat(r, "rotation", 0f, 360f).apply {
+                duration = 1000; interpolator = android.view.animation.LinearInterpolator(); repeatCount = android.animation.ValueAnimator.INFINITE; start()
+            }
+        } else {
+            ringAnim?.cancel(); ringAnim = null; r.rotation = 0f; r.alpha = 1f
+            if (done && lastDonePop != Diag.readAt) {          // uma vez por leitura concluída
+                lastDonePop = Diag.readAt
+                r.animate().scaleX(1.25f).scaleY(1.25f).setDuration(180).withEndAction { r.animate().scaleX(1f).scaleY(1f).setDuration(220).start() }.start()
+            }
+        }
+    }
+
+    private var lastDonePop = 0L
+
+    /** Anel com um arco de 270° (o resto apagado): girando vira o indicador de "lendo". */
+    private class ArcRing(private val color: Int, private val stroke: Float) : android.graphics.drawable.Drawable() {
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = stroke; strokeCap = android.graphics.Paint.Cap.ROUND }
+        override fun draw(c: android.graphics.Canvas) {
+            val b = bounds; val m = stroke / 2f
+            val rect = android.graphics.RectF(b.left + m, b.top + m, b.right - m, b.bottom - m)
+            p.color = (color and 0x00FFFFFF) or 0x40000000; c.drawOval(rect, p)
+            p.color = color; c.drawArc(rect, 0f, 270f, false, p)
+        }
+        override fun setAlpha(a: Int) { p.alpha = a }
+        override fun setColorFilter(f: android.graphics.ColorFilter?) { p.colorFilter = f }
+        @Deprecated("Deprecated in Java") override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+    }
+
     /** Recalcula o que fazer quando a tela/slot muda ou chega leitura nova; dica que sumiu = feito. */
     private fun startHints() {
         if (hintJob != null) return
@@ -372,6 +437,7 @@ class CaptureService : AccessibilityService() {
                         }
                     }
                 }
+                withContext(Dispatchers.Main) { updateRing() }
                 delay(1500L)
             }
         }
@@ -410,11 +476,15 @@ class CaptureService : AccessibilityService() {
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             elevation = 9 * dp
         }
-        bubble.addView(icon, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize, Gravity.CENTER))
+        val ring = View(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), 0xFFB9F363.toInt()) }
+        }
+        bubble.addView(ring, android.widget.FrameLayout.LayoutParams(bubbleSize, bubbleSize, Gravity.CENTER))
+        bubble.addView(icon, android.widget.FrameLayout.LayoutParams(bubbleSize - (10 * dp).toInt(), bubbleSize - (10 * dp).toInt(), Gravity.CENTER))
         val badge = TextView(this).apply {
             setTextColor(android.graphics.Color.WHITE); textSize = 11f; gravity = Gravity.CENTER
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFE5484D.toInt()); setStroke((1.5f * dp).toInt(), android.graphics.Color.WHITE) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFFEF5350.toInt()); setStroke((1.5f * dp).toInt(), android.graphics.Color.WHITE) }
             elevation = 10 * dp
             visibility = View.GONE
         }
@@ -422,13 +492,14 @@ class CaptureService : AccessibilityService() {
 
         // cartão: título, lista de dicas e os botões App / Tática / Encerrar
         val head = TextView(this).apply {
-            setTextColor(0xFFFFD24A.toInt()); textSize = 13f
+            setTextColor(0xFFB9F363.toInt()); textSize = 13f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val end = chip("■ Encerrar", 0xE6D32F2F.toInt(), dp)
-        val toggle = chip("📱 App", 0xE61F6BFF.toInt(), dp)
-        val tactic = chip("📋 Tática", 0xE6B8860B.toInt(), dp)
+        val end = chip("■ Encerrar", 0xFFEF5350.toInt(), dp)
+        val toggle = chip("📱 App", 0xFFB9F363.toInt(), dp).apply { setTextColor(0xFF0B111B.toInt()) }
+        val tactic = chip("📋 Tática", 0xFF1C2938.toInt(), dp)
+        val statusPill = chip("● Capturando", 0xF239BDF8.toInt(), dp).apply { setTextColor(0xFF0B111B.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD); visibility = View.GONE }
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             fun lp() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = (6 * dp).toInt() }
@@ -438,9 +509,10 @@ class CaptureService : AccessibilityService() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xFA0F2347.toInt(), 0xFA081A3C.toInt())).apply {
-                cornerRadius = 18 * dp
-                setStroke((1.5f * dp).toInt(), 0xAA2AB4FF.toInt())
+            background = GradientDrawable().apply {
+                setColor(0xF5151F2D.toInt())
+                cornerRadius = 20 * dp
+                setStroke((1.5f * dp).toInt(), 0xCCB9F363.toInt())
             }
             elevation = 12 * dp
             addView(head)
@@ -451,12 +523,13 @@ class CaptureService : AccessibilityService() {
         // a lista não passa de ~55% da tela (o resto rola)
         scroll.layoutParams = LinearLayout.LayoutParams(maxW, LinearLayout.LayoutParams.WRAP_CONTENT)
         scroll.viewTreeObserver.addOnGlobalLayoutListener {
-            val cap = (resources.displayMetrics.heightPixels * 0.62f).toInt()
+            val cap = (resources.displayMetrics.heightPixels * 0.38f).toInt()
             if (scroll.height > cap) scroll.layoutParams = scroll.layoutParams.apply { height = cap }
         }
-        val notice = chip("", 0xF2FFB300.toInt(), dp).apply {
+        val notice = chip("", 0xF2F5B942.toInt(), dp).apply {
             setTextColor(android.graphics.Color.BLACK)
             maxWidth = maxW
+            maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END
             visibility = View.GONE
         }
         fun gap(): LinearLayout.LayoutParams = LinearLayout.LayoutParams(
@@ -466,6 +539,7 @@ class CaptureService : AccessibilityService() {
             orientation = LinearLayout.VERTICAL
             alpha = 0.97f
             addView(bubble, LinearLayout.LayoutParams(bubbleSize + (6 * dp).toInt(), bubbleSize + (6 * dp).toInt()))
+            addView(statusPill, gap())
             addView(card, gap())
             addView(notice, gap())
         }
@@ -534,6 +608,11 @@ class CaptureService : AccessibilityService() {
         box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> markBounds(v) }
         try {
             wm.addView(box, lp)
+            // o painel nunca passa da tela: se o conjunto (bola + cartão + aviso) ficar mais baixo que o espaço, sobe até caber (botões sempre visíveis)
+            box.viewTreeObserver.addOnGlobalLayoutListener {
+                val maxY = (resources.displayMetrics.heightPixels - box.height - (56 * dp).toInt()).coerceAtLeast(0)
+                if (lp.y > maxY) { lp.y = maxY; try { wm.updateViewLayout(box, lp) } catch (ex: Exception) { } }
+            }
             overlayBox = box
             overlay = end
             toggleView = toggle
@@ -542,6 +621,8 @@ class CaptureService : AccessibilityService() {
             listView = list
             headView = head
             badgeView = badge
+            ringView = ring
+            statusView = statusPill
             updateToggle()
             startHints()
         } catch (e: Exception) {
@@ -557,6 +638,9 @@ class CaptureService : AccessibilityService() {
                 i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(i)
             } else {
+                // estando num slot do OSM (S1..S4), o app abre nesse slot (na aba em que você estava)
+                val sl = Diag.currentSlot
+                if (sl in 1..4) { Route.tab = -1; Route.slot = sl; Route.nonce++ }
                 startActivity(
                     android.content.Intent(this, MainActivity::class.java).addFlags(
                         android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT

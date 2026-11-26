@@ -49,6 +49,36 @@
         </activity>
 
         <receiver
+            android:name=".SlotWidgetProvider"
+            android:label="OSM Coach • 4 slots (4×2)"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/slot_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".SlotWidgetSmallProvider"
+            android:label="OSM Coach • próximo jogo (2×2)"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/slot_widget_small_info" />
+        </receiver>
+
+        <receiver
+            android:name=".SlotWidgetLargeProvider"
+            android:label="OSM Coach • painel completo (4×4)"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/slot_widget_large_info" />
+        </receiver>
+
+        <receiver
             android:name=".NotifyReceiver"
             android:exported="false" />
 

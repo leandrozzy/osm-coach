@@ -1,0 +1,48 @@
+package com.osmaicoach.collector
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class CrestAdminTest {
+    private val dir = java.nio.file.Files.createTempDirectory("crest").toFile()
+
+    @Test fun bannerTextIsNeverAClub() {
+        assertTrue(CrestAdmin.isBlocked(dir, "25 ANNIVERSARY"))
+        assertTrue(CrestAdmin.isBlocked(dir, "25th Anniversary"))
+        assertTrue(CrestAdmin.isBlocked(dir, "OSM"))
+        assertTrue(CrestAdmin.isBlocked(dir, "123"))
+        assertTrue(CrestAdmin.isBlocked(dir, null))
+    }
+
+    @Test fun realClubsAreNotBlocked() {
+        for (n in listOf("Botafogo", "Red Bull Bragantino", "Fortuna Düsseldorf", "FC Liefering", "EC Cruzeiro Belo Horizonte")) assertFalse(n, CrestAdmin.isBlocked(dir, n))
+    }
+
+    @Test fun entriesMarkBlockedNamesAndListKnownClubsWithoutCrest() {
+        val e = CrestAdmin.entries(dir, listOf("Botafogo", "25 anniversary", "Santos"))
+        val by = e.associateBy { it.name }
+        assertEquals("nenhum", by["Botafogo"]!!.source)
+        assertEquals("nenhum", by["Santos"]!!.source)
+        assertEquals("bloqueado", by["25 anniversary"]?.source ?: "bloqueado")
+    }
+}
+
+class CrestClusterTest {
+    @Test fun ocrVariantsOfTheSameClubAreGrouped() {
+        val g = CrestAdmin.cluster(listOf("SK Rapid Wien II", "SK Rapid Wien ||", "SK Rapid Wien Il", "5C Fortuna Köln", "SC Fortuna Köln", "Vf8 Stuttgart II", "VfB Stuttgart II", "VfB Stuttgart ll", "FC Hertha VWels", "FC Hertha Wels"))
+        val sets = g.map { it.toSet() }
+        assertTrue(sets.any { it == setOf("SK Rapid Wien II", "SK Rapid Wien ||", "SK Rapid Wien Il") })
+        assertTrue(sets.any { it == setOf("5C Fortuna Köln", "SC Fortuna Köln") })
+        assertTrue(sets.any { it == setOf("Vf8 Stuttgart II", "VfB Stuttgart II", "VfB Stuttgart ll") })
+        assertTrue(sets.any { it == setOf("FC Hertha VWels", "FC Hertha Wels") })
+    }
+
+    @Test fun differentClubsWithNumeralSuffixAreKeptApart() {
+        val g = CrestAdmin.cluster(listOf("VfB Stuttgart II", "VfB Stuttgart III", "SK Sturm Graz II", "SK Sturm Graz I", "SK Rapid Wien", "SK Rapid Wien II"))
+        assertEquals(6, g.size)
+    }
+
+    @Test fun differentClubsAreNeverMerged() {
+        assertEquals(4, CrestAdmin.cluster(listOf("Botafogo", "Internacional", "Grêmio", "Atlético Mineiro")).size)
+    }
+}

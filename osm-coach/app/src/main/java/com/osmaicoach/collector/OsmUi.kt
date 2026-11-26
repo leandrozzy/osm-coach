@@ -62,17 +62,17 @@ object OsmColors {
     val TRACK = Color(0xFF1A2742)
 }
 
-private val PANEL_SHAPE = RoundedCornerShape(18.dp)
+private val PANEL_SHAPE = RoundedCornerShape(16.dp)
 
 /**
  * Painel "vidro" sobre o estádio: sombra suave azulada, degradê translúcido, brilho no canto de cima e borda
  * iluminada que some para baixo.
  */
 fun Modifier.osmPanel(shape: RoundedCornerShape = PANEL_SHAPE): Modifier = this
-    .shadow(10.dp, shape, ambientColor = Color(0xFF0A84FF), spotColor = Color(0xFF0A84FF))
+    .shadow(2.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
     .clip(shape)
-    .background(Brush.verticalGradient(listOf(Color(0xFF0F2347), Color(0xFF0A1830))))
-    .border(1.3.dp, Brush.linearGradient(listOf(Color(0xFF2AB4FF), Color(0xFF1E6FD9), Color(0xFF2AB4FF).copy(alpha = 0.55f))), shape)
+    .background(DS.SURFACE)
+    .border(1.dp, DS.BORDER, shape)
 
 /** Fundo da tela: céu de estádio à noite. */
 val OSM_BACKGROUND = Brush.verticalGradient(listOf(OsmColors.NIGHT_TOP, OsmColors.NIGHT_MID, OsmColors.NIGHT_BOTTOM))
@@ -513,9 +513,9 @@ fun OsmSplitCard(left: @Composable () -> Unit, right: @Composable () -> Unit) {
 @Composable
 fun OsmTitle(text: String, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().padding(top = 18.dp, bottom = 8.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(4.dp).height(22.dp).clip(RoundedCornerShape(50)).background(OsmColors.BLUE))
+        Box(Modifier.width(5.dp).height(22.dp).clip(RoundedCornerShape(50)).background(DS.LIME))
         Spacer(Modifier.width(10.dp))
-        Text(text, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+        Text(text, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
     }
 }
 
@@ -526,18 +526,7 @@ fun OsmTitle(text: String, modifier: Modifier = Modifier) {
 /** Fundo do app: estádio noturno com refletores, coberto por um véu azul-marinho que garante contraste. */
 @Composable
 fun OsmAppBackground(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Box(modifier.background(Brush.verticalGradient(listOf(Color(0xFF0C2250), Color(0xFF081A3C), Color(0xFF050E22))))) {
-        // faixa de luz diagonal, como nas referências
-        Box(
-            Modifier.matchParentSize().background(
-                Brush.linearGradient(
-                    0f to Color.Transparent, 0.35f to Color(0x1A2AB4FF), 0.5f to Color.Transparent,
-                    start = Offset(0f, 0f), end = Offset(900f, 700f)
-                )
-            )
-        )
-        content()
-    }
+    Box(modifier.background(DS.BG)) { content() }
 }
 
 @Composable

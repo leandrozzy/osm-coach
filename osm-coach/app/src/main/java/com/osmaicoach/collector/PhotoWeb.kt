@@ -272,7 +272,15 @@ object PhotoWeb {
             // 1º quem NUNCA foi tentado (jogador comprado agora vem primeiro); só quando todos foram tentados volta aos sem acerto (um por vez, 7 dias de intervalo)
             val bought = HashSet<String>()
             for (sl in 1..4) Ledger.parse(repo.dao.plan(sl, "ledger")?.json).filter { it.type == "buy" && now - it.at < 3L * 86400000L }.forEach { bought.add(it.key) }
-            val untried = all.filter { needsTry(ctx.filesDir, ix, it.nameKey) }.sortedByDescending { it.nameKey in bought }
+            // "sem acerto/ambíguo" volta a ser tentado quando CHEGA informação nova (país pela bandeira ou identificação no cadastro real): era o que "Buscar de novo" fazia à mão
+            val isoNow = FlagManual.all(repo)
+            suspend fun isoOf(p: PlayerEntity): String = isoNow[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }.orEmpty()
+            val retryNew = HashSet<String>()
+            for (p in all) { val e = ix.optJSONObject(p.nameKey) ?: continue; if (e.optString("s") == "ok") continue
+                val hadIso = e.optString("iso"); val hadReal = e.optBoolean("real", false)
+                val nowReal = runCatching { WorldOcr.realPlayer(ctx, p.slotId, p.name) != null }.getOrDefault(false)
+                if ((hadIso.isEmpty() && isoOf(p).isNotEmpty()) || (!hadReal && nowReal)) retryNew.add(p.nameKey) }
+            val untried = all.filter { needsTry(ctx.filesDir, ix, it.nameKey) || it.nameKey in retryNew }.sortedByDescending { it.nameKey in bought }
             val queue = if (untried.isNotEmpty()) untried
             else all.filter { now - (ix.optJSONObject(it.nameKey)?.optLong("at", 0L) ?: 0L) > RETRY_MS }.sortedBy { ix.optJSONObject(it.nameKey)?.optLong("at", 0L) ?: 0L }
             if (queue.isEmpty()) return
@@ -280,13 +288,16 @@ object PhotoWeb {
             var done = 0
             for (p in queue) {
                 if (usedToday(ctx) >= BUDGET) { block(ctx); Diag.log("Fotos: cota do dia usada ($BUDGET), volto amanhã"); break }
-                val terms = searchTerms(p.name)
+                // jogador já identificado no cadastro real: busca pelo NOME COMPLETO real ("Anton Ari Einarsson"), não pela abreviação do jogo ("A. Einarsson")
+                val real = runCatching { WorldOcr.realPlayer(ctx, p.slotId, p.name) }.getOrNull()
+                val nm = real?.fullName?.takeIf { it.isNotBlank() } ?: p.name
+                val terms = searchTerms(nm)
                 if (terms.isEmpty()) continue
-                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() } ?: real?.iso
                 var cands: List<Cand> = emptyList()
                 var stop = false; var again = false; var zero = false
                 for ((ti, term) in terms.withIndex()) {
-                    val (code, body, hdr) = get("$HOST/players/profiles?search=" + java.net.URLEncoder.encode(term, "UTF-8"), apiKey)
+                    val (code, body, hdr) = Live.run("Foto (API-Football): " + p.name.take(22)) { get("$HOST/players/profiles?search=" + java.net.URLEncoder.encode(term, "UTF-8"), apiKey) }
                     addUsed(ctx)
                     if (code == 429) { Diag.log("Fotos: limite por minuto, espero e tento de novo"); delay(65_000L); again = true; break }
                     if (code == 401 || code == 403) { Diag.log("Fotos: chave recusada pela API ($code)"); block(ctx); stop = true; break }
@@ -301,7 +312,7 @@ object PhotoWeb {
                 }
                 if (stop) break
                 if (again) continue
-                val pk = pick(p.name, p.age, iso, cands)
+                val pk = pick(nm, p.age, iso, cands)
                 val e = JSONObject().put("s", pk.state).put("at", System.currentTimeMillis())
                 if (pk.cand != null) {
                     val img = pk.cand.photo?.let { get(it, null).second }
@@ -312,6 +323,7 @@ object PhotoWeb {
                         Diag.log("Foto de ${p.name} ← ${pk.cand.name} (${pk.cand.nationality ?: "?"}, ${pk.cand.age ?: "?"})")
                     } else e.put("s", "miss")
                 } else Diag.log("Foto de ${p.name}: ${if (pk.state == "amb") "mais de um candidato, não escolhi" else "sem acerto seguro"} (${cands.size} resultados)")
+                e.put("iso", iso.orEmpty()).put("real", real != null)
                 ix.put(p.nameKey, e); saveIdx(ctx.filesDir, ix)
                 if (done > 0 && done % 3 == 0) UiBus.bump()
                 if (zero) { block(ctx); break }
@@ -319,6 +331,20 @@ object PhotoWeb {
             }
             if (done > 0) UiBus.bump()
         } finally { running = false }
+    }
+
+    /**
+     * Foto pelo cadastro real: o Reep traz o ID do jogador na API-Football; a imagem sai de media.api-sports.io SEM consumir a cota diária (não é consulta à API) e SEM chave.
+     * Salva como as outras fotos (`photos/<nameKey>.png`, vale para os 4 slots); nunca sobrescreve foto existente (manual vale mais). Devolve se salvou.
+     */
+    suspend fun saveFromBaseId(ctx: Context, nameKey: String, apifId: String): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (!apifId.all { it.isDigit() } || apifId.isEmpty() || file(ctx.filesDir, nameKey) != null) return@withContext file(ctx.filesDir, nameKey) != null
+        val img = Live.run("Foto (cadastro real): $nameKey".take(40)) { get("https://media.api-sports.io/football/players/$apifId.png", null).second } ?: return@withContext false
+        val ok = img.size in 1500..600_000 && runCatching { BitmapFactory.decodeByteArray(img, 0, img.size) }.getOrNull()?.also { it.recycle() } != null
+        if (!ok) return@withContext false
+        File(dir(ctx.filesDir), "$nameKey.png").writeBytes(img)
+        val ix = idx(ctx.filesDir); ix.put(nameKey, JSONObject().put("s", "ok").put("at", System.currentTimeMillis()).put("id", apifId.toInt()).put("src", "base")); saveIdx(ctx.filesDir, ix)
+        Diag.log("Foto de $nameKey ← cadastro real (API-Football #$apifId)"); UiBus.bump(); true
     }
 
     /** Chave nova: libera o bloqueio do dia (401/403 da chave antiga). Os "sem acerto" NÃO são limpos: só voltam depois de tentar todos. */
@@ -518,7 +544,7 @@ object PhotoWeb {
             for (p in queue) {
                 val q = toks(p.name).joinToString(" ")
                 if (q.length < 3) continue
-                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = isoMap[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
                 fun mark(state: String) { wx.put(p.nameKey, JSONObject().put("s", state).put("at", System.currentTimeMillis())); runCatching { wikiFile(ctx.filesDir).writeText(wx.toString()) } }
                 val sUrl = "https://www.wikidata.org/w/api.php?action=query&list=search&format=json&srlimit=50&srsearch=" +
                     java.net.URLEncoder.encode("$q haswbstatement:P106=Q937857", "UTF-8")

@@ -234,6 +234,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
             .distinctBy { it.nameKey }.singleOrNull()
         if (p == null) return false   // pode ser de outro slot (photosFrom tenta os demais)
+        runCatching { WorldOcr.bigCard(ctx, slot, p.name, shown) }   // o card mostra o NOME COMPLETO: identificação real pelo nome inteiro
         val now = System.currentTimeMillis()
         fun say(msg: String, tell: String? = null) {
             if (msg != lastBigLog) { lastBigLog = msg; Diag.log(msg) }
@@ -292,6 +293,17 @@ class FramePipeline private constructor(private val ctx: Context) {
                 val merged = old ?: JSONObject()
                 for (k in seen.keys()) merged.put(k, seen.get(k))
                 dao.putPlan(PlanEntity(slot, "tacmounted", merged.put("at", now).put("round", round).toString(), now))
+                // registro por PARTIDA (slot + competição + rodada + rival), com origem e hora por campo
+                PlayedTactic.record(repo, slot, seen.keys().asSequence().associateWith { k -> seen.optString(k) }, "tela", now)
+                // "Capturado" só com os 11 campos lidos (formação sozinha não basta: vídeo 25/11 mostrava "capturado" antes do meio da tela)
+                val all = listOf("formation", "playStyle", "pressure", "mentality", "tempo", "marking", "offside", "tackle", "advAttack", "advMid", "advDef")
+                val have = all.count { k -> merged.optString(k).isNotBlank() }   // só o que ESTA passada leu (a última leitura de antes não conta)
+                Diag.setRead(if (have >= all.size) 2 else 1, ScreenType.TACTIC.name)
+                // os 11 campos lidos = fim da tela de Tática: avisa AGORA (antes só ao sair da página); uma vez por rodada
+                if (have >= all.size && tacticAnnounced[slot] != round) {
+                    tacticAnnounced[slot] = round
+                    tacticSummary(slot, now)?.let { Diag.log("Resumo da tela → $it"); note(slot, it, now) }
+                }
             }
         }
         pending = Pending(slot, ScreenType.TACTIC, null)
@@ -316,6 +328,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         return "⚠ S$slot: " + w.joinToString(" • ")
     }
     private val autoTacticAt = HashMap<Int, Long>()
+    private val tacticAnnounced = HashMap<Int, Int>()
     private val lastNote = HashMap<Int, Pair<String, Long>>()
 
     /** Aviso por cima do jogo; o mesmo texto não se repete em menos de 1 min por slot (avisos diferentes passam sempre). */
@@ -394,6 +407,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         var ratings = false
         var maxRound = 0
         var lastSet: Set<String> = emptySet()
+        var lastLines: List<Pair<String, Float>> = emptyList()
         var moved = false
         var still = 0
         /** Último quadro mostrava goleiros (última seção do Plantel). */
@@ -422,7 +436,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         val pd: Pending = when (type) {
             ScreenType.RESULT -> {
                 val r = ex.matchReport ?: return
-                (cur?.takeIf { it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty()) { it.ratings = true; if (gap) it.endSeen = true } }
+                // a página das notas não tem o cabeçalho com a rodada: continua a MESMA leitura (antes abria uma leitura nova a cada quadro e nunca chegava ao fim)
+                (cur?.takeIf { r.round == null || it.round == r.round } ?: Pending(slot, type, r.round)).also { pending = it; if (r.ratingsHome.isNotEmpty() || r.ratingsAway.isNotEmpty() || Parsers.notesPage(ocr)) { it.ratings = true; if (gap) it.endSeen = true } }
             }
             ScreenType.CALENDAR -> {
                 // o fim do calendário é sempre "Última rodada" + "Resumo da época": o quadro anterior é a última rodada
@@ -444,11 +459,21 @@ class FramePipeline private constructor(private val ctx: Context) {
             else -> return
         }
         pd.offFrames = 0
+        if (!pd.done) Diag.setRead(1, type.name)
         // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
         // quadro "igual" = as MESMAS linhas nas MESMAS alturas (texto + altura em faixas de 0,02): rolar uma linha desloca todas as alturas,
         // então um quadro que só ganhou 1 jogador novo embaixo NÃO é igual (antes valia ≥85% dos nomes e o plantel "terminava" no 1º goleiro)
         val names = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) + "@" + Math.round(it.yc * 50f) }.toSet()
-        val same = pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.6f   // o OCR oscila entre quadros parados
+        // fim da página: o dedo arrasta e a tela só "sobe 1 milímetro" (borda elástica) e volta: as linhas mudam ≤0,02 de altura. Compara texto + altura com essa tolerância
+        val curLines = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) to it.yc }.filter { it.first.length >= 2 }
+        // a borda elástica do Android ESTICA a lista (as linhas se deslocam de forma desigual, até ~0,05): o que prova o fim é NÃO APARECER texto novo e as linhas continuarem as mesmas
+        val curKeys = curLines.map { it.first }.toSet(); val lastKeys = pd.lastLines.map { it.first }.toSet()
+        val jac = if (curKeys.isEmpty() || lastKeys.isEmpty()) 0f else curKeys.intersect(lastKeys).size.toFloat() / curKeys.union(lastKeys).size
+        val dys = curLines.mapNotNull { c -> pd.lastLines.firstOrNull { l -> l.first == c.first && Math.abs(l.second - c.second) <= 0.07f }?.let { l -> Math.abs(l.second - c.second) } }.sorted()
+        val medDy = if (dys.isEmpty()) 1f else dys[dys.size / 2]
+        val sameLines = pd.lastLines.isNotEmpty() && jac >= 0.85f && dys.size >= curLines.size * 0.7f && medDy <= 0.06f
+        val same = sameLines || (pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.6f)   // o OCR oscila entre quadros parados
+        pd.lastLines = curLines
         if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
         pd.still = if (same) pd.still + 1 else 0
         // fim da lista = a lista PAROU (quadro igual ao anterior, depois de já ter rolado) mostrando a última seção (goleiros).
@@ -458,6 +483,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         pd.lastSet = names
         pd.lastHadGk = hasGk
         // Mercado: lista parada (depois de rolar) já é o fim, qualquer que seja a ordem; Plantel: parada mostrando os goleiros (última seção)
+        // Resultado: depois das notas não há mais nada embaixo (a lista de notas é o fim da página): quadro igual duas vezes seguidas depois de rolar = fim (vídeo 25/11: ficava "lendo" para sempre)
+        if (stalled && type == ScreenType.RESULT && pd.ratings) pd.endSeen = true
         if (stalled && (type == ScreenType.MARKET || (type == ScreenType.SQUAD && hasGk) || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
         // Plantel: já li ao menos o elenco guardado (ou o mínimo de 18) com as 4 seções e o quadro atual mostra goleiros no fim = completo
         if (type == ScreenType.SQUAD && hasGk && pd.moved && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))) {
@@ -478,6 +505,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         if (!pd.done && complete(pd)) {
             pd.done = true
+            Diag.setRead(2, type.name)
             if (pd.type == ScreenType.SQUAD && pd.owner != "RIVAL") runCatching {
                 val n = repo.reconcileSlot(pd.slot, pd.startAt)
                 if (n > 0) { Diag.log("Elenco S${pd.slot}: $n jogador(es) que não estão mais no plantel saíram da lista"); UiBus.bump() }
@@ -554,6 +582,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         // saiu da tela logo depois de chegar aos goleiros (última seção) com as 4 seções e ≥18 jogadores vistos: a lista foi até o fim
         val atEnd = pd.type == ScreenType.SQUAD && pd.lastHadGk && pd.moved && pd.seen.size >= 18 && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
         val txt = summary(pd, atEnd)
+        Diag.setRead(if (atEnd) 2 else 3, pd.type.name)
         if (txt != null) { Diag.log("Resumo da tela → $txt"); note(pd.slot, txt, System.currentTimeMillis()) }
     }
 
@@ -1046,9 +1075,9 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
     }
 
-    /** Banco global de bandeiras (plano `natbank`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
+    /** Banco global de bandeiras (plano `natbank3`, país → miniatura mais nítida): vale para os 4 slots e para jogadores lidos borrados. */
     private suspend fun updateFlagBank(imgs: JSONObject) {
-        val bank = repo.dao.plan(0, "natbank")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val bank = repo.dao.plan(0, "natbank3")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
         val atlas = Atlas.load(repo, Atlas.Kind.NAT)
         var ch = 0
         for (k in imgs.keys()) {
@@ -1058,7 +1087,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             val q = Flags.imgQuality(v) ?: 0f
             if (old == null || q > old * 1.08f + 1f) { bank.put(c, v); ch++ }
         }
-        if (ch > 0) repo.dao.putPlan(PlanEntity(0, "natbank", bank.toString(), System.currentTimeMillis()))
+        if (ch > 0) repo.dao.putPlan(PlanEntity(0, "natbank3", bank.toString(), System.currentTimeMillis()))
     }
 
     /** Faixa de clubes do topo do Calendário: escudo + nome de cada clube da liga (um por clube; só grava o que ainda não existe). */
@@ -1359,6 +1388,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (changed > 0) {
                 Diag.extracted.addAndGet(changed)
                 Diag.lastUpdateAt = now
+                // tela que não é lista (Pré-jogo, Relatório, Estádio, Classificação…): o que ela mostrava foi gravado = "Capturado" na bolha
+                if (type != ScreenType.SQUAD && type != ScreenType.CALENDAR && type != ScreenType.MARKET && type != ScreenType.RESULT && type != ScreenType.TACTIC) Diag.setRead(2, type.name)
                 if (type == ScreenType.PREGAME || type == ScreenType.CALENDAR) {
                     try {
                         Notifier.reschedule(ctx)

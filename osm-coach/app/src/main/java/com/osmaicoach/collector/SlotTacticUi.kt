@@ -42,7 +42,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -60,7 +59,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -330,7 +328,7 @@ internal fun EvidencePanel(ev: JSONObject?, cpu: Boolean = false) {
         K.RIVAL_STRENGTH to "Força do rival", K.RIVAL_FORMATION to "Formação do rival"
     )
     Panel {
-        Text("🔎 Conferência entre telas", color = C.GOLD, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        PanelTitle("🔎 Conferência entre telas")
         Text("Um dado só é dado como certo quando aparece igual em telas diferentes.", fontSize = 12.5.sp, color = C.MUTED)
         for ((k, label) in items) {
             val vals = Evidence.values(ev, k)
@@ -381,7 +379,7 @@ internal fun TacticHero(d: SlotData) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((lab, v, sub) in listOf(Triple("Pressão", pr, Osm.pressureLabel(pr)), Triple("Estilo", me, Osm.mentalityLabel(me)), Triple("Ritmo", te, Osm.tempoLabel(te)))) {
                 Column(
-                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.dp, Color(0x332AB4FF), RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(14.dp)).padding(vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(lab, fontSize = 12.sp, color = C.MUTED)
@@ -418,6 +416,7 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
     WhyCard(slot, d)
     AuditCard(slot, d)
     PlanBCard(slot, d)
+    LabCard(slot)
     GameContextCard(d)
     if (d.rivalChanged.isNotEmpty()) RivalChangedCard(d.rivalChanged) { startGeneration(ctx, "tactic", slot) }
     d.rivalPred?.takeIf { it.guesses.isNotEmpty() }?.let { RivalPredictCard(it, known(d.fields, K.RIVAL_NICK)) }
@@ -621,6 +620,7 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
             OsmDots(2, if (offside == "Sim") 1 else 0, Modifier.padding(top = 4.dp))
         }
     }
+    PlayedTable(slot, j)
     Spacer(Modifier.height(8.dp))
     GenPanel("tactic_ai", slot, "🤖 Consultar a IA de novo") { startGeneration(ctx, "tactic_ai", slot) }
 

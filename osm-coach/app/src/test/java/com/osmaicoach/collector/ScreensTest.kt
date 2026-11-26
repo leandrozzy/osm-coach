@@ -120,6 +120,15 @@ class ScreensTest {
         assertEquals(4 * 86400L, j.getLong("weekIn"))
     }
 
+    @Test fun missionsScreenWithoutRenewalCountdownIsStillRecognised() {
+        // print do usuário (25/11): todas as missões liberadas, só "A semana reinicia em: 4d" (sem "Novas missões dentro de")
+        val o = Fx.ocr(Fx.line("Cumpre missões e ganha recompensas", 0.18f, 0.20f, 0.3f), Fx.line("A semana reinicia em:", 0.78f, 0.20f, 0.2f), Fx.line("4d", 0.90f, 0.20f, 0.02f))
+        assertEquals(ScreenType.MISSIONS, Screens.classify(Txt.norm("Cumpre missões e ganha recompensas A semana reinicia em: 4d")))
+        val j = Screens.missions(o)
+        assertTrue(j.isNull("newIn"))
+        assertEquals(4 * 86400L, j.getLong("weekIn"))
+    }
+
     @Test fun scoutTimerOnlyWhenSearching() {
         assertTrue(Screens.scout(Fx.ocr(Fx.line("Procurar jogadores", 0.9f, 0.9f), Fx.line("16h", 0.9f, 0.93f, 0.02f))).isNull("endsIn"))
         assertEquals(15 * 3600L + 59 * 60 + 2, Screens.scout(Fx.ocr(Fx.line("15h 59m 02s", 0.9f, 0.93f, 0.06f))).getLong("endsIn"))

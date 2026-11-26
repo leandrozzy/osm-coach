@@ -185,19 +185,21 @@ object CrestCut {
     fun dir(filesDir: File): File = File(filesDir, "crests/t5").apply { mkdirs() }
 
     fun file(filesDir: File, team: String?): File? {
-        val k = Txt.key(team ?: "").takeIf { it.length >= 3 } ?: return null
+        val k = Txt.key(CrestAdmin.snap(filesDir, team) ?: "").takeIf { it.length >= 3 } ?: return null
         return File(File(filesDir, "crests/t5"), "$k.png")
     }
 
     /** Arquivo do escudo do clube: nome exato ou, se faltar, o mais parecido (OCR: "SC"/"5C", acento perdido) com similaridade ≥0,85. */
     fun find(filesDir: File, team: String?): File? {
+        if (CrestAdmin.isBlocked(filesDir, team)) return null
         val exact = file(filesDir, team) ?: return null
         if (exact.exists()) return exact
         val k = Txt.key(team ?: "")
         val dir = File(filesDir, "crests/t5")
         val all = dir.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
-        return all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
-            ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }
+        all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
+            ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }?.let { return it }
+        return all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }       // mesmo clube lido de outro jeito (5V/SV, I/l/|)
     }
 
     /** Parecença de dois nomes de clube: similaridade, ou 0,9 se um é início do outro (nome cortado/quebrado na faixa: "Young Violets" × "Young Violets Austria Wien"). */
@@ -213,6 +215,7 @@ object CrestCut {
      */
     fun save(filesDir: File, bmp: Bitmap, team: String?, cx: Float, cy: Float, w: Float, h: Float, overwrite: Boolean = false, expW: Float = 0f, expH: Float = 0f): Boolean {
         val f = file(filesDir, team) ?: return false
+        if (CrestAdmin.isBlocked(filesDir, team)) return false
         if (f.exists() && !overwrite) return false
         return try {
             val x = ((cx - w / 2) * bmp.width).toInt().coerceIn(0, bmp.width - 2)

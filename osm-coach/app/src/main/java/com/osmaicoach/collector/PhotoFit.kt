@@ -134,13 +134,19 @@ object PhotoFit {
             return Fit(out, removeBg)
         }
         // plano B: quadrado (retrato: do alto), sem tirar o fundo
+        val a0 = px.count { (it ushr 24) >= 230 }.toFloat() / px.size.coerceAtLeast(1)
         val side = minOf(w, h).toFloat()
         val fx = (w - side) / 2f; val fy = if (h > w) (h * 0.02f).coerceAtMost(h - side) else (h - side) / 2f
         for (oy in 0 until s) for (ox in 0 until s) {
             val xp = (fx + (ox + 0.5f) / s * side).toInt().coerceIn(0, w - 1); val yp = (fy + (oy + 0.5f) / s * side).toInt().coerceIn(0, h - 1)
-            out[oy * s + ox] = px[yp * w + xp] or (0xFF shl 24)
+            // PNG com fundo transparente cujo rosto não foi achado: o pixel transparente tem RGB preto e virava um quadrado PRETO; compõe sobre o fundo claro (26/11)
+            val p = px[yp * w + xp]; val a = (p ushr 24) / 255f
+            val R = (((p shr 16) and 255) * a + ((BG shr 16) and 255) * (1 - a)).toInt().coerceIn(0, 255)
+            val G = (((p shr 8) and 255) * a + ((BG shr 8) and 255) * (1 - a)).toInt().coerceIn(0, 255)
+            val B = ((p and 255) * a + (BG and 255) * (1 - a)).toInt().coerceIn(0, 255)
+            out[oy * s + ox] = (0xFF shl 24) or (R shl 16) or (G shl 8) or B
         }
-        return Fit(out, false)
+        return Fit(out, a0 < 0.9f)
     }
 
     /** Bitmap → Bitmap s×s enquadrado, com o melhor fundo/rosto disponíveis no aparelho. */

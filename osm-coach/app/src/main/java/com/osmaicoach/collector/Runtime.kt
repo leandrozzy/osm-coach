@@ -29,6 +29,11 @@ object Diag {
     @Volatile var serviceConnected = false
     @Volatile var lastOsmEventAt = 0L
     @Volatile var lastShotAt = 0L
+    /** Leitura de lista em andamento (só por CONTEÚDO: 1 lendo, 2 chegou ao fim, 3 saiu da tela sem terminar); a bolha mostra "Lendo…" / "Capturado" / "Incompleto". */
+    @Volatile var readState = 0
+    @Volatile var readType = ""
+    @Volatile var readAt = 0L
+    fun setRead(state: Int, type: String) { readState = state; readType = type; readAt = System.currentTimeMillis() }
     @Volatile var currentType = "—"
     @Volatile var currentSlot = 0
     @Volatile var lastUpdateAt = 0L

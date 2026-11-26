@@ -99,7 +99,7 @@ object DiagExport {
     private fun settingsDump(ctx: Context): JSONObject {
         val out = JSONObject()
         for ((k, v) in ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).all) {
-            if (k in SECRETS) {
+            if (k in SECRETS || k.endsWith("_key") || k.endsWith("_token") || k.endsWith("_secret")) {
                 val keys = Settings.splitKeys(v?.toString() ?: "")
                 out.put(k, JSONObject().put("count", keys.size).put("labels", JSONArray(keys.map { AiClient.keyLabel(it) })))
             } else out.put(k, v?.toString() ?: JSONObject.NULL)

@@ -131,6 +131,20 @@ object Arts {
      * Competição em andamento: contratação, goleada (3+ gols de diferença), 3+ vitórias seguidas, liderança. Encerrada: campeão, objetivo alcançado.
      * Campanha e resumo da temporada só à mão. Batalhas/crews o app não lê ainda.
      */
+    /** Assumi a liderança? Na foto COMPLETA anterior da Classificação eu não era o 1º e na mais recente sou. Sem duas fotos, não dá para afirmar (não gera arte). */
+    private suspend fun tookLead(repo: Repo, slot: Int, team: String?): Boolean {
+        val j = repo.dao.plan(slot, "league")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return false
+        val snaps = j.optJSONArray("snaps") ?: return false
+        if (snaps.length() < 2) return false
+        fun myRank(i: Int): Int? {
+            val r = snaps.optJSONObject(i)?.optJSONObject("r") ?: return null
+            val rows = r.keys().asSequence().mapNotNull { k -> r.optJSONArray(k)?.let { a -> League.Row(a.optString(3), null, a.optInt(0), a.optInt(1), null, null, null, a.optInt(2), null, null) } }.toList()
+            return League.find(rows, team)?.rank
+        }
+        val last = myRank(snaps.length() - 1); val prev = myRank(snaps.length() - 2)
+        return last == 1 && prev != null && prev != 1
+    }
+
     suspend fun candidates(repo: Repo, slot: Int, includeDismissed: Boolean = false): List<Cand> {
         val f = repo.fieldMap(slot)
         if (f[K.TEAM]?.value == null) return emptyList()
@@ -146,36 +160,32 @@ object Arts {
         val obj = num(f[K.MY_OBJECTIVE]?.value)
         if (!over) {
             val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
-            for (e in ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.take(8)) {
-                out.add(Cand("buy|$slot|${e.key}|${e.at}", slot, "BUY", "Contratação: " + e.name, e.at, e.key))
-            }
             val recent = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
             if (recent.isNotEmpty()) out.add(Cand("news|$slot|${recent.first().at}", slot, "NEWS", "Capa de jornal: " + recent.joinToString(", ") { it.name }, recent.first().at, auto = false))
             if (last != null && last.round != null) out.add(Cand("post|$slot|${last.round}", slot, "POST", "Jornal do jogo: J${last.round} ${last.scoreMine ?: "?"}×${last.scoreOpp ?: "?"} vs ${repo.realClub(last.opponent).orEmpty()}", last.updatedAt))
             if (last != null && last.result == "V") {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
-                if (streak >= 3) out.add(Cand("streak|$slot|$streak|${last.round}", slot, "STREAK", "$streak vitórias seguidas", last.updatedAt))
+                if (streak > 10) out.add(Cand("streak|$slot|$streak|${last.round}", slot, "STREAK", "$streak vitórias seguidas", last.updatedAt))     // só com MAIS de 10
                 if (diff >= 3) out.add(Cand("win|$slot|${last.round}", slot, "GOLEADA", "Goleada na J${last.round}: ${last.scoreMine}×${last.scoreOpp}", last.updatedAt))
             }
-            if (pos == 1 && ms.size >= 3) out.add(Cand("leader|$slot|${ms.last().round}", slot, "LEADER", "Líder da liga na J${ms.last().round}", System.currentTimeMillis()))
-            if (ms.size >= 3) out.add(Cand("camp|$slot|${ms.size}", slot, "CAMP", "Campanha até a J${ms.last().round}", System.currentTimeMillis(), auto = false))
+            // liderança: só quando EU assumo a ponta (na foto anterior da tabela eu não era o 1º)
+            if (pos == 1 && ms.size >= 3 && tookLead(repo, slot, f[K.TEAM]?.value)) out.add(Cand("leader|$slot|${ms.last().round}", slot, "LEADER", "Assumiu a liderança na J${ms.last().round}", System.currentTimeMillis()))
+            // reação: 3 jogos sem vencer e pelo menos uma derrota (só à mão)
+            val l3 = ms.takeLast(3)
+            if (ms.size >= 4 && l3.size == 3 && l3.none { it.result == "V" } && l3.any { it.result == "D" }) out.add(Cand("recover|$slot|${ms.last().round}", slot, "RECOVER", "Hora de reagir (J${ms.last().round})", System.currentTimeMillis(), auto = false))
             // começo e meio de campeonato: expectativa, craques, momento, dia de jogo e lado a lado
             val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
             val now = System.currentTimeMillis()
             if (ms.size <= 1) out.add(Cand("expect|$slot|$comp", slot, "EXPECT", "Expectativa da temporada", now))
             if (repo.dao.playersOf(slot).count { it.owner == "MY" && it.strength != null } >= 3)
                 out.add(Cand("stars|$slot|${ms.size / 5}", slot, "STARS", "Craques do time", now, auto = ms.size <= 1 || ms.size % 5 == 0))
-            if (ms.size >= 5) out.add(Cand("moment|$slot|${ms.size}", slot, "MOMENT", "Momento do time (últimos 5)", now, auto = ms.size % 5 == 0))
             val round = num(f[K.ROUND]?.value)
             val matchAt = f[K.MATCH_AT]?.value?.toLongOrNull()
             val rival = f[K.RIVAL_TEAM]?.value
             if (round != null && rival != null && f[K.RIVAL_STRENGTH]?.value?.toIntOrNull() != null && f[K.MY_STRENGTH]?.value?.toIntOrNull() != null) {
                 val soon = matchAt != null && matchAt > now && matchAt - now <= 24 * 3600_000L
                 out.add(Cand("match|$slot|$round", slot, "MATCHDAY", "Dia de jogo: J$round vs ${repo.realClub(rival)}", now, auto = soon))
-                val sectors = listOf(K.MY_ATK to K.RIVAL_ATK, K.MY_MID to K.RIVAL_MID, K.MY_DEF to K.RIVAL_DEF, K.MY_GOL to K.RIVAL_GOL)
-                if (sectors.count { (a, b) -> f[a]?.value?.toIntOrNull() != null && f[b]?.value?.toIntOrNull() != null } >= 2)
-                    out.add(Cand("cmp|$slot|$round", slot, "COMPARE", "Lado a lado: J$round vs ${repo.realClub(rival)}", now, auto = soon))
             }
         } else if (ms.isNotEmpty()) {
             val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
@@ -313,7 +323,7 @@ object Arts {
         val shortNames = ArrayList<String>()
         for (b in buys) {
             val p = mine.firstOrNull { it.nameKey == b.key } ?: continue
-            val iso = FlagManual.all(repo)[b.key] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(b.key) }.getOrNull() }?.takeIf { it.isNotBlank() }
+            val iso = FlagManual.all(repo)[b.key] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(b.key) }.getOrNull() }?.takeIf { it.isNotBlank() }
             val country = Flags.countryName(iso)
             val look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
             val sc = ArtsAi.scene(ArtsAi.portraitPrompt(colors, kit, look), seed + list.size * 31)
@@ -475,7 +485,7 @@ object Arts {
             "BUY", "PLAYER" -> {
                 val key = c.key ?: return null
                 val p = repo.dao.playersOf(slot).firstOrNull { it.owner == "MY" && it.nameKey == key } ?: return null
-                val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                val iso = FlagManual.all(repo)[key] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(key) }.getOrNull() }?.takeIf { it.isNotBlank() }
                 val country = Flags.countryName(iso)
                 kit = ArtsAi.kitFor(ctx, repo, team, comp)
                 look = ArtsAi.lookFor(ctx, repo, p.name, p.age, country, posLabel(p.cat, p.posCode).ifBlank { null })
@@ -523,11 +533,11 @@ object Arts {
                 val outS = ArtsDraw.list(th, scene, crest, null, "CRAQUES DO TIME", rowsS, "Quem vai decidir a temporada!")
                 scene.recycle(); return outS
             }
-            "MOMENT" -> {
+            "MOMENT", "RECOVER" -> {
                 val l5 = ms.takeLast(5)
                 val a5 = if (l5.isEmpty()) 0 else Math.round(100f * (3 * l5.count { it.result == "V" } + l5.count { it.result == "E" }) / (3 * l5.size))
                 val rowsM = listOf(ArtsDraw.Row("Aproveitamento", "$a5%", a5 / 100f), ArtsDraw.Row("Gols marcados × sofridos", "${l5.sumOf { it.scoreMine ?: 0 }} × ${l5.sumOf { it.scoreOpp ?: 0 }}"))
-                val badM = l5.size >= 3 && a5 < 40
+                val badM = c.kind == "RECOVER" || (l5.size >= 3 && a5 < 40)
                 val scene = ArtsAi.scene(ArtsAi.prompt(if (badM) "RECOVER" else c.kind, colors, "", ""), seed) ?: return null
                 val outM = ArtsDraw.list(th, scene, crest, null, if (badM) "HORA DE REAGIR" else "MOMENTO DO TIME", rowsM, if (badM) "Não está bom: vamos melhorar!" else "Cinco jogos, uma história!", dots = l5.joinToString("") { it.result.orEmpty() })
                 scene.recycle(); return outM

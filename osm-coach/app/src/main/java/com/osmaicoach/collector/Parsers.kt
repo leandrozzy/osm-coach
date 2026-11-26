@@ -93,8 +93,9 @@ object Parsers {
                     continue
                 }
             }
-            if (done == null && all.contains("procurar advers")) {
-                val title = names.firstOrNull { !Txt.norm(it.text).contains("procurar") }?.text?.trim() ?: "Batalha"
+            // "A PROCURAR ADVERSÁRIO" ou "A RECRUTAR MEMBROS…" (batalha de grupos ainda formando as equipes): sem jogo, tratado como "procurando"
+            if (done == null && (all.contains("procurar advers") || all.contains("recrutar"))) {
+                val title = names.firstOrNull { val t = Txt.norm(it.text); !t.contains("procurar") && !t.contains("recrutar") }?.text?.trim() ?: "Batalha"
                 cards.add(HubCard(slot, "", title, null, null, "procurando", dx = dx, dy = dy))
                 continue
             }
@@ -638,7 +639,56 @@ object Parsers {
         only(Osm.STYLES)?.let { j.put("playStyle", it) }
         only(Osm.TACKLES)?.let { j.put("tackle", it) }
         only(Osm.MARKING)?.let { j.put("marking", it) }
+        only(Osm.ATTACK)?.let { j.put("advAttack", it) }
+        only(Osm.MIDFIELD)?.let { j.put("advMid", it) }
+        only(Osm.DEFENSE)?.let { j.put("advDef", it) }
+        tacticPanel(o).forEach { (k, v) -> j.put(k, v) }
         return j
+    }
+
+    private fun intBox(t: String): Int? = t.trim().takeIf { it.length in 1..3 && it.all { c -> c.isDigit() } }?.toIntOrNull()?.takeIf { it in 0..100 }
+
+    /**
+     * Painel ROLADO do editor de tática (prints/diagnóstico de 25/11, 2448×1080): no meio ficam os rótulos Pressão / Estilo (= mentalidade) / Temporização
+     * com o nome da faixa logo abaixo ("Equilibrado", "Defensivo", "Passes rápidos"); o valor 0–100 está numa caixa à direita (x≈0,95), ~0,19 abaixo do rótulo.
+     * Marcação (esquerda) e "Fazer fora-de-jogo" (direita) trazem o valor logo abaixo. O número só vale se a faixa escrita abaixo do rótulo bate com ele
+     * (OCR errado de dígito nunca vira dado). Devolve só o que apareceu de forma inequívoca.
+     */
+    fun tacticPanel(o: OcrResult): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        val mid = o.lines.filter { it.xc in 0.42f..0.58f }
+        val sliders = listOf(
+            Triple("pressure", "pressao", { v: Int -> Osm.pressureLabel(v) }),
+            Triple("mentality", "estilo", { v: Int -> Osm.mentalityLabel(v) }),
+            Triple("tempo", "tempor", { v: Int -> Osm.tempoLabel(v) })
+        )
+        for ((key, word, labelOf) in sliders) {
+            val lab = mid.filter { val n = Txt.norm(it.text).replace("?", "").trim(); if (key == "mentality") n == "estilo" else n.contains(word) && !n.contains("estilo de jogo") }
+                .singleOrNull() ?: continue
+            val sub = mid.filter { it !== lab && it.yc > lab.yc && it.yc - lab.yc <= 0.08f }.minByOrNull { it.yc - lab.yc }
+            val box = o.tokens.filter { it.xc >= 0.9f && it.yc - lab.yc in 0.10f..0.28f }.mapNotNull { t -> intBox(t.text)?.let { Pair(t, it) } }
+                .minByOrNull { abs((it.first.yc - lab.yc) - 0.19f) } ?: continue
+            val subOk = sub?.let { Txt.norm(it.text).replace("?", "").trim() == Txt.norm(labelOf(box.second)) }
+            if (subOk == false) continue            // faixa escrita ≠ número lido: não grava
+            out[key] = box.second.toString()
+        }
+        val markLab = o.lines.filter { it.xc in 0.15f..0.35f && Txt.norm(it.text).startsWith("marca") }.singleOrNull()
+        if (markLab != null) {
+            val v = o.lines.filter { it.yc > markLab.yc && it.yc - markLab.yc <= 0.08f && abs(it.xc - markLab.xc) <= 0.12f }.minByOrNull { it.yc - markLab.yc }
+            Osm.marking(v?.text)?.let { out["marking"] = it }
+        }
+        val offLab = o.lines.filter { it.xc in 0.62f..0.86f && Txt.norm(it.text).let { n -> n.contains("fora-de-jogo") || n.contains("fora de jogo") } }.singleOrNull()
+        if (offLab != null) {
+            val v = o.lines.filter { it.yc > offLab.yc && it.yc - offLab.yc <= 0.08f && abs(it.xc - offLab.xc) <= 0.12f }.minByOrNull { it.yc - offLab.yc }
+            when (Txt.norm(v?.text ?: "").trim()) { "sim" -> out["offside"] = "Sim"; "nao" -> out["offside"] = "Não" }
+        }
+        return out
+    }
+
+    /** Painel rolado do editor: ao menos um controle com número ou Marcação (esquerda) + fora-de-jogo (direita). */
+    fun isTacticPanel(o: OcrResult): Boolean {
+        val p = tacticPanel(o)
+        return p.keys.any { it in setOf("pressure", "mentality", "tempo") } || (p.containsKey("marking") && p.containsKey("offside"))
     }
 
     /** Diferenças entre o que está montado (`tacmounted`) e a tática gerada. */
@@ -659,6 +709,14 @@ object Parsers {
         val mk = m.optString("marking").takeIf { it.isNotBlank() }?.let { Osm.marking(it) }
         val wantMk = Osm.marking(plan.optString("marking"))
         if (mk != null && wantMk != null && mk != wantMk) out.add("Marcação $mk — a gerada é $wantMk")
+        for ((k, label) in listOf("pressure" to "Pressão", "mentality" to "Mentalidade", "tempo" to "Temporização")) {
+            val got = m.optString(k).toIntOrNull() ?: continue
+            val want = plan.optString(k).toIntOrNull() ?: continue
+            if (abs(got - want) > PlayedTactic.SLIDER_TOL) out.add("$label $got — a gerada é $want")
+        }
+        val of = m.optString("offside").takeIf { it == "Sim" || it == "Não" }
+        val wantOf = plan.optString("offside").takeIf { it == "Sim" || it == "Não" }
+        if (of != null && wantOf != null && of != wantOf) out.add("Fora-de-jogo $of — a gerada é $wantOf")
         return out
     }
 
@@ -830,6 +888,9 @@ object Parsers {
             if (secs != null) timers[label] = now + secs * 1000L
             else if (text.contains("comecar") || text.contains("concluir") || text.contains("maximo")) timers[label] = null
         }
+        // uma obra por vez: horários iguais em vários cards são a duração do próximo melhoramento, não obra em andamento
+        val run = Work.onlyRunning(timers.map { Pair(it.key, it.value) })
+        for (k in timers.keys.toList()) if (timers[k] != null && run[k] == null) timers[k] = null
         return timers
     }
 
@@ -852,8 +913,15 @@ object Parsers {
         if (t.contains("jornada")) return false
         val l = o.tokens.count { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.44f..0.49f && it.yc in 0.10f..0.97f }
         val r = o.tokens.count { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.50f..0.56f && it.yc in 0.10f..0.97f }
-        return l >= 5 && r >= 5
+        if (l >= 5 && r >= 5) return true
+        // fim da página (só a lista de notas): o OCR perde várias bolinhas vermelhas/verdes das notas, mas os nomes "9. Fulano" nas duas bordas continuam (diagnóstico 25/11: caía em OTHER_OSM e o fim nunca era visto)
+        return notesLines(o, left = true) >= 4 && notesLines(o, left = false) >= 4 && l + r >= 2
     }
+
+    private val RX_NOTE_NAME = Regex("^[\\(\\[]?\\s*\\d?\\s*\\d{1,2}\\s*\\.\\s*\\p{L}{3,}")
+    /** Linhas "N. Nome" da lista de notas de um dos lados (esquerda = casa, direita = visitante). */
+    fun notesLines(o: OcrResult, left: Boolean): Int = o.lines.count { (if (left) it.xc < 0.2f else it.xc > 0.8f) && it.yc in 0.10f..0.99f && RX_NOTE_NAME.containsMatchIn(it.text.trim()) }
+    fun notesPage(o: OcrResult): Boolean = notesLines(o, true) >= 4 && notesLines(o, false) >= 4
 
     private val RX_MINUTE = Regex("^(\\d{1,3})\\s*['’′]$")
     private val RX_SHIRT = Regex("^\\d{1,2}\\.\\s*")
@@ -984,6 +1052,9 @@ object Parsers {
                     val mn = o.lines.filter { RX_MINUTE.containsMatchIn(it.text.trim()) && it.xc in 0.42f..0.58f && abs(it.yc - by) <= 0.05f }.minByOrNull { abs(it.yc - by) }
                     if (mn == null) continue
                     val min = RX_MINUTE.find(mn.text.trim())!!.groupValues[1]
+                    // o texto do lance já trouxe o autor, só faltou o ícone na leitura dele (diagnóstico 25/11: "lance de Lucas Barbosa" + "gol (autor não lido)" no mesmo minuto): é UM gol
+                    val li = events.indexOfFirst { it.startsWith("$min' ($sideTxt) lance de ") && it.contains("(gol sem assistência ou cartão)") }
+                    if (li >= 0) { events[li] = events[li].replace("lance de ", "gol de ").replace(" (gol sem assistência ou cartão)", ""); continue }
                     if (events.none { it.startsWith("$min' ($sideTxt) gol") }) events.add("$min' ($sideTxt) gol (autor não lido)")
                 }
                 // bola sem minuto lido (o OCR perdeu a linha do minuto): conta o gol do lado sem minuto, se ainda não há gol de texto suficiente
@@ -998,17 +1069,34 @@ object Parsers {
         // Notas dos jogadores: bolinhas à esquerda (time da casa) e à direita (visitante).
         val ratingsHome = ArrayList<Pair<String, Int>>()
         val ratingsAway = ArrayList<Pair<String, Int>>()
+        // gols por jogador na lista de notas: "2 ⚽ 9. Hudson-Odoi" (visitante: a quantidade vem ANTES da bola) / "7. A. Silva ⚽ 2" (casa: DEPOIS); OCR lê "2 9. Hudson-Odoi" e "A. Silva 2"
+        val listGoals = ArrayList<Triple<Boolean, String, Int>>()
+        fun rated(raw: String, home: Boolean): String {
+            var t = raw.trim()
+            var n = 0
+            if (!home) Regex("^[\\(\\[]?\\s*([2-9])\\s+(\\d{1,2}\\.\\s*.+)$").find(t)?.let { m -> n = m.groupValues[1].toInt(); t = m.groupValues[2] }
+            else Regex("^(\\d{1,2}\\.\\s*.*\\p{L}.*?)\\s+([2-9])$").find(t)?.let { m -> n = m.groupValues[2].toInt(); t = m.groupValues[1] }
+            val name = t.replace(RX_SHIRT, "").trim()
+            if (n >= 2 && Txt.letters(name) >= 3) listGoals.add(Triple(home, name, n))
+            return name
+        }
         val lr = o.tokens.filter { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.44f..0.49f && it.yc in 0.10f..0.97f }
         for (t in lr) {
             val nm = o.lines.filter { it.xc < 0.35f && abs(it.yc - t.yc) <= 0.03f && Txt.letters(it.text) >= 3 }.minByOrNull { abs(it.yc - t.yc) }?.text?.trim()
-            if (nm != null) ratingsHome.add(Pair(nm.replace(RX_SHIRT, ""), intTok(t) ?: 0))
+            if (nm != null) ratingsHome.add(Pair(rated(nm, true), intTok(t) ?: 0))
         }
         val rr = o.tokens.filter { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.50f..0.56f && it.yc in 0.10f..0.97f }
         for (t in rr) {
             val nm = o.lines.filter { it.xc > 0.65f && abs(it.yc - t.yc) <= 0.03f && Txt.letters(it.text) >= 3 }.minByOrNull { abs(it.yc - t.yc) }?.text?.trim()
-            if (nm != null) ratingsAway.add(Pair(nm.replace(RX_SHIRT, ""), intTok(t) ?: 0))
+            if (nm != null) ratingsAway.add(Pair(rated(nm, false), intTok(t) ?: 0))
         }
 
+        // quem fez 2+ gols na lista de notas: se a lista de eventos trouxe menos gols dele, completa (sem inventar minuto)
+        for ((home, name, n) in listGoals) {
+            val sideTxt = if (home) "casa" else "visitante"
+            val have = events.count { it.contains("($sideTxt) gol de ") && Txt.sim(Txt.key(it.substringAfter(") gol de ").substringBefore(" (")), Txt.key(name)) >= 0.8 }
+            for (i in have until n) events.add("?' ($sideTxt) gol de $name (${i + 1}º gol, pela lista de jogadores)")
+        }
         val rep = MatchReportRead(
             round = round, homeTeam = home, awayTeam = away, homeNick = homeNick, awayNick = awayNick,
             scoreHome = sh, scoreAway = sa, referee = referee, tip = tip, advice = advice, mom = mom,

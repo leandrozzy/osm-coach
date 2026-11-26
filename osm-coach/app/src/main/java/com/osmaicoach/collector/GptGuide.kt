@@ -35,7 +35,11 @@ object GptGuide {
         "Escudos: use exatamente os do clube real (ou as imagens que eu anexar), sem redesenhar. " +
         "Texto: português, letras grandes e nítidas, exatamente como eu escrever; não invente números, nomes, gols ou lances. " +
         "Terço inferior mais escuro para o texto ficar legível. " +
-        "Tom: antes do jogo = confiança; vitória = festa; derrota ou empate = recuperação, \"vamos melhorar\", nunca humilhação."
+        "Tom: antes do jogo = confiança; vitória = festa; derrota ou empate = recuperação, \"vamos melhorar\", nunca humilhação. " +
+        "EXPECTATIVA DA TEMPORADA = o que o clube QUER ALCANÇAR (a meta e a ambição): manchete sobre a meta, nunca um balanço de resultados. " +
+        "Se a temporada ainda não teve jogos, NÃO escreva campanha, vitórias, gols ou aproveitamento zerados (\"0V 0E 0D\", \"0%\", \"0 × 0\"): o que não aconteceu não vira texto. " +
+        "Gols: cite o autor e o minuto só quando eu informar; gol sem autor informado vira \"gol do <clube>\". " +
+        "Use apenas os fatos do pedido (meta, posição, ranking do elenco, placares, nomes); não invente adversários, minutos nem declarações."
 
     suspend fun build(ctx: Context): String {
         val repo = Repo(ctx)
@@ -70,8 +74,9 @@ object GptGuide {
             if (mine.isNotEmpty()) {
                 sb.append("\n### Meu elenco (${mine.size})\n")
                 for (p in mine) {
-                    val iso = FlagManual.all(repo)[p.nameKey] ?: repo.dao.plan(slot, "natiso2")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
-                    sb.append("- ${p.name}" + (p.posCode?.let { " | $it" } ?: "") + (p.age?.let { " | $it anos" } ?: "") + (p.strength?.let { " | força $it" } ?: "") + (Flags.countryName(iso)?.let { " | $it" } ?: "") + "\n")
+                    val iso = FlagManual.all(repo)[p.nameKey] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+                    val real = runCatching { WorldOcr.realPlayer(ctx, slot, p.name) }.getOrNull()
+                    sb.append("- ${p.name}" + (real?.let { " (real: ${it.fullName ?: it.name}${it.dob?.let { d -> ", nasc. ${d.take(10)}" } ?: ""})" } ?: "") + (p.posCode?.let { " | $it" } ?: "") + (p.age?.let { " | $it anos" } ?: "") + (p.strength?.let { " | força $it" } ?: "") + (Flags.countryName(iso)?.let { " | $it" } ?: "") + "\n")
                     players++
                 }
             }

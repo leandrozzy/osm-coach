@@ -30,6 +30,7 @@ internal fun ImpactCard(slot: Int, d: SlotData) {
             Title("Tática: seguiu o app × mexeu à mão")
             for (s in listOf(fol.first, fol.second)) if (s.n > 0) Text("• ${s.label}: ${s.text()}", fontSize = 13.5.sp, color = Color.White, modifier = Modifier.padding(top = 3.dp))
             Text(Impact.followedNote(fol), fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            Impact.unconfirmed(logs).takeIf { it > 0 }?.let { n -> Text("$n jogo(s) sem confirmação do que foi jogado ficam fora desta conta (confirme na aba Tática).", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp)) }
         } else Text("Tática: ainda sem jogos para comparar.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
         Title("Compras e vendas")
         if (ledger == null || (ledger.buys == 0 && ledger.sells == 0)) {

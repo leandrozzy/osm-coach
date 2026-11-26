@@ -46,7 +46,7 @@ private fun signColor(v: Double?): Color = when {
 private fun EvoCard(title: String, icon: String, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).osmPanel().padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x332AB4FF)), contentAlignment = Alignment.Center) { Text(icon, fontSize = 17.sp) }
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(C.SURFACE2), contentAlignment = Alignment.Center) { Text(icon, fontSize = 17.sp) }
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, modifier = Modifier.padding(start = 10.dp))
         }
         Column(Modifier.padding(top = 12.dp)) { content() }
@@ -57,7 +57,7 @@ private fun EvoCard(title: String, icon: String, content: @Composable () -> Unit
 @Composable
 private fun Metric(label: String, value: String, delta: String?, deltaColor: Color, modifier: Modifier = Modifier) {
     Column(
-        modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xFF0A1830)).border(1.dp, Color(0x332AB4FF), RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 12.dp),
+        modifier.clip(RoundedCornerShape(14.dp)).background(C.SURFACE).border(1.dp, C.BORDER, RoundedCornerShape(14.dp)).padding(horizontal = 6.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(label, fontSize = 12.sp, color = MUTE, maxLines = 1)
@@ -151,7 +151,7 @@ fun ScoreboardCard(s: Scoreboard.Stats) {
 fun EvolutionPanel(p: Repo.ProgressData, team: String? = null, slot: Int = 0) {
     // de quem são estes números
     if (team != null) Row(
-        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x222AB4FF)).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp).clip(RoundedCornerShape(14.dp)).background(C.SURFACE2).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("📌", fontSize = 15.sp)

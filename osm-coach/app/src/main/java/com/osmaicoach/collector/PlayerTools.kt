@@ -86,8 +86,8 @@ internal fun PlayerCompareDialog(slot: Int, p: PlayerEntity, onDone: () -> Unit)
                 other?.let { CompareBars(p, it) } ?: Text("Escolha com quem comparar ${p.name}:", fontSize = 13.sp, color = C.MUTED)
                 FlowRow(Modifier.padding(top = 10.dp)) {
                     for (m in mates.take(24)) {
-                        Box(Modifier.padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(14.dp)).background(if (other?.nameKey == m.nameKey) C.PRIMARY.copy(alpha = 0.35f) else Color(0xFF0A1830))
-                            .border(1.dp, Color(0x332AB4FF), RoundedCornerShape(14.dp)).clickable { other = m }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Box(Modifier.padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(14.dp)).background(if (other?.nameKey == m.nameKey) C.PRIMARY.copy(alpha = 0.35f) else C.SURFACE)
+                            .border(1.dp, C.BORDER, RoundedCornerShape(14.dp)).clickable { other = m }.padding(horizontal = 10.dp, vertical = 6.dp)) {
                             Text("${m.name} ${m.strength ?: ""}", fontSize = 12.5.sp)
                         }
                     }

@@ -13,18 +13,25 @@ object Impact {
         fun text(): String = "$n jogos • ${v}V ${e}E ${d}D • ${"%.1f".format(ppg).replace('.', ',')} pts/jogo"
     }
 
-    /** Jogos com a tática do app montada igual × jogos em que você trocou à mão (`deviated` no registro da tática). */
+    /**
+     * Jogos em que a tática do app foi montada igual × jogos em que você trocou, SÓ com evidência (`usage` = "seguiu"/"alterou", ver PlayedTactic).
+     * Registro antigo sem evidência e jogo "não confirmado" ficam de fora das duas contas (ver [unconfirmed]).
+     */
     fun followed(logs: List<JSONObject>): Pair<Side, Side>? {
         val played = logs.filter { it.optString("result") in listOf("V", "E", "D") }
         if (played.isEmpty()) return null
-        fun side(label: String, dev: Boolean): Side {
-            val g = played.filter { it.optBoolean("deviated", false) == dev }
+        fun side(label: String, usage: String): Side {
+            val g = played.filter { PlayedTactic.usageOf(it) == usage }
             return Side(label, g.count { it.optString("result") == "V" }, g.count { it.optString("result") == "E" }, g.count { it.optString("result") == "D" })
         }
-        val a = side("Montou o que o app sugeriu", false)
-        val b = side("Mexeu na tática à mão", true)
+        val a = side("Montou o que o app sugeriu (confirmado)", PlayedTactic.SEGUIU)
+        val b = side("Mexeu na tática (confirmado)", PlayedTactic.ALTEROU)
         return if (b.n == 0 && a.n < 4) null else Pair(a, b)
     }
+
+    /** Jogos terminados sem confirmação do que foi jogado (não entram em nenhum dos dois lados). */
+    fun unconfirmed(logs: List<JSONObject>): Int =
+        logs.count { it.optString("result") in listOf("V", "E", "D") && PlayedTactic.usageOf(it) == PlayedTactic.NAO }
 
     /** Frase curta comparando os dois lados; sem 4+ jogos em cada, só informa. */
     fun followedNote(p: Pair<Side, Side>): String {

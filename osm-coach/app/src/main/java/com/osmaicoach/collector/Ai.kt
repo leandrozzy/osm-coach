@@ -836,6 +836,10 @@ object AiClient {
 
     /** Tenta cada provedor com chave, em ordem, com orçamento total de tempo. Nunca fica preso. */
     suspend fun ask(ctx: Context, prompt: String, jpeg: ByteArray?, budgetMs: Long = 150000L): Reply {
+        val live = Live.begin(if (jpeg != null) "IA: lendo uma tela" else "IA: pensando")
+        try { return askInner(ctx, prompt, jpeg, budgetMs) } finally { Live.end(live) }
+    }
+    private suspend fun askInner(ctx: Context, prompt: String, jpeg: ByteArray?, budgetMs: Long): Reply {
         val deadline = System.currentTimeMillis() + budgetMs
         val order = providerOrder(ctx, jpeg != null)
         if (order.isEmpty()) return Reply(false, null, "Nenhuma chave de IA configurada. Abra Ajustes › Inteligência artificial e cole uma chave gratuita.")

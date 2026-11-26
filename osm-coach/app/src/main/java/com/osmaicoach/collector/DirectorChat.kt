@@ -63,8 +63,8 @@ internal fun DirectorChatView(
         FlowRow(Modifier.padding(top = 8.dp)) {
             for (c in chips) {
                 Box(
-                    Modifier.padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF0A1830))
-                        .border(1.dp, Color(0x552AB4FF), RoundedCornerShape(16.dp)).clickable(enabled = !busy) { onChip(c) }.padding(horizontal = 12.dp, vertical = 7.dp)
+                    Modifier.padding(end = 6.dp, bottom = 6.dp).clip(RoundedCornerShape(16.dp)).background(C.SURFACE)
+                        .border(1.dp, C.BORDER, RoundedCornerShape(16.dp)).clickable(enabled = !busy) { onChip(c) }.padding(horizontal = 12.dp, vertical = 7.dp)
                 ) { Text(c, fontSize = 13.sp, color = C.PRIMARY, fontWeight = FontWeight.SemiBold) }
             }
         }

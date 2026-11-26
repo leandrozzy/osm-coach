@@ -41,7 +41,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,7 +58,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -120,6 +118,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.io.File
+import java.util.Calendar
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import java.text.SimpleDateFormat
@@ -137,6 +136,22 @@ internal fun durShort(ms: Long): String {
     return if (min < 60) "${min} min" else "${min / 60} h ${min % 60} min"
 }
 
+/** Eventos da Agenda que o usuário dispensou ("não vale mais"): plano global `agendaskip` (chave slot|título|hora). */
+internal object AgendaSkip {
+    suspend fun load(ctx: Context): Set<String> = runCatching {
+        val a = org.json.JSONArray(Repo(ctx).dao.plan(0, "agendaskip")?.json ?: "[]")
+        (0 until a.length()).map { a.optString(it) }.toSet()
+    }.getOrDefault(emptySet())
+
+    suspend fun add(ctx: Context, keys: Collection<String>) {
+        val repo = Repo(ctx)
+        val cur = load(ctx).toMutableSet(); cur.addAll(keys)
+        val arr = org.json.JSONArray(); cur.toList().takeLast(400).forEach { arr.put(it) }
+        repo.dao.putPlan(PlanEntity(0, "agendaskip", arr.toString(), System.currentTimeMillis()))
+        UiBus.bump()
+    }
+}
+
 /** Linha do tempo de tudo o que tem hora: jogos, fim de treino e obra do estádio, de todos os slots, por dia. */
 @Composable
 internal fun AgendaTab() {
@@ -144,27 +159,29 @@ internal fun AgendaTab() {
     val tick = rememberTick(1000L)
     val data = rememberLoaded(TodayCache.last, tick / 5, UiBus.version) { loadToday(ctx) }
     val now = System.currentTimeMillis()
-    class Ev(val at: Long, val icon: String, val title: String, val sub: String, val slot: Int, val col: Color, val todo: String, val path: String)
+    val skip = rememberLoaded(emptySet<String>(), tick / 5, UiBus.version) { AgendaSkip.load(ctx) }
+    val scope = rememberCoroutineScope()
+    class Ev(val at: Long, val icon: String, val title: String, val sub: String, val slot: Int, val col: Color, val todo: String, val path: String, val kind: Int = 0, val club: String? = null, val rival: String? = null, val home: Boolean? = null, val human: String? = null)
     val evs = ArrayList<Ev>()
     val H = 3600000L
     for (s in data.slots) {
         val at = s.nextAt ?: continue
         // jogo: fica pendente (sem limite de tempo) até o app LER o Resultado e a próxima rodada assumir
         if (!s.ended && s.state == null && true) evs.add(Ev(at, "⚽", "Jogo" + (s.rival?.let { " vs $it" } ?: ""), s.title + (s.human?.let { if (it == "Sim") " • rival humano" else " • rival CPU" } ?: ""), s.slot, C.PRIMARY,
-            "O jogo já começou: abra o Resultado para o app aprender com ele.", "S${s.slot}: Central → card do slot → Resultado do jogo (role a tela inteira)"))
+            "O jogo já começou: abra o Resultado para o app aprender com ele.", "S${s.slot}: Central → card do slot → Resultado do jogo (role a tela inteira)", 0, s.title, s.rival, s.home, s.human))
     }
     for (w in data.work) {
         // treino/obra: ficam pendentes (sem limite de tempo) até você passar pela tela e o app registrar a troca (o horário muda)
         for (seat in w.seats) seat.endAt?.let {
             evs.add(Ev(it, "🏋", "Treino ${Timers.roleLabel(seat.role)} termina", seat.name ?: "treinador ocupado", w.slot, C.OK,
-                "Terminou: colete o treino e ponha o próximo jogador (treinador parado é evolução perdida).", "S${w.slot}: Menu ☰ → Treino (${Timers.roleLabel(seat.role)})"))
+                "Terminou: colete o treino e ponha o próximo jogador (treinador parado é evolução perdida).", "S${w.slot}: Menu ☰ → Treino (${Timers.roleLabel(seat.role)})", 1))
         }
         for (c in w.cards) c.endAt?.let {
             evs.add(Ev(it, "🏟", "Obra do estádio termina: ${c.label}", "nível ${c.level ?: "?"}", w.slot, C.GOLD,
-                "A obra terminou: colete e comece a próxima melhoria.", "S${w.slot}: Menu ☰ → Estádio (${c.label})"))
+                "A obra terminou: colete e comece a próxima melhoria.", "S${w.slot}: Menu ☰ → Estádio (${c.label})", 2))
         }
     }
-    val sorted = evs.sortedBy { it.at }
+    val sorted = evs.filter { "${it.slot}|${it.title}|${it.at}" !in skip }.sortedBy { it.at }
     val overdue = sorted.filter { it.at < now }
     val upcoming = sorted.filter { it.at >= now }
     val dayFmt = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
@@ -176,52 +193,110 @@ internal fun AgendaTab() {
         if (!openOsm(ctx)) android.widget.Toast.makeText(ctx, "Instale/abra o OSM. " + e.path, android.widget.Toast.LENGTH_LONG).show()
         else android.widget.Toast.makeText(ctx, e.path, android.widget.Toast.LENGTH_LONG).show()
     }
+    var filter by rememberSaveable { mutableIntStateOf(0) }
+    var pickedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    fun kindColor(k: Int) = when (k) { 0 -> C.PRIMARY; 1 -> C.INFO; else -> C.GOLD }
+    fun pass(e: Ev) = filter == 0 || (filter == 1 && e.kind == 0) || (filter == 2 && e.kind == 1) || (filter == 3 && e.kind == 2)
     @Composable
-    fun EventRow(e: Ev, late: Boolean) {
-        Column(
-            Modifier.fillMaxWidth().padding(vertical = 4.dp).osmPanel().then(if (late) Modifier.border(1.5.dp, C.WARN, RoundedCornerShape(18.dp)) else Modifier)
-                .clickable { open(e) }.padding(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.width(60.dp)) {
-                    Text(hourFmt.format(Date(e.at)), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = if (late) C.WARN else e.col)
-                    Text(if (late) "há ${durShort(now - e.at)}" else countdownShort(e.at), fontSize = 12.sp, color = if (late) C.WARN else C.MUTED, maxLines = 1)
+    fun EventCard(e: Ev, late: Boolean) {
+        val shape = RoundedCornerShape(DS.RADIUS_CARD)
+        val edge = if (late) C.WARN else if (e.kind == 0) C.PRIMARY.copy(alpha = 0.45f) else C.BORDER
+        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(if (late) C.WARN.copy(alpha = 0.08f) else DS.SURFACE).border(1.dp, edge, shape).clickable { open(e) }.padding(14.dp)) {
+            if (e.kind == 0) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DsChip("S${e.slot}", C.GOLD)
+                    Spacer(Modifier.width(6.dp))
+                    DsChip("Jogo", C.PRIMARY)
+                    Spacer(Modifier.weight(1f))
+                    e.home?.let { DsChip(if (it) "casa" else "fora") }
                 }
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(e.col.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) { Text(e.icon, fontSize = 19.sp) }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(e.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(e.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val mineLeft = e.home != false
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val mine: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { Crest(e.slot, 46.dp, e.club); Text(e.club ?: "Seu time", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) } }
+                    val riv: @Composable (Modifier) -> Unit = { m -> Column(m, horizontalAlignment = Alignment.CenterHorizontally) { RivalShield(e.rival, 46.dp, e.slot); Text(e.rival ?: "rival não lido", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp), color = if (e.rival != null) C.TEXT else C.WARN) } }
+                    if (mineLeft) mine(Modifier.weight(1f)) else riv(Modifier.weight(1f))
+                    Text("×", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = C.MUTED, modifier = Modifier.padding(horizontal = 6.dp))
+                    if (mineLeft) riv(Modifier.weight(1f)) else mine(Modifier.weight(1f))
                 }
-                Text("S${e.slot}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = C.GOLD)
+                e.human?.let { Text(if (it == "Sim") "👤 rival humano" else "🖥 rival CPU", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp)) }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DsTile(e.icon, e.col)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(e.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(e.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    DsChip("S${e.slot}", C.GOLD)
+                }
             }
             if (late) {
-                Text("👉 ${e.todo}", fontSize = 13.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
-                Text("Toque para abrir o OSM • ${e.path.substringAfter(": ")}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+                // compacto, como no protótipo: quanto tempo passou + caminho no OSM, e Dispensar na mesma linha
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("há ${durShort(now - e.at)} · ${e.path.substringAfter(": ")}", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.weight(1f), maxLines = 2)
+                    TextButton(onClick = { scope.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { AgendaSkip.add(ctx, listOf("${e.slot}|${e.title}|${e.at}")) } } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Dispensar", fontSize = 13.sp, color = C.MUTED) }
+                }
             }
         }
     }
+    @Composable
+    fun TimeRow(e: Ev, late: Boolean) {
+        Row(Modifier.fillMaxWidth()) {
+            Column(Modifier.width(60.dp).padding(top = 18.dp)) {
+                Text(hourFmt.format(Date(e.at)), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = if (late) C.WARN else kindColor(e.kind))
+                Text(if (late) "há ${durShort(now - e.at)}" else countdownShort(e.at), fontSize = 12.sp, color = if (late) C.WARN else C.MUTED, maxLines = 1)
+            }
+            Box(Modifier.padding(top = 22.dp, end = 8.dp).size(10.dp).clip(RoundedCornerShape(50)).background(if (late) C.WARN else kindColor(e.kind)))
+            Box(Modifier.weight(1f)) { EventCard(e, late) }
+        }
+    }
+    // faixa dos próximos 7 dias, com um ponto por evento (cor do tipo) e âmbar para o que passou do horário (hoje)
+    val dayCells = (0..6).map { i ->
+        val c = Calendar.getInstance().apply { timeInMillis = now + i * 86400000L }
+        val k = dayKey(c.timeInMillis)
+        val dots = ArrayList<Color>()
+        if (i == 0 && overdue.isNotEmpty()) dots.add(C.WARN)
+        for (e in upcoming) if (dayKey(e.at) == k) dots.add(kindColor(e.kind))
+        DayCell(k, ptDow(c).uppercase(), c.get(Calendar.DAY_OF_MONTH), dots)
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 96.dp)) {
-        PageTitle("📅", "Agenda", "${sorted.size} eventos")
-        Text("Tudo o que tem hora nos seus 4 slots. Toque num evento para abrir o OSM com o caminho. O que passou do horário continua no topo, como pendente, até o app ler a tela correspondente no OSM (Resultado, Treino, Estádio).", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 4.dp))
+        HeroHeader("📅", "Agenda", "Jogos, treinos e obras por dia", "${sorted.size} eventos")
+        DayStrip(dayCells, pickedDay) { pickedDay = it }
+        DsFilters(listOf("Tudo", "Jogos", "Treinos", "Obras"), filter) { filter = it }
+        Text("Toque num evento para abrir o OSM com o caminho. O que passou do horário fica no topo, como pendente, até o app ler a tela correspondente (Resultado, Treino, Estádio).", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 6.dp))
+        val ov = overdue.filter { pass(it) }
+        val up = upcoming.filter { pass(it) && (pickedDay == null || dayKey(it.at) == pickedDay) }
         if (sorted.isEmpty()) {
             EmptyState("📅", "Nada agendado ainda", "Passe pelo Calendário, pelo Treinamento e pelo Estádio no OSM com a captura ligada: jogos, fim de treino e de obra aparecem aqui.")
         }
-        if (overdue.isNotEmpty()) {
-            Title("⏰ Passou do horário — faça agora (${overdue.size})")
-            for (e in overdue) EventRow(e, true)
+        if (ov.isNotEmpty() && pickedDay == null) {
+            val shape = RoundedCornerShape(DS.RADIUS_CARD + 4.dp)
+            Column(Modifier.fillMaxWidth().padding(top = 4.dp).clip(shape).background(C.WARN.copy(alpha = 0.08f)).border(1.dp, C.WARN.copy(alpha = 0.6f), shape).padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DsTile("⏰", C.WARN, 44.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("${ov.size} passaram do horário", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("Faça agora: o app só registra quando você abre a tela", fontSize = 12.5.sp, color = C.MUTED)
+                    }
+                }
+                for (e in ov) EventCard(e, true)
+                val bySlot = ov.groupBy { it.slot }
+                for ((sl, l) in bySlot) if (l.size >= 2) TextButton(onClick = { scope.launch { withContext(kotlinx.coroutines.Dispatchers.IO) { AgendaSkip.add(ctx, l.map { "${it.slot}|${it.title}|${it.at}" }) } } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("✕ Dispensar os ${l.size} pendentes do S$sl", fontSize = 13.sp, color = C.MUTED) }
+            }
+            NowLine(hourFmt.format(Date(now)))
         }
         var lastDay = ""
-        for (e in upcoming) {
+        for (e in up) {
             val dk = dayKey(e.at)
             if (dk != lastDay) {
                 lastDay = dk
                 val today = dayKey(now); val tomorrow = dayKey(now + 86400000L)
                 val label = when (dk) { today -> "Hoje"; tomorrow -> "Amanhã"; else -> dayFmt.format(Date(e.at)).replaceFirstChar { it.uppercase() } }
-                Title(label)
+                DsSection(label)
             }
-            EventRow(e, false)
+            TimeRow(e, false)
         }
+        if (pickedDay != null && up.isEmpty()) Text("Nada neste dia. Toque de novo no dia para ver tudo.", fontSize = 13.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 12.dp))
     }
 }
-

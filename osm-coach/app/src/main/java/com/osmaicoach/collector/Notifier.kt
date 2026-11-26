@@ -24,6 +24,8 @@ object Route {
     var slot by mutableIntStateOf(0)
     var tab by mutableIntStateOf(0)
     var nonce by mutableIntStateOf(0)
+    /** Aba principal pedida (ex.: 1 = Agenda, pelo widget); -1 = nenhuma. */
+    var main by mutableIntStateOf(-1)
 }
 
 /** O horário do jogo vem do card do calendário ("22:18"), que é o horário real da partida. */

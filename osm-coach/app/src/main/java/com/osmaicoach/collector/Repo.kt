@@ -15,6 +15,9 @@ object ResultCtx {
 private val LEARN_SEEN = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
 class Repo(private val ctx: Context) {
+    /** Ajuste simples do app (SharedPreferences "settings"). */
+    fun setting(key: String, def: String): String = Settings.get(ctx, key, def)
+
     /** Nome real do clube na web (ver ClubNames); sem acerto, o nome do jogo. */
     fun realClub(game: String?): String? = ClubNames.real(ctx.filesDir, game)
 
@@ -176,6 +179,8 @@ class Repo(private val ctx: Context) {
         if (ex.type == ScreenType.MISSIONS) return applyExtra(0, ex, now)
         if (slot == null) return 0
         val n = applyTyped(slot, ex, source, now)
+        // Base Mundial: registra as observações lidas (só grava; falha ou lentidão nunca afetam o OCR/slots)
+        runCatching { WorldOcr.submit(ctx, slot, ex, now) }
         // registra que a tela foi lida (base do "telas para atualizar"): só se trouxe conteúdo de verdade
         val meaningful = when (ex.type) {
             // tela reconhecida pelo classificador = você passou por ela (mesmo sem treinador/obra/listagem para ler)
@@ -414,7 +419,7 @@ class Repo(private val ctx: Context) {
         dao.deleteRivalPlayers(slot)
         if (clearClub) {
             for (k in listOf("injured", "suspended", "cards", "cm", "nations", "natreps", "leagueflag", "valuebase", "spec", "sponsor", "todolist", "formread",
-                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "squadmissat", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso2", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
+                "rivalsnap", "autogen", "tacticdone", "tacmounted", "prep", "reds", "noappeal", "unavail", "squadseen", "squadreads", "squadgone", "squadblock", "squadmissat", "watch", "lesson", "lessontry", "phist", "weekly", "ledger", "evoteam", "squadbase", "treating", "lineup", "natrich", "natiso4", "whyalt", "reanalysis")) dao.deletePlan(slot, k)
         }
         learn(slot, "temporada", "Competição nova detectada ($reason): a anterior foi arquivada" + (if (clearClub) " e o elenco/dados do clube antigo saíram" else "") + "; o aprendizado das táticas continua.", now)
         Diag.log("S$slot: competição nova detectada ($reason)")
@@ -1097,7 +1102,9 @@ class Repo(private val ctx: Context) {
             }
             ScreenType.MISSIONS -> {
                 val up = LinkedHashMap<String, Pair<Long, String>?>()
-                if (x.has("newIn")) up["mission_new"] = Pair(now + x.optLong("newIn") * 1000L, "missões: novas")
+                // sem o "Novas missões dentro de" na tela (todas liberadas), o aviso de renovação antigo não vale mais: some o cronômetro vencido
+                // (antes ele ficava para sempre e "Atualizar: Missões" não saía do Hoje mesmo passando pela tela)
+                if (x.has("newIn")) up["mission_new"] = Pair(now + x.optLong("newIn") * 1000L, "missões: novas") else up["mission_new"] = null
                 if (x.has("weekIn")) up["mission_week"] = Pair(now + x.optLong("weekIn") * 1000L, "missões: semana")
                 if (up.isEmpty()) return 0
                 updateTimers(0, up, now)
@@ -1147,10 +1154,18 @@ class Repo(private val ctx: Context) {
             if (r > old) dao.putPlan(PlanEntity(slot, "ceiling", org.json.JSONObject().put("r", r).put("at", now).toString(), now))
         }
         // tabelas da liga inteira (Classificação / Valor do plantel): guarda para comparar o elenco e calibrar a tática
-        League.read(ocr)?.let { (kind, rows) ->
+        League.read(ocr, fieldMap(slot)[K.TEAM]?.value)?.let { (kind, rows) ->
             val old = dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
-            dao.putPlan(PlanEntity(slot, "league", League.merge(old, kind, rows, now).toString(), now))
+            val merged = League.merge(old, kind, rows, now)
+            dao.putPlan(PlanEntity(slot, "league", merged.toString(), now))
+            // bolha: "Capturado" só quando a tabela inteira fechou (posições 1..N seguidas e as contas batendo); antes disso segue "Lendo"
+            if (kind == "st") runCatching {
+                val v = Standings.build(League.table(merged, "st"), now, fieldMap(slot)[K.TEAM]?.value, null, false)
+                Diag.setRead(if (v != null && v.complete) 2 else 1, "OTHER_OSM")
+            }
+            if (kind == "st") runCatching { CrestAdmin.rememberTrusted(ctx, rows.map { it.club }) }   // grafia limpa dos clubes: o nome dos escudos passa a ser este
         }
+        runCatching { ResultsIngest.onScreen(this, slot, type, ocr, now) }
         val deals = Sponsors.parse(ocr)
         if (deals.size >= 2) {
             dao.putPlan(PlanEntity(slot, "sponsor", Sponsors.toJson(deals, now), now))
@@ -1738,7 +1753,18 @@ class Repo(private val ctx: Context) {
         }
         mergeRatings("rh", rep.ratingsHome)
         mergeRatings("ra", rep.ratingsAway)
-        val evs = j.optJSONArray("events") ?: org.json.JSONArray()
+        var evs = j.optJSONArray("events") ?: org.json.JSONArray()
+        // gol com autor lido no mesmo minuto/lado substitui o "lance (gol sem assistência ou cartão)" e o "gol (autor não lido)" gravados antes
+        val goalAt = rep.events.mapNotNull { Regex("^(\\S+)' \\((casa|visitante)\\) gol de ").find(it)?.let { m -> m.groupValues[1] + "' (" + m.groupValues[2] + ") " } }.toSet()
+        if (goalAt.isNotEmpty()) {
+            val kept = org.json.JSONArray()
+            for (i in 0 until evs.length()) {
+                val e = evs.optString(i)
+                val stale = goalAt.any { pre -> e.startsWith(pre + "gol (autor não lido)") || (e.startsWith(pre + "lance de ") && e.contains("(gol sem assistência ou cartão)")) }
+                if (!stale) kept.put(e) else changed++
+            }
+            evs = kept
+        }
         val seen = HashSet<String>()
         for (i in 0 until evs.length()) seen.add(Txt.key(evs.optString(i)))
         // o OCR lê o mesmo lance com grafias diferentes ("MCNeil"/"McNeil"): compara sem caixa/acento, senão o gol vira dois
@@ -1817,27 +1843,22 @@ class Repo(private val ctx: Context) {
             val home = mineHome == mineSide
             return if (home) pr.first else pr.second
         }
-        // o que foi JOGADO de verdade: a tática montada no OSM (tela de Tática, mesma rodada) e a formação que o Resultado mostra.
-        // Sem isso, derrota com tática trocada à mão era atribuída à tática do app (e o aprendizado ficava errado).
+        // o que foi JOGADO de verdade (item 1, 24/11): leituras da tela de Tática desta PARTIDA (slot + competição + rodada + rival), a formação do Resultado
+        // e confirmações manuais. Campo não confirmado fica desconhecido (nunca é completado com a sugestão).
         runCatching {
-            if (!t.has("genFormation")) {
-                val gen = t.optString("formation")
-                val m = dao.plan(slot, "tacmounted")?.json?.let { org.json.JSONObject(it) }?.takeIf { it.optInt("round", -2) == round }
+            val legacy = !t.has("usage") && (t.has("deviated") || PlayedTactic.FIELDS.any { t.has("gen" + it.replaceFirstChar { c -> c.uppercase() }) })
+            if (!legacy) {
+                val played = PlayedTactic.forLog(this, slot, round, t.optString("rival").ifBlank { oppName })
                 val resultForm = side("formacao", true)?.let { Formations.canonical(it) }
-                val usedForm = resultForm ?: m?.optString("formation")?.takeIf { it.isNotBlank() }?.let { Formations.canonical(it) }
-                var deviated = usedForm != null && Formations.canonical(gen) != usedForm
-                if (m != null) {
-                    val ps = m.optString("playStyle").takeIf { it.isNotBlank() }
-                    if (ps != null && Osm.style(ps) != Osm.style(t.optString("playStyle"))) { t.put("genPlayStyle", t.optString("playStyle")); t.put("playStyle", ps); deviated = true }
-                    val tk = m.optString("tackle").takeIf { it.isNotBlank() }
-                    if (tk != null && Osm.tackle(tk) != Osm.tackle(t.optString("tackle"))) { t.put("genTackle", t.optString("tackle")); t.put("tackle", tk); deviated = true }
-                    val mk = m.optString("marking").takeIf { it.isNotBlank() }
-                    if (mk != null && Osm.marking(mk) != Osm.marking(t.optString("marking"))) { t.put("genMarking", t.optString("marking")); t.put("marking", mk); deviated = true }
-                }
-                if (usedForm != null && Formations.canonical(gen) != usedForm) { t.put("genFormation", gen); t.put("formation", usedForm) }
-                if (deviated) {
-                    t.put("deviated", true)
-                    learn(slot, "resultado", "Na J$round você jogou ${t.optString("formation")} • ${t.optString("playStyle")} (a do app era $gen): o aprendizado usa o que foi jogado.", now)
+                val extra = HashMap<String, String>()
+                resultForm?.let { extra["formation"] = it }
+                val v = PlayedTactic.applyToLog(t, played, extra)
+                if (v.usage == PlayedTactic.ALTEROU && !t.optBoolean("usageLogged", false)) {
+                    t.put("usageLogged", true)
+                    learn(slot, "resultado", "Na J$round: ${v.text()}. O aprendizado usa o que foi jogado.", now)
+                } else if (v.usage == PlayedTactic.NAO && !t.optBoolean("usageLogged", false)) {
+                    t.put("usageLogged", true)
+                    learn(slot, "resultado", "Na J$round a tática jogada não foi confirmada (${v.unknown.size} campo(s) sem leitura): o resultado não é atribuído à sugerida.", now)
                 }
             }
         }

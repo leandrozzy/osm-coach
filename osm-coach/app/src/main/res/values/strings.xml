@@ -3,4 +3,5 @@
     <string name="app_name">OSM AI Coach</string>
     <string name="service_label">OSM AI Coach — leitura automática</string>
     <string name="service_description">Observa o OSM enquanto você joga e tira capturas de tela somente quando o jogo está em primeiro plano. Não toca, não clica e não executa ações no jogo.</string>
+    <string name="widget_description">Os 4 slots: clube, próximo jogo e status, com os dados já lidos pelo OSM AI Coach.</string>
 </resources>

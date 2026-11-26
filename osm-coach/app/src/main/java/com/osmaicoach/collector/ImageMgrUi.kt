@@ -31,7 +31,7 @@ internal fun ImageManagerFold() {
     var shown by remember { mutableStateOf(25) }
     var pickFor by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<Triple<String, String, suspend () -> String>?>(null) }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val k = pickFor; pickFor = null
         if (uri != null && k != null) {
             android.widget.Toast.makeText(ctx, "Processando a foto…", android.widget.Toast.LENGTH_SHORT).show()
@@ -71,7 +71,7 @@ internal fun ImageManagerFold() {
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = { pickFor = it.key; pick.launch("image/*") }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("📷 Trocar", fontSize = 12.sp) }
+                OutlinedButton(onClick = { pickFor = it.key; pick.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("📷 Trocar", fontSize = 12.sp) }
                 OutlinedButton(onClick = { AppScope.scope.launch(Dispatchers.IO) { PhotoWeb.retryPhoto(ctx, it.key); PhotoWeb.run(ctx, force = true) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("🔁 Buscar de novo", fontSize = 12.sp) }
                 if (it.source in listOf("manual", "wiki", "api"))
                     OutlinedButton(onClick = { AppScope.scope.launch(Dispatchers.IO) { PhotoWeb.removePhoto(ctx, it.key) } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)) { Text("🗑 Remover", fontSize = 12.sp) }
@@ -115,6 +115,98 @@ internal fun ImageManagerFold() {
                 }) { Text("Confirmar") }
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancelar") } }
+        )
+    }
+}
+
+
+/** Ajustes → Imagens → "Escudos dos clubes": excluir escudo errado/inventado (e bloquear o nome) e adicionar/trocar à mão, como nas fotos dos jogadores. */
+@Composable
+internal fun CrestManagerFold() {
+    val ctx = LocalContext.current.applicationContext
+    val tick = rememberTick(4000L)
+    val entries = rememberLoaded(emptyList<CrestAdmin.Entry>(), tick, UiBus.version) { CrestAdmin.entries(ctx.filesDir, CrestAdmin.knownNames(Repo(ctx), ctx), CrestAdmin.trustedNames(Repo(ctx))) }
+    var filter by remember { mutableStateOf("all") }
+    var q by remember { mutableStateOf("") }
+    var shown by remember { mutableStateOf(25) }
+    var pickFor by remember { mutableStateOf<String?>(null) }
+    var delete by remember { mutableStateOf<CrestAdmin.Entry?>(null) }
+    var adding by remember { mutableStateOf(false) }
+    var cleanup by remember { mutableStateOf(false) }
+    var newName by remember { mutableStateOf("") }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val name = pickFor; pickFor = null
+        if (uri != null && name != null) {
+            AppScope.scope.launch(Dispatchers.IO) {
+                val bmp = PhotoWeb.decodeUri(ctx, uri)
+                val ok = bmp != null && CrestAdmin.setManual(ctx, name, bmp)
+                withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, if (ok) "Escudo de $name salvo." else "Não consegui ler essa imagem.", android.widget.Toast.LENGTH_SHORT).show() }
+            }
+        }
+    }
+    val count = { s: String -> entries.count { it.source == s } }
+    // excluídos são erros de leitura (ex.: "25 anniversary"): ficam fora da contagem, só aparecem no filtro "Excluídos"
+    Fold("🛡", "Escudos dos clubes", "${entries.count { it.source in listOf("manual", "web", "recorte") }} de ${entries.count { it.source != "bloqueado" }}") {
+        Text("Escudo errado ou clube inventado pela leitura (ex.: \"25 anniversary\")? Exclua: o nome fica bloqueado e o app não recria. Para um clube sem escudo ou com escudo errado, escolha a imagem à mão.", fontSize = 13.sp, color = C.MUTED)
+        Panel {
+            KV("✋ Manuais", "${count("manual")}")
+            KV("🌐 Da web", "${count("web")}")
+            KV("✂ Recorte do jogo", "${count("recorte")}")
+            KV("▫ Sem escudo", "${count("nenhum")}")
+            KV("⛔ Excluídos (bloqueados)", "${count("bloqueado")}")
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((id, label) in listOf("all" to "Todos", "nenhum" to "Sem escudo", "manual" to "Manual", "web" to "Web", "recorte" to "Recorte", "bloqueado" to "Excluídos"))
+                FilterPill(label, filter == id) { filter = id; shown = 25 }
+        }
+        OutlinedTextField(q, { q = it; shown = 25 }, singleLine = true, label = { Text("Buscar clube") }, modifier = Modifier.fillMaxWidth())
+        Button(onClick = { adding = true; newName = "" }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("＋ Adicionar escudo de um clube", fontWeight = FontWeight.ExtraBold) }
+        val dups = entries.sumOf { it.variants.size }
+        if (dups > 0) OutlinedButton(onClick = { cleanup = true }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("🧹 Limpar $dups leitura(s) duplicada(s) do mesmo clube") }
+        val list = entries.filter { (filter == "all" || it.source == filter) && (q.isBlank() || Txt.norm(it.name).contains(Txt.norm(q))) }
+        Text("${list.size} clube(s)", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+        for (e in list.take(shown)) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (e.source == "bloqueado") Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Text("⛔", fontSize = 24.sp) } else RivalShield(e.name, 44.dp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(e.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(when (e.source) { "manual" -> "✋ escolhido à mão"; "web" -> "🌐 da web"; "recorte" -> "✂ recorte do jogo"; "bloqueado" -> "⛔ excluído (não será recriado)"; else -> "▫ sem escudo" } + (if (e.variants.isNotEmpty()) " • +${e.variants.size} leitura(s) igual(is)" else ""), fontSize = 12.sp, color = C.MUTED)
+                }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { pickFor = e.name; pick.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(if (e.source == "nenhum" || e.source == "bloqueado") "📷 Adicionar" else "📷 Trocar", fontSize = 12.sp) }
+                if (e.source == "bloqueado") OutlinedButton(onClick = { CrestAdmin.unblock(ctx, e.name) }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("↩ Desbloquear", fontSize = 12.sp) }
+                else OutlinedButton(onClick = { delete = e }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = C.BAD)) { Text("🗑 Excluir", fontSize = 12.sp) }
+            }
+        }
+        if (list.size > shown) GhostButton("Mostrar mais (${list.size - shown})") { shown += 25 }
+    }
+    if (cleanup) {
+        AlertDialog(
+            onDismissRequest = { cleanup = false },
+            title = { Text("Limpar leituras duplicadas?") },
+            text = { Text("Cada clube fica só com o nome mostrado na lista (o da Classificação, ou o que já tem escudo). As outras grafias (erro de leitura, como Wien II lido de dois jeitos) são excluídas e bloqueadas.") },
+            confirmButton = { TextButton(onClick = { cleanup = false; AppScope.scope.launch(Dispatchers.IO) { val n = CrestAdmin.removeDuplicates(ctx, entries); withContext(Dispatchers.Main) { android.widget.Toast.makeText(ctx, "$n leitura(s) removida(s).", android.widget.Toast.LENGTH_LONG).show() } } }) { Text("Limpar") } },
+            dismissButton = { TextButton(onClick = { cleanup = false }) { Text("Cancelar") } }
+        )
+    }
+    delete?.let { e ->
+        AlertDialog(
+            onDismissRequest = { delete = null },
+            title = { Text("Excluir o escudo de ${e.name}?") },
+            text = { Text("O escudo é apagado e o nome fica bloqueado: o app não busca nem recorta escudo para ele de novo. Dá para desbloquear ou adicionar à mão depois, na lista de Excluídos.") },
+            confirmButton = { TextButton(onClick = { delete = null; AppScope.scope.launch(Dispatchers.IO) { CrestAdmin.delete(ctx, e.name); e.variants.forEach { CrestAdmin.delete(ctx, it) } } }) { Text("Excluir") } },
+            dismissButton = { TextButton(onClick = { delete = null }) { Text("Cancelar") } }
+        )
+    }
+    if (adding) {
+        AlertDialog(
+            onDismissRequest = { adding = false },
+            title = { Text("Adicionar escudo") },
+            text = { OutlinedTextField(newName, { newName = it }, singleLine = true, label = { Text("Nome do clube (como aparece no jogo)") }, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = { TextButton(enabled = Txt.key(newName).length >= 3, onClick = { adding = false; pickFor = newName.trim(); pick.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }) { Text("Escolher imagem") } },
+            dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancelar") } }
         )
     }
 }

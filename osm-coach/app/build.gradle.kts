@@ -71,4 +71,5 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.0")   // testa o esquema/consultas da Base Mundial com SQLite de verdade (só nos testes)
 }
