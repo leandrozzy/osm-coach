@@ -100,6 +100,10 @@ object WorldOsm {
             }
             Live.on("osm", "Base: lendo o que o OSM mostrou")
             migrateLeague(sql)
+            // regra de identificação nova: reavalia tudo (menos o que você confirmou à mão) e esquece os "não achei" do cadastro para buscar de novo
+            if (Settings.get(ctx, "world_algo", "") != WorldIdentity.ALGO) {
+                sql.exec("UPDATE football_ocr_observations SET status='novo'", emptyArray()); sql.exec("DELETE FROM football_pull_log WHERE found=0", emptyArray()); Settings.put(ctx, "world_algo", WorldIdentity.ALGO)
+            }
             val obs = backfill(ctx)
             Live.on("osm", "Base: identificando nomes lidos")
             var resolved = 0

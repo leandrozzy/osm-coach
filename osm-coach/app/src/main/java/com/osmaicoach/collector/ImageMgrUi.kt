@@ -125,7 +125,7 @@ internal fun ImageManagerFold() {
 internal fun CrestManagerFold() {
     val ctx = LocalContext.current.applicationContext
     val tick = rememberTick(4000L)
-    val entries = rememberLoaded(emptyList<CrestAdmin.Entry>(), tick, UiBus.version) { CrestAdmin.entries(ctx.filesDir, CrestAdmin.knownNames(Repo(ctx)), CrestAdmin.trustedNames(Repo(ctx))) }
+    val entries = rememberLoaded(emptyList<CrestAdmin.Entry>(), tick, UiBus.version) { CrestAdmin.entries(ctx.filesDir, CrestAdmin.knownNames(Repo(ctx), ctx), CrestAdmin.trustedNames(Repo(ctx))) }
     var filter by remember { mutableStateOf("all") }
     var q by remember { mutableStateOf("") }
     var shown by remember { mutableStateOf(25) }

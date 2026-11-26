@@ -6,7 +6,7 @@ package com.osmaicoach.collector
  * margem sobre o 2º candidato e nenhuma contradição relevante. Nunca une homônimos, equipe B/principal ou clubes de países diferentes.
  */
 object WorldIdentity {
-    const val ALGO = "id-v1"
+    const val ALGO = "id-v3"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
     class Config(val veryHigh: Int = 98, val probable: Int = 90, val ambiguous: Int = 75, val margin: Int = 6, val minSignals: Int = 2)
     val DEFAULT = Config()
 
@@ -70,6 +70,7 @@ object WorldIdentity {
     class PlayerObs(val name: String, val ageNow: Int? = null, val year: Int = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR), val nationality: String? = null, val position: String? = null, val independent: Int = 1)
 
     private val POS = mapOf("gk" to "G", "gol" to "G", "goalkeeper" to "G", "goleiro" to "G", "gl" to "G", "def" to "D", "defender" to "D", "df" to "D", "de" to "D", "dc" to "D", "dd" to "D", "dl" to "D", "mid" to "M", "midfielder" to "M", "mei" to "M", "mc" to "M", "mco" to "M", "mcd" to "M", "mf" to "M", "mo" to "M",
+        "gr" to "G", "zag" to "D", "ld" to "D", "le" to "D", "lb" to "D", "rb" to "D", "cb" to "D", "dm" to "M", "cm" to "M", "am" to "M", "lm" to "M", "rm" to "M", "md" to "M", "me" to "M", "mdc" to "M", "vol" to "M", "lw" to "A", "rw" to "A", "cf" to "A", "st" to "A", "ss" to "A", "sa" to "A", "ac" to "A", "winger" to "A",
         "att" to "A", "attacker" to "A", "forward" to "A", "ata" to "A", "pl" to "A", "ee" to "A", "ed" to "A", "fw" to "A", "striker" to "A")
     fun posGroup(p: String?): String? = p?.let { WorldNorm.fold(it).split(' ').firstNotNullOfOrNull { w -> POS[w] } ?: when { it.contains("keep", true) -> "G"; it.contains("back", true) || it.contains("defen", true) -> "D"; it.contains("mid", true) -> "M"; it.contains("wing", true) || it.contains("forw", true) || it.contains("strik", true) || it.contains("attack", true) -> "A"; else -> null } }
 
@@ -106,6 +107,8 @@ object WorldIdentity {
             }
             val gp = posGroup(o.position); val cp = posGroup(c0.position)
             if (gp != null && cp != null) { if (gp == cp) { sig++; score += 5; why.add("mesma posição") } else { score -= 8; why.add("posição diferente") } }
+            // jogador só com SOBRENOME no jogo ("Dumfries"): sozinho o nome vale pouco, mas idade + nacionalidade + posição batendo JUNTAS é evidência forte
+            if (name < 90 && sig >= 3 && !contra) { score += 13; why.add("sobrenome + idade + nacionalidade + posição batem") }
             Sc(c, score.coerceIn(0, 100), why, sig, contra)
         }.sortedByDescending { it.score }
         val top = scored.firstOrNull() ?: return Result(null, 0, Status.UNRESOLVED, 0, listOf("sem candidatos"))

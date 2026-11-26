@@ -103,3 +103,19 @@ class WorldClubTieBreakTest {
         assertTrue(t.reasons.any { it.contains("sem favorito") })
     }
 }
+
+class WorldSurnameOnlyTest {
+    private val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+    @Test fun surnameWithAgeNationalityAndPositionIsEnoughWhenNoOneElseFits() {
+        val dumfries = WorldIdentity.PlayerC(1, "Denzel Dumfries", "Denzel Dumfries", emptyList(), year - 30, "Netherlands", "defender")
+        val other = WorldIdentity.PlayerC(2, "Rodney Dumfries", null, emptyList(), year - 41, "Suriname", "forward")
+        val r = WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Dumfries", 30, year, "Netherlands", "DD"), listOf(other, dumfries))
+        assertEquals(1L, r.best!!.id); assertEquals(WorldIdentity.Status.CONFIRMED, r.status)
+        // só o sobrenome SEM as três evidências continua não confirmando
+        val weak = WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Dumfries", null, year, null, null), listOf(dumfries))
+        assertNotEquals(WorldIdentity.Status.CONFIRMED, weak.status)
+        // dois jogadores que batem em tudo: continua ambíguo (nunca escolhe por sorte)
+        val twin = WorldIdentity.PlayerC(3, "Dennis Dumfries", null, emptyList(), year - 30, "Netherlands", "defender")
+        assertNotEquals(WorldIdentity.Status.CONFIRMED, WorldIdentity.matchPlayer(WorldIdentity.PlayerObs("Dumfries", 30, year, "Netherlands", "DD"), listOf(dumfries, twin)).status)
+    }
+}

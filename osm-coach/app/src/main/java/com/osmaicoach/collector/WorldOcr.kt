@@ -195,4 +195,13 @@ object WorldOcr {
         val db: WorldSql = AndroidSql(WorldDb.get(ctx).readableDatabase)
         db.q("SELECT c.name FROM football_osm_entity_mappings m JOIN football_clubs c ON c.id=m.entity_id WHERE m.osm_kind='club' AND m.osm_key=? AND m.status IN ('confirmado','muito alta','provável') ORDER BY CASE m.status WHEN 'confirmado' THEN 0 ELSE 1 END, m.score DESC LIMIT 1", WorldNorm.fold(osmName)) { it.getString(0) }.firstOrNull()
     }.getOrNull()
+
+    /** Nome lido como clube que não é clube (apelido de treinador, faixa, OCR quebrado): excluído por você ou sem NENHUM candidato no cadastro (45 mil clubes). Com o Supabase fora, nunca decide. */
+    fun isJunkClub(ctx: Context, name: String): Boolean = runCatching {
+        if (WorldRemote.cfg(ctx) == null) return false
+        val db: WorldSql = AndroidSql(WorldDb.get(ctx).readableDatabase); val k = WorldNorm.fold(name)
+        if ((db.long("SELECT COUNT(*) FROM football_ignored WHERE kind='club' AND norm=?", k) ?: 0L) > 0L) return true
+        val st = db.q("SELECT status FROM football_osm_entity_mappings WHERE osm_kind='club' AND osm_key=?", k) { it.getString(0) }
+        st.isNotEmpty() && st.none { it in setOf("confirmado", "muito alta", "provável", "ambíguo") } && st.any { it == "desconhecido" }
+    }.getOrDefault(false)
 }

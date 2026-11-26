@@ -31,18 +31,22 @@ object Live {
     private val hour = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     /** Tarefa com chave fixa (só uma por vez, ex.: "sync"): atualiza o texto enquanto avança. */
-    fun on(key: String, label: String) { active.compute(key) { _, old -> Ev(label, old?.at ?: System.currentTimeMillis()) }; UiBus.bump() }
+    /** Só a faixa do topo lê isto: NUNCA usar o UiBus aqui (cada requisição de rede ocupava a janela do bump e os avisos de escudo/foto salvos se perdiam). */
+    var version by mutableIntStateOf(0)
+    private fun changed() { version++ }
+
+    fun on(key: String, label: String) { active.compute(key) { _, old -> Ev(label, old?.at ?: System.currentTimeMillis()) }; changed() }
     fun off(key: String, note: String? = null) {
         val e = active.remove(key) ?: return
-        log(e, note); UiBus.bump()
+        log(e, note); changed()
     }
     /** Tarefa curta e possivelmente paralela (uma chamada de rede): registra início/fim sozinha. */
     inline fun <T> run(label: String, block: () -> T): T {
         val k = begin(label)
         try { return block() } finally { end(k) }
     }
-    fun begin(label: String): String { val k = "t" + seq.incrementAndGet(); active[k] = Ev(label, System.currentTimeMillis()); UiBus.bump(); return k }
-    fun end(k: String) { active.remove(k)?.let { log(it, null) }; UiBus.bump() }
+    fun begin(label: String): String { val k = "t" + seq.incrementAndGet(); active[k] = Ev(label, System.currentTimeMillis()); changed(); return k }
+    fun end(k: String) { active.remove(k)?.let { log(it, null) }; changed() }
 
     private fun log(e: Ev, note: String?) = synchronized(recent) {
         val ms = System.currentTimeMillis() - e.at
@@ -57,7 +61,7 @@ object Live {
 @Composable
 internal fun LiveStrip() {
     val tick = rememberTick(1000L); tick.let { }
-    UiBus.version.let { }
+    Live.version.let { }
     val now = Live.labels()
     var open by remember { mutableStateOf(false) }
     if (now.isEmpty() && !open) return

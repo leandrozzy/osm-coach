@@ -272,7 +272,15 @@ object PhotoWeb {
             // 1º quem NUNCA foi tentado (jogador comprado agora vem primeiro); só quando todos foram tentados volta aos sem acerto (um por vez, 7 dias de intervalo)
             val bought = HashSet<String>()
             for (sl in 1..4) Ledger.parse(repo.dao.plan(sl, "ledger")?.json).filter { it.type == "buy" && now - it.at < 3L * 86400000L }.forEach { bought.add(it.key) }
-            val untried = all.filter { needsTry(ctx.filesDir, ix, it.nameKey) }.sortedByDescending { it.nameKey in bought }
+            // "sem acerto/ambíguo" volta a ser tentado quando CHEGA informação nova (país pela bandeira ou identificação no cadastro real): era o que "Buscar de novo" fazia à mão
+            val isoNow = FlagManual.all(repo)
+            suspend fun isoOf(p: PlayerEntity): String = isoNow[p.nameKey] ?: repo.dao.plan(p.slotId, "natiso4")?.json?.let { runCatching { JSONObject(it).optString(p.nameKey) }.getOrNull() }.orEmpty()
+            val retryNew = HashSet<String>()
+            for (p in all) { val e = ix.optJSONObject(p.nameKey) ?: continue; if (e.optString("s") == "ok") continue
+                val hadIso = e.optString("iso"); val hadReal = e.optBoolean("real", false)
+                val nowReal = runCatching { WorldOcr.realPlayer(ctx, p.slotId, p.name) != null }.getOrDefault(false)
+                if ((hadIso.isEmpty() && isoOf(p).isNotEmpty()) || (!hadReal && nowReal)) retryNew.add(p.nameKey) }
+            val untried = all.filter { needsTry(ctx.filesDir, ix, it.nameKey) || it.nameKey in retryNew }.sortedByDescending { it.nameKey in bought }
             val queue = if (untried.isNotEmpty()) untried
             else all.filter { now - (ix.optJSONObject(it.nameKey)?.optLong("at", 0L) ?: 0L) > RETRY_MS }.sortedBy { ix.optJSONObject(it.nameKey)?.optLong("at", 0L) ?: 0L }
             if (queue.isEmpty()) return
@@ -315,6 +323,7 @@ object PhotoWeb {
                         Diag.log("Foto de ${p.name} ← ${pk.cand.name} (${pk.cand.nationality ?: "?"}, ${pk.cand.age ?: "?"})")
                     } else e.put("s", "miss")
                 } else Diag.log("Foto de ${p.name}: ${if (pk.state == "amb") "mais de um candidato, não escolhi" else "sem acerto seguro"} (${cands.size} resultados)")
+                e.put("iso", iso.orEmpty()).put("real", real != null)
                 ix.put(p.nameKey, e); saveIdx(ctx.filesDir, ix)
                 if (done > 0 && done % 3 == 0) UiBus.bump()
                 if (zero) { block(ctx); break }

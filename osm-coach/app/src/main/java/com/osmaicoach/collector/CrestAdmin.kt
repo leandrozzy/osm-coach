@@ -171,7 +171,7 @@ object CrestAdmin {
     }
 
     /** Nomes de clubes já lidos nos 4 slots (adversários do calendário, tabela da Classificação, meu time e rival). */
-    suspend fun knownNames(repo: Repo): List<String> {
+    suspend fun knownNames(repo: Repo, ctx: Context? = null): List<String> {
         val out = LinkedHashSet<String>()
         for (s in 1..4) runCatching {
             repo.dao.matchesOf(s).forEach { m -> Fixtures.opponent(m)?.let { out.add(it) } }
@@ -180,6 +180,8 @@ object CrestAdmin {
             f[K.RIVAL_TEAM]?.value?.takeIf { FieldMerge.known(it) }?.let { out.add(it) }
             League.table(repo.dao.plan(s, "league")?.json?.let { JSONObject(it) }, "st").forEach { out.add(it.club) }
         }
+        // clubes que o OCR viu em QUALQUER tela (topo do calendário, classificação, jogos) e não estavam nas listas acima
+        if (ctx != null) runCatching { WorldDb.get(ctx).query("SELECT DISTINCT raw FROM football_ocr_observations o WHERE kind='club' AND NOT EXISTS(SELECT 1 FROM football_ignored ig WHERE ig.kind='club' AND ig.norm=o.norm) LIMIT 800") { it.getString(0) }.forEach { n -> if (!Fixtures.notAClub(n)) out.add(n) } }
         return out.toList()
     }
 }

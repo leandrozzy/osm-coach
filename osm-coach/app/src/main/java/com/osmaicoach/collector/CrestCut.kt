@@ -197,8 +197,9 @@ object CrestCut {
         val k = Txt.key(team ?: "")
         val dir = File(filesDir, "crests/t5")
         val all = dir.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
-        return all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
-            ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }
+        all.maxByOrNull { score(Txt.key(it.name.removeSuffix(".png")), k) }
+            ?.takeIf { score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.85 }?.let { return it }
+        return all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }       // mesmo clube lido de outro jeito (5V/SV, I/l/|)
     }
 
     /** Parecença de dois nomes de clube: similaridade, ou 0,9 se um é início do outro (nome cortado/quebrado na faixa: "Young Violets" × "Young Violets Austria Wien"). */

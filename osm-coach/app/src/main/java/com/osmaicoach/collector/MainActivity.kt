@@ -338,10 +338,19 @@ object UiBus {
     private var lastBump = 0L
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
-    /** Chamado pela captura depois de gravar algo (campos, escudos, bandeiras): a tela recarrega sozinha, sem botão de atualizar. No máx. 1× a cada 1,2 s. */
-    fun bump() {
+    private var pending = false
+
+    /**
+     * Chamado pela captura depois de gravar algo (campos, escudos, bandeiras): a tela recarrega sozinha, sem botão de atualizar. No máx. 1× a cada 1,2 s,
+     * MAS o último aviso nunca se perde: se chegar dentro da janela, fica agendado para o fim dela (antes era descartado e a tela ficava velha até o usuário mexer).
+     */
+    @Synchronized fun bump() {
         val now = System.currentTimeMillis()
-        if (now - lastBump < 1200L) return
+        val wait = 1200L - (now - lastBump)
+        if (wait > 0) {
+            if (!pending) { pending = true; main.postDelayed({ synchronized(this) { pending = false; lastBump = System.currentTimeMillis() }; version++; SlotWidget.requestRefresh() }, wait) }
+            return
+        }
         lastBump = now
         main.post { version++ }
         SlotWidget.requestRefresh()

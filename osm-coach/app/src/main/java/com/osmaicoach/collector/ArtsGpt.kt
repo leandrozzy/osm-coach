@@ -92,6 +92,20 @@ object ArtsGpt {
         fun pl(p: PlayerEntity?, clubName: String?) = p?.let { "${it.name}" + (it.age?.let { a -> ", $a anos" } ?: "") + (it.strength?.let { x -> ", força $x" } ?: "") + (clubName?.let { c -> " ($c)" } ?: "") }
         val myLine = pl(myStar, team)
         val rivLine = pl(rivStar, rival)
+        // nomes REAIS (cadastro da Base Mundial) dos jogadores, com posição, país e idade: o gerador de imagem precisa do nome certo para o rosto e a camisa
+        suspend fun desc(p: PlayerEntity): String {
+            val real = runCatching { WorldOcr.realPlayer(ctx, slot, p.name) }.getOrNull()
+            val iso = FlagManual.all(repo)[p.nameKey] ?: repo.dao.plan(slot, "natiso4")?.json?.let { runCatching { org.json.JSONObject(it).optString(p.nameKey) }.getOrNull() }?.takeIf { it.isNotBlank() }
+            val n = real?.let { r -> r.fullName ?: r.name } ?: p.name
+            val extra = listOfNotNull(p.posCode, Flags.countryName(iso) ?: real?.nationality, p.age?.let { a -> "$a anos" }).joinToString(", ")
+            return n + (if (n != p.name) " (no jogo: ${p.name})" else "") + (if (extra.isEmpty()) "" else " — $extra")
+        }
+        suspend fun squad(owner: String, n: Int): String {
+            val parts = ArrayList<String>()
+            for (p in all.filter { it.owner == owner && it.strength != null }.sortedByDescending { it.strength }.take(n)) parts.add(desc(p))
+            return parts.joinToString("; ")
+        }
+        val squadMine = squad("MY", 5); val squadRiv = squad("RIVAL", 3)
         val sb = StringBuilder()
         fun head(kind: String, fmt: String = "vertical 1080x1350") =
             sb.append("ARTE NOVA E INDEPENDENTE: ignore o conteúdo, os nomes e o estilo das imagens anteriores desta conversa.\nCrie um pôster de futebol $fmt: $kind. Siga as instruções do projeto (realista, estádio à noite, futebol de campo, escudos e nomes exatos). Gere uma composição NOVA e criativa, diferente das anteriores.\n\n")
@@ -102,6 +116,7 @@ object ArtsGpt {
                 val (l, rt) = if (away) r to team else team to r
                 head("DIA DE JOGO")
                 sb.append("Jogo: $l × $rt (casa à esquerda, fora à direita). Rodada ${round ?: "—"}. Meu clube: $club. Rival: $r.\n")
+                if (squadMine.isNotEmpty() || squadRiv.isNotEmpty()) sb.append("Elenco (nomes reais, para rostos e camisas corretos): $team: $squadMine" + (if (squadRiv.isNotEmpty()) ". $r: $squadRiv" else "") + ".\n")
                 sb.append("Cena: tela dividida na diagonal, uma cor para cada clube (cores reais dos dois), escudos grandes no topo com um X entre eles.\n")
                 sb.append("Jogadores (use os rostos reais deles): melhor do meu time = ${myLine ?: "um jogador do $team"}, em destaque, de braços cruzados; melhor do adversário = ${rivLine ?: "um jogador do $r"}, menor, ao fundo do outro lado, com a camisa do $r.\n")
                 if (p != null) {
@@ -117,6 +132,7 @@ object ArtsGpt {
                     val x = f[a]?.value; val y = f[b]?.value
                     if (x != null && y != null) sb.append("$n: $x × $y\n")
                 }
+                if (squadMine.isNotEmpty() || squadRiv.isNotEmpty()) sb.append("Elenco (nomes reais): $team: $squadMine" + (if (squadRiv.isNotEmpty()) ". $r: $squadRiv" else "") + ".\n")
                 sb.append("Cena: dois jogadores de perfil, frente a frente, uma cor por clube, barras comparativas por setor entre eles.\n")
                 sb.append("Jogadores (rostos reais): ${myLine ?: "um jogador do $team"} contra ${rivLine ?: "um jogador do $r"}, cada um com a camisa oficial do seu clube.\n")
             }
@@ -147,11 +163,23 @@ object ArtsGpt {
                 head("PÓS-JOGO / CAPA DE JORNAL", "horizontal 1600x1120")
                 sb.append("Estilo desta vez: ${pick(POST_STYLES)}.\n")
                 sb.append("Jornal do $team. Resultado: $res de $team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}" + (if (mineHome == true) " (em casa)" else if (mineHome == false) " (fora)" else "") + ". Clube: $club. Campanha: ${v}V ${e}E ${d}D.\n")
-                val ourGoals = shown.filter { it.third == true }; val theirGoals = shown.filter { it.third == false }
-                fun fmt(l: List<Triple<String?, String, Boolean?>>) = l.joinToString("; ") { (it.first?.let { mm -> "$mm' " } ?: "") + it.second }
-                if (ourGoals.isNotEmpty()) sb.append("Autores dos gols do $team: " + fmt(ourGoals) + ".\n")
-                if (theirGoals.isNotEmpty()) sb.append("Autores dos gols do $opp: " + fmt(theirGoals) + ".\n")
-                if (shown.isNotEmpty()) sb.append("Cite TODOS os autores informados acima como destaques do jogo. Não escreva nada sobre gols sem autor informado: o placar já mostra o total.\n")
+                val ourGoals = shown.filter { it.third == true }; val theirGoals = shown.filter { it.third == false }; val sideless = shown.filter { it.third == null }
+                val mineScore = m.scoreMine ?: 0; val oppScore = m.scoreOpp ?: 0
+                suspend fun goalText(g: Triple<String?, String, Boolean?>): String {
+                    val r = runCatching { WorldOcr.realPlayer(ctx, slot, g.second) }.getOrNull()
+                    return (g.first?.let { mm -> "$mm' " } ?: "") + (r?.let { x -> x.fullName ?: x.name } ?: g.second)
+                }
+                suspend fun sideLine(list: List<Triple<String?, String, Boolean?>>, total: Int): String {
+                    val parts = ArrayList<String>(); for (g in list) parts.add(goalText(g))
+                    repeat((total - list.size).coerceAtLeast(0)) { parts.add("gol sem autor identificado") }
+                    return if (parts.isEmpty()) "nenhum gol" else parts.joinToString("; ")
+                }
+                sb.append("GOLS DO JOGO (mostre os DOIS lados na arte, cada gol com minuto e autor quando informados):\n")
+                sb.append("- $team ($mineScore gol(s)): ${sideLine(ourGoals, mineScore)}.\n")
+                sb.append("- $opp ($oppScore gol(s)): ${sideLine(theirGoals, oppScore)}.\n")
+                if (sideless.isNotEmpty()) { val parts = ArrayList<String>(); for (g in sideless) parts.add(goalText(g)); sb.append("- Gols cujo time não foi identificado: ${parts.joinToString("; ")}.\n") }
+                sb.append("Cite pelo NOME todos os autores informados, dos dois times. Para \"gol sem autor identificado\" escreva só \"gol do <clube>\" (com o minuto, se houver): nunca invente nome. Não deixe nenhum dos dois times sem seus gols na arte.\n")
+                if (squadMine.isNotEmpty()) sb.append("Elenco do $team (nomes reais, para rostos e camisas corretos): $squadMine.\n")
                 sb.append(when (m.result) {
                     "V" -> "Tom: festa e orgulho; torcida e jogadores comemorando.\n"
                     "D" -> "Tom: recuperação, \"vamos melhorar\", jogadores unidos, sem humilhação.\n"
@@ -187,13 +215,13 @@ object ArtsGpt {
                 val key = c.key ?: return null
                 val p = repo.dao.playersOf(slot).firstOrNull { it.owner == "MY" && it.nameKey == key } ?: return null
                 head(if (c.kind == "BUY") "CONTRATAÇÃO CONFIRMADA" else "DESTAQUE DO ELENCO")
-                sb.append("Jogador: ${p.name}" + (p.age?.let { ", $it anos" } ?: "") + (p.strength?.let { ", força $it" } ?: "") + ". Clube: $club.\n")
+                sb.append("Jogador: ${desc(p)}" + (p.strength?.let { ", força $it" } ?: "") + ". Clube: $club.\n")
                 sb.append("Use o rosto, cabelo, barba e tom de pele fiéis ao jogador real, com a camisa oficial do $team. Retrato de cintura para cima, braços cruzados.\n")
             }
             "STARS" -> {
                 val top = repo.dao.playersOf(slot).filter { it.owner == "MY" && it.strength != null }.sortedByDescending { it.strength }.take(4)
                 head("CRAQUES DO TIME")
-                sb.append("Clube: $club. Craques: " + top.joinToString("; ") { "${it.name} (força ${it.strength})" } + ". Rostos fiéis aos jogadores reais, camisa oficial do $team.\n")
+                sb.append("Clube: $club. Craques (nomes reais): " + squad("MY", 4) + ". Rostos fiéis aos jogadores reais, camisa oficial do $team.\n")
             }
             "MOMENT", "CAMP", "SEASON", "EXPECT" -> {
                 val l5 = ms.takeLast(5)

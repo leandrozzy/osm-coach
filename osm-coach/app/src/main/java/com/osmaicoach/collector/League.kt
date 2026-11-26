@@ -71,7 +71,29 @@ object League {
      */
     class RawRow(val name: OcrLine, val nick: OcrLine?, val rankTok: Int?, val ints: List<Int>, val gl: MatchResult?)
 
+    /**
+     * Linha com 3 ou 4 números (o OCR perdeu uma ou duas colunas do meio): J é o primeiro e Pts o último; V/E/D que faltam saem de J = V+E+D e Pts = 3V+E.
+     * Só aceita quando há UMA única solução com números inteiros e não negativos (nunca chuta). Ex.: [21, 7, 10, 25] → J21 V7 E4 D10 Pts25.
+     */
+    internal fun reconstruct(ints: List<Int>): List<Int>? {
+        if (ints.size !in 3..4) return null
+        val j = ints.first(); val pts = ints.last(); val mid = ints.subList(1, ints.size - 1)
+        val sols = LinkedHashSet<List<Int>>()
+        fun add(v: Int, e: Int, d: Int) { if (v >= 0 && e >= 0 && d >= 0 && v + e + d == j && 3 * v + e == pts) sols.add(listOf(j, v, e, d, pts)) }
+        if (mid.size == 2) {
+            val (a, b) = mid
+            add(a, b, j - a - b); add(a, j - a - b, b); add(j - a - b, a, b)       // falta D, falta E, falta V
+        } else {
+            val x = mid[0]
+            add(x, pts - 3 * x, j - x - (pts - 3 * x))                              // x é V
+            if ((pts - x) % 3 == 0) { val v = (pts - x) / 3; add(v, x, j - v - x) } // x é E
+            if ((pts - (j - x)) % 2 == 0) { val v = (pts - (j - x)) / 2; add(v, j - x - v, x) } // x é D
+        }
+        return sols.singleOrNull()
+    }
+
     fun repairStats(ints: List<Int>): List<Int>? {
+        if (ints.size in 3..4) return reconstruct(ints)
         if (ints.size < 5) return null
         val a = if (ints.size > 5) ints.takeLast(5) else ints
         val (j, v, e, d, p) = a
@@ -115,10 +137,14 @@ object League {
         val first = ranks.indexOfFirst { it != null }
         if (first > 0) for (i in first - 1 downTo 0) ranks[i] = (ranks[i + 1] ?: break) - 1
         val out = ArrayList<Row>()
+        // Batalha de grupos / início de liga: ninguém jogou ainda, a tela só mostra zeros (o OCR lê [0,0], [0,0,0] ou nada). Tabela em que a maioria das linhas é só zero = tudo zero.
+        val zeroish = raws.count { r -> r.ints.all { it == 0 } }
+        val someZeros = raws.count { r -> r.ints.isNotEmpty() && r.ints.all { it == 0 } }
+        val allZero = raws.size >= 4 && zeroish * 10 >= raws.size * 6 && someZeros >= 2
         for (i in raws.indices) {
             val r = raws[i]; val rank = ranks[i]?.takeIf { it in 1..40 } ?: continue
             val club = r.name.text.trim().takeIf { it.length >= 3 } ?: continue
-            val st = repairStats(r.ints)
+            val st = if (allZero && r.ints.all { it == 0 }) listOf(0, 0, 0, 0, 0) else repairStats(r.ints)
             if (st == null) { runCatching { Diag.log("Classificação: linha de '$club' descartada (números lidos: ${r.ints}, posição $rank)") }; continue }
             val (j, v, e, d, pts) = st
             out.add(Row(club, r.nick?.text?.trim()?.takeIf { it.length >= 3 }, rank, j, v, e, d, pts, r.gl?.groupValues?.get(1)?.toIntOrNull(), r.gl?.groupValues?.get(2)?.toIntOrNull()))

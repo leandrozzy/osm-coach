@@ -47,7 +47,9 @@ object CrestWeb {
         if (exact.exists()) return exact
         val all = d.listFiles()?.filter { it.name.endsWith(".png") } ?: return null
         val best = all.maxByOrNull { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) } ?: return null
-        return best.takeIf { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.9 }
+        best.takeIf { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.9 }?.let { return it }
+        // mesmo clube lido de outro jeito pelo OCR (5V/SV, I/l/|, 0/O): vale o escudo que já existe (e o escolhido à mão)
+        return all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }
     }
 
     /** O time devolvido pela busca é o MESMO clube? (nome parecido, um é início do outro ou todas as palavras de um estão no outro) */
@@ -70,6 +72,7 @@ object CrestWeb {
         if (Txt.key(t).length < 3 || Fixtures.notAClub(t)) return   // fase da copa / "a definir" não é clube: o escudo vem quando a vaga for preenchida
         if (Settings.get(ctx, "web_crests", "1") != "1") return
         if (find(ctx.filesDir, t) != null) return
+        if (WorldOcr.isJunkClub(ctx, t)) return       // lixo de OCR (apelido de treinador, texto de faixa): não gasta a cota do TheSportsDB, que faltava para os clubes de verdade
         if (missedRecently(ctx.filesDir, t)) return
         synchronized(lock) {
             if (!queue.add(t)) return
