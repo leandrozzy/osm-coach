@@ -6,7 +6,7 @@ package com.osmaicoach.collector
  * margem sobre o 2º candidato e nenhuma contradição relevante. Nunca une homônimos, equipe B/principal ou clubes de países diferentes.
  */
 object WorldIdentity {
-    const val ALGO = "id-v3"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
+    const val ALGO = "id-v4"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
     class Config(val veryHigh: Int = 98, val probable: Int = 90, val ambiguous: Int = 75, val margin: Int = 6, val minSignals: Int = 2)
     val DEFAULT = Config()
 

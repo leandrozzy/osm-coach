@@ -171,10 +171,6 @@ object SlotWidget {
     private fun strengths(r: Row) = if (r.strMe != null && r.strOpp != null) "${r.strMe} × ${r.strOpp}" else "×"
     private fun where(r: Row) = when (r.home) { true -> "🏠 casa"; false -> "✈ fora"; null -> "" }
 
-    private val WIDE = listOf(
-        intArrayOf(R.id.wc1, R.id.wc1_badge, R.id.wc1_crest, R.id.wc1_name, R.id.wc1_when, R.id.wc1_info), intArrayOf(R.id.wc2, R.id.wc2_badge, R.id.wc2_crest, R.id.wc2_name, R.id.wc2_when, R.id.wc2_info),
-        intArrayOf(R.id.wc3, R.id.wc3_badge, R.id.wc3_crest, R.id.wc3_name, R.id.wc3_when, R.id.wc3_info), intArrayOf(R.id.wc4, R.id.wc4_badge, R.id.wc4_crest, R.id.wc4_name, R.id.wc4_when, R.id.wc4_info)
-    )
     private val LIST = listOf(
         intArrayOf(R.id.lr1, R.id.lr1_badge, R.id.lr1_crest, R.id.lr1_title, R.id.lr1_line, R.id.lr1_when, R.id.lr1_sub), intArrayOf(R.id.lr2, R.id.lr2_badge, R.id.lr2_crest, R.id.lr2_title, R.id.lr2_line, R.id.lr2_when, R.id.lr2_sub),
         intArrayOf(R.id.lr3, R.id.lr3_badge, R.id.lr3_crest, R.id.lr3_title, R.id.lr3_line, R.id.lr3_when, R.id.lr3_sub), intArrayOf(R.id.lr4, R.id.lr4_badge, R.id.lr4_crest, R.id.lr4_title, R.id.lr4_line, R.id.lr4_when, R.id.lr4_sub)
@@ -257,27 +253,6 @@ object SlotWidget {
         return v
     }
 
-    /** 4×2: quatro cartões lado a lado: escudo, clube, contagem (pílula colorida pela urgência) e chances/rodada; o jogo mais próximo ganha contorno lima. */
-    fun wide(ctx: Context, rows: List<Row>, now: Long): RemoteViews {
-        val v = RemoteViews(ctx.packageName, R.layout.widget_wide)
-        val hr = hero(rows)
-        for ((i, r) in rows.withIndex()) {
-            val id = WIDE[i]
-            v.setTextViewText(id[1], r.slot.toString()); v.setInt(id[1], "setBackgroundResource", badgeFor(r.state))
-            v.setTextColor(id[1], if (r.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
-            v.setInt(id[0], "setBackgroundResource", if (r === hr && r.at != null) R.drawable.w_tile_hero else R.drawable.w_tile)
-            v.setTextViewText(id[3], r.club.ifBlank { "sem clube" })
-            v.setTextViewText(id[4], if (r.state == STATE_NONE) "livre" else short(r))
-            v.setTextColor(id[4], if (r.state == STATE_NONE || r.stale) C_MUTED else urgencyColor(r.at, now))
-            v.setTextViewText(id[5], if (r.stale) staleText(r, now) else if (r.win != null && r.at != null) "V${r.win} E${r.draw} D${r.loss}" else r.round ?: "")
-            v.setTextColor(id[5], if (r.stale) C_RED else C_MUTED)
-            setCrest(ctx, v, id[2], if (r.state == STATE_NONE) null else r.club)
-            click(ctx, v, id[0], r, 700)
-        }
-        v.setTextViewText(R.id.w_footer, upd(now))
-        return v
-    }
-
     /** 4×4: jogo em destaque (escudos, contagem grande, chances, forma, estado) e a lista dos 4 slots. */
     /** Evento da Agenda (mesma regra da aba Agenda): jogo (kind 0), fim de treino (1) ou fim de obra do estádio (2). */
     class Ev(val at: Long, val kind: Int, val icon: String, val title: String, val sub: String, val slot: Int, val club: String? = null, val rival: String? = null)
@@ -299,16 +274,14 @@ object SlotWidget {
 
     private fun ago(ms: Long): String { val m = ms / 60_000L; return if (m < 60) "há ${maxOf(1, m)} min" else if (m < 48 * 60) "há ${m / 60} h" else "há ${m / (24 * 60)} d" }
 
-    fun large(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250, evs: List<Ev> = emptyList(), done: List<Done> = emptyList()): RemoteViews {
-        val v = RemoteViews(ctx.packageName, R.layout.widget_large)
+    private fun fillHero(ctx: Context, v: RemoteViews, rows: List<Row>, now: Long, wDp: Int, evs: List<Ev>): Ev? {
         // destaque = o evento MAIS PRÓXIMO da agenda (jogo, treino ou obra); sem nenhum futuro, o atrasado mais recente
         val upcoming = evs.filter { it.at >= now }
         val overdue = evs.filter { it.at < now }
         val heroEv = upcoming.minByOrNull { it.at } ?: overdue.maxByOrNull { it.at }
         val h = if (heroEv != null && heroEv.kind == 0) rows.firstOrNull { it.slot == heroEv.slot && it.at != null } ?: hero(rows) else if (heroEv != null) null else hero(rows)
         val next = (upcoming.sortedBy { it.at }.drop(if (heroEv != null && heroEv.at >= now) 1 else 0)).firstOrNull()
-        v.setTextViewText(R.id.h_alt, next?.let { "depois: ${it.icon} ${it.title.take(18)} ${until(it.at, now)}" } ?: "")
-        if (next == null) v.setViewVisibility(R.id.h_alt, android.view.View.GONE) else v.setViewVisibility(R.id.h_alt, android.view.View.VISIBLE)
+        v.setTextViewText(R.id.h_alt, next?.let { "depois: ${it.icon} ${it.title.take(18)} ${until(it.at, now)}" } ?: "sem outro evento agendado")
         if (heroEv != null && heroEv.kind != 0) {
             // treino / obra: ícone grande + o que é + quanto falta (contagem ao vivo)
             val late = heroEv.at < now
@@ -323,7 +296,8 @@ object SlotWidget {
             v.setTextColor(R.id.h_when, if (late) C_RED else urgencyColor(heroEv.at, now))
             v.setTextViewText(R.id.h_time, "${day(heroEv.at)} • ${clock(heroEv.at)}")
             v.setTextViewText(R.id.h_str, heroEv.sub)
-            v.setImageViewBitmap(R.id.h_prob, null); v.setTextViewText(R.id.h_probtxt, ""); v.setImageViewBitmap(R.id.h_form_me, null); v.setImageViewBitmap(R.id.h_form_opp, null)
+            v.setTextViewText(R.id.h_probtxt, "S${heroEv.slot} • ${heroEv.club ?: "clube"}"); v.setImageViewBitmap(R.id.h_form_me, null); v.setImageViewBitmap(R.id.h_form_opp, null)
+            v.setTextViewText(R.id.h_comp, heroEv.sub); v.setViewVisibility(R.id.h_where, android.view.View.GONE); v.setTextViewText(R.id.h_str, "")
             v.setTextViewText(R.id.h_status, if (late) "⏰ colete e comece o próximo" else "✅ em andamento"); v.setTextColor(R.id.h_status, if (late) C_RED else C_GREEN)
             click(ctx, v, R.id.h_card, rows.firstOrNull { it.slot == heroEv.slot } ?: rows.first(), 900)
         } else {
@@ -337,7 +311,6 @@ object SlotWidget {
             v.setChronometerCountDown(R.id.h_chrono, true)
             v.setChronometer(R.id.h_chrono, android.os.SystemClock.elapsedRealtime() + (target - now), null, true)
         } else v.setViewVisibility(R.id.h_chrono, android.view.View.GONE)
-        bindPanels(ctx, v, rows, evs, done, now, wDp, heroEv)
         if (h != null) {
             v.setTextViewText(R.id.h_slot, h.slot.toString()); v.setInt(R.id.h_slot, "setBackgroundResource", badgeFor(h.state))
             v.setTextColor(R.id.h_slot, if (h.state == STATE_OLD) 0xFFFFFFFF.toInt() else 0xFF0B111B.toInt())
@@ -347,7 +320,7 @@ object SlotWidget {
             v.setTextColor(R.id.h_when, if (h.stale) C_MUTED else urgencyColor(h.at, now))
             v.setTextViewText(R.id.h_time, if (h.at != null) "${day(h.at)} • ${clock(h.at)} ${where(h)}".trim() else h.short)
             v.setTextViewText(R.id.h_str, listOfNotNull(if (h.strMe != null && h.strOpp != null) strengths(h) else null, h.round, h.pos).joinToString(" • "))
-            setProb(ctx, v, R.id.h_prob, h, wDp * 0.8f); v.setTextViewText(R.id.h_probtxt, probText(h))
+            v.setTextViewText(R.id.h_probtxt, probText(h).ifEmpty { h.short })
             setForm(ctx, v, R.id.h_form_me, h.formMe, false); setForm(ctx, v, R.id.h_form_opp, h.formOpp, true)
             val st = staleText(h, now)
             v.setTextViewText(R.id.h_status, if (st.isNotEmpty()) st else h.icon + " " + h.short)
@@ -355,9 +328,25 @@ object SlotWidget {
             click(ctx, v, R.id.h_card, h, 900)
             v.setTextViewText(R.id.h_comp, listOfNotNull(h.comp?.let { "🏆 $it" }, h.round, h.pos?.let { "${it}º" }).joinToString(" • "))
             if (h.home != null) { v.setViewVisibility(R.id.h_where, android.view.View.VISIBLE); v.setTextViewText(R.id.h_where, if (h.home == true) "🏠 CASA" else "✈ FORA") } else v.setViewVisibility(R.id.h_where, android.view.View.GONE)
-        } else { v.setViewVisibility(R.id.h_where, android.view.View.GONE); v.setTextViewText(R.id.h_comp, "") }
+        } else if (heroEv == null || heroEv.kind == 0) { v.setViewVisibility(R.id.h_where, android.view.View.GONE); v.setTextViewText(R.id.h_comp, "") }
         v.setTextViewText(R.id.h_now, SimpleDateFormat("EEE dd/MM • HH:mm", Locale("pt", "BR")).format(Date(now)))
+        return heroEv
+    }
+
+    /** 4 colunas × 3+ linhas: cabeçalho, destaque compacto, próximos eventos por slot (esq.), eventos anteriores (dir., ≥4 colunas) e rodapé de status. */
+    fun large(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250, evs: List<Ev> = emptyList(), done: List<Done> = emptyList()): RemoteViews {
+        val v = RemoteViews(ctx.packageName, R.layout.widget_large)
+        val heroEv = fillHero(ctx, v, rows, now, wDp, evs)
+        bindPanels(ctx, v, rows, evs, done, now, wDp, heroEv)
         v.setTextViewText(R.id.l_footer, upd(now).removePrefix("atualizado "))
+        return v
+    }
+
+    /** 4×2: destaque à esquerda e o próximo evento de cada slot à direita (sem lista de anteriores: não cabe). */
+    fun wide(ctx: Context, rows: List<Row>, now: Long, wDp: Int = 250, evs: List<Ev> = emptyList(), done: List<Done> = emptyList()): RemoteViews {
+        val v = RemoteViews(ctx.packageName, R.layout.widget_wide)
+        val heroEv = fillHero(ctx, v, rows, now, wDp, evs)
+        bindPanels(ctx, v, rows, evs, done, now, 0, heroEv)
         return v
     }
 
@@ -406,7 +395,7 @@ object SlotWidget {
             click(ctx, v, id[0], r, 700)
         }
         // direita (só com 4+ colunas): eventos que já passaram
-        val wide = wDp >= 250
+        val wide = wDp >= 240
         v.setViewVisibility(R.id.r_panel, if (wide) vis else gone)
         val pending = done.filter { it.state != 0 }
         val statusColor = { st: Int -> when (st) { 0 -> C_GREEN; 1 -> C_RED; else -> C_AMBER } }
@@ -443,8 +432,8 @@ object SlotWidget {
 
     /** Escolhe o layout pelo tamanho atual do widget (dp) — funciona do Android 11 em diante (opções do widget), sem depender do modo responsivo do Android 12. */
     fun views(ctx: Context, rows: List<Row>, now: Long, wDp: Int, hDp: Int, evs: List<Ev> = emptyList(), done: List<Done> = emptyList()): RemoteViews = when {
-        wDp >= 200 && hDp >= 210 -> large(ctx, rows, now, wDp, evs, done)
-        wDp >= 200 -> wide(ctx, rows, now)
+        wDp >= 180 && hDp >= 250 -> large(ctx, rows, now, wDp, evs, done)
+        wDp >= 180 && hDp >= 95 -> wide(ctx, rows, now, wDp, evs, done)
         else -> small(ctx, rows, now, wDp, evs)
     }
 

@@ -465,9 +465,12 @@ class FramePipeline private constructor(private val ctx: Context) {
         val names = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) + "@" + Math.round(it.yc * 50f) }.toSet()
         // fim da página: o dedo arrasta e a tela só "sobe 1 milímetro" (borda elástica) e volta: as linhas mudam ≤0,02 de altura. Compara texto + altura com essa tolerância
         val curLines = ocr.lines.filter { it.yc > 0.12f }.map { Txt.key(it.text).take(10) to it.yc }.filter { it.first.length >= 2 }
-        val sameLines = pd.lastLines.isNotEmpty() && curLines.isNotEmpty() &&
-            curLines.count { c -> pd.lastLines.any { l -> l.first == c.first && Math.abs(l.second - c.second) <= 0.02f } }.toFloat() / curLines.size >= 0.75f &&
-            pd.lastLines.count { l -> curLines.any { c -> l.first == c.first && Math.abs(l.second - c.second) <= 0.02f } }.toFloat() / pd.lastLines.size >= 0.75f
+        // a borda elástica do Android ESTICA a lista (as linhas se deslocam de forma desigual, até ~0,05): o que prova o fim é NÃO APARECER texto novo e as linhas continuarem as mesmas
+        val curKeys = curLines.map { it.first }.toSet(); val lastKeys = pd.lastLines.map { it.first }.toSet()
+        val jac = if (curKeys.isEmpty() || lastKeys.isEmpty()) 0f else curKeys.intersect(lastKeys).size.toFloat() / curKeys.union(lastKeys).size
+        val dys = curLines.mapNotNull { c -> pd.lastLines.firstOrNull { l -> l.first == c.first && Math.abs(l.second - c.second) <= 0.07f }?.let { l -> Math.abs(l.second - c.second) } }.sorted()
+        val medDy = if (dys.isEmpty()) 1f else dys[dys.size / 2]
+        val sameLines = pd.lastLines.isNotEmpty() && jac >= 0.85f && dys.size >= curLines.size * 0.7f && medDy <= 0.06f
         val same = sameLines || (pd.lastSet.isNotEmpty() && names.intersect(pd.lastSet).size.toFloat() / names.union(pd.lastSet).size.coerceAtLeast(1) >= 0.6f)   // o OCR oscila entre quadros parados
         pd.lastLines = curLines
         if (pd.lastSet.isNotEmpty() && !same) pd.moved = true
