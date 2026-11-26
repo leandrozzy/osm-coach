@@ -118,3 +118,19 @@ class Round3WorldTest {
         assertEquals("1100", h.id); assertEquals("Dominic Calvert-Lewin", h.name); assertEquals("1997-03-16", h.dob); assertEquals(187, h.heightCm)
     }
 }
+
+class Round3CupTest {
+    private fun m(label: String, opp: String?, round: Int?, res: String? = null) = MatchEntity(1, "k$round$label", label, round, null, null, null, null, null, res, opp, null, 0L)
+    @Test fun cupMatchesAreLabeledWithTheStageAndNeverAsRound() {
+        val cup = m("Copa • Oitavos-de-final", "Bayern", 40)
+        assertEquals("COPA • Oitavos de final", Fixtures.phase(cup, 40))
+        assertEquals("COPA • Final", Fixtures.phase(m("Copa • Final", null, 42), 42))
+        assertEquals("LIGA • rodada 13", Fixtures.phase(m("Jornada 13", "Coritiba", 13), 13))
+        assertEquals("BATALHA DE GRUPOS • rodada 3", Fixtures.phase(null, 3, "Batalha"))
+    }
+    @Test fun nextMatchPrefersTheOpponentOverTheRoundNumber() {
+        val league = m("Jornada 40", "VfB Stuttgart II", 40); val cup = m("Copa • Final", "Hansa Rostock", 40)
+        assertTrue(Fixtures.isCup(Fixtures.nextFor(listOf(league, cup), "Hansa Rostock", 40)!!))
+        assertFalse(Fixtures.isCup(Fixtures.nextFor(listOf(league, cup), "VfB Stuttgart II", 40)!!))
+    }
+}
