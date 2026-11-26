@@ -165,7 +165,7 @@ internal fun WorldSourcesView() {
 @Composable
 internal fun WorldRealBox(slot: Int, playerName: String) {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
-    val r = rememberLoaded(null as WorldOcr.RealPlayer?, 0, Pair(slot, playerName)) { runCatching { WorldOcr.realPlayer(ctx, slot, playerName) }.getOrNull() }
+    val r = rememberLoaded(null as WorldOcr.RealPlayer?, 0, Triple(slot, playerName, UiBus.version)) { runCatching { WorldOcr.realPlayer(ctx, slot, playerName) }.getOrNull() }
     var msg by remember { mutableStateOf("") }
     val shape = RoundedCornerShape(DS.RADIUS_CARD)
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape).background(DS.SURFACE).border(1.dp, C.INFO.copy(alpha = 0.45f), shape).padding(12.dp)) {

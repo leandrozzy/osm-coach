@@ -1154,9 +1154,15 @@ class Repo(private val ctx: Context) {
             if (r > old) dao.putPlan(PlanEntity(slot, "ceiling", org.json.JSONObject().put("r", r).put("at", now).toString(), now))
         }
         // tabelas da liga inteira (Classificação / Valor do plantel): guarda para comparar o elenco e calibrar a tática
-        League.read(ocr)?.let { (kind, rows) ->
+        League.read(ocr, fieldMap(slot)[K.TEAM]?.value)?.let { (kind, rows) ->
             val old = dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
-            dao.putPlan(PlanEntity(slot, "league", League.merge(old, kind, rows, now).toString(), now))
+            val merged = League.merge(old, kind, rows, now)
+            dao.putPlan(PlanEntity(slot, "league", merged.toString(), now))
+            // bolha: "Capturado" só quando a tabela inteira fechou (posições 1..N seguidas e as contas batendo); antes disso segue "Lendo"
+            if (kind == "st") runCatching {
+                val v = Standings.build(League.table(merged, "st"), now, fieldMap(slot)[K.TEAM]?.value, null, false)
+                Diag.setRead(if (v != null && v.complete) 2 else 1, "OTHER_OSM")
+            }
             if (kind == "st") runCatching { CrestAdmin.rememberTrusted(ctx, rows.map { it.club }) }   // grafia limpa dos clubes: o nome dos escudos passa a ser este
         }
         runCatching { ResultsIngest.onScreen(this, slot, type, ocr, now) }

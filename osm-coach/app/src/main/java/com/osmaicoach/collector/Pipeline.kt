@@ -293,9 +293,12 @@ class FramePipeline private constructor(private val ctx: Context) {
                 val merged = old ?: JSONObject()
                 for (k in seen.keys()) merged.put(k, seen.get(k))
                 dao.putPlan(PlanEntity(slot, "tacmounted", merged.put("at", now).put("round", round).toString(), now))
-                Diag.setRead(2, ScreenType.TACTIC.name)
                 // registro por PARTIDA (slot + competição + rodada + rival), com origem e hora por campo
                 PlayedTactic.record(repo, slot, seen.keys().asSequence().associateWith { k -> seen.optString(k) }, "tela", now)
+                // "Capturado" só com os 11 campos lidos (formação sozinha não basta: vídeo 25/11 mostrava "capturado" antes do meio da tela)
+                val all = listOf("formation", "playStyle", "pressure", "mentality", "tempo", "marking", "offside", "tackle", "advAttack", "advMid", "advDef")
+                val have = all.count { k -> merged.optString(k).isNotBlank() }   // só o que ESTA passada leu (a última leitura de antes não conta)
+                Diag.setRead(if (have >= all.size) 2 else 1, ScreenType.TACTIC.name)
             }
         }
         pending = Pending(slot, ScreenType.TACTIC, null)
@@ -463,6 +466,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         pd.lastSet = names
         pd.lastHadGk = hasGk
         // Mercado: lista parada (depois de rolar) já é o fim, qualquer que seja a ordem; Plantel: parada mostrando os goleiros (última seção)
+        // Resultado: depois das notas não há mais nada embaixo (a lista de notas é o fim da página): quadro igual duas vezes seguidas depois de rolar = fim (vídeo 25/11: ficava "lendo" para sempre)
+        if (stalled && type == ScreenType.RESULT && pd.ratings) pd.endSeen = true
         if (stalled && (type == ScreenType.MARKET || (type == ScreenType.SQUAD && hasGk) || (type == ScreenType.CALENDAR && lowestRow(ocr) < 0.93f))) pd.endSeen = true
         // Plantel: já li ao menos o elenco guardado (ou o mínimo de 18) com as 4 seções e o quadro atual mostra goleiros no fim = completo
         if (type == ScreenType.SQUAD && hasGk && pd.moved && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))) {
@@ -1367,7 +1372,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 Diag.extracted.addAndGet(changed)
                 Diag.lastUpdateAt = now
                 // tela que não é lista (Pré-jogo, Relatório, Estádio, Classificação…): o que ela mostrava foi gravado = "Capturado" na bolha
-                if (type != ScreenType.SQUAD && type != ScreenType.CALENDAR && type != ScreenType.MARKET && type != ScreenType.RESULT) Diag.setRead(2, type.name)
+                if (type != ScreenType.SQUAD && type != ScreenType.CALENDAR && type != ScreenType.MARKET && type != ScreenType.RESULT && type != ScreenType.TACTIC) Diag.setRead(2, type.name)
                 if (type == ScreenType.PREGAME || type == ScreenType.CALENDAR) {
                     try {
                         Notifier.reschedule(ctx)

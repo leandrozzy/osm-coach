@@ -30,11 +30,11 @@ object League {
     private val RX_GOALS = Regex("^(\\d{1,3})\\s*[-–—]\\s*(\\d{1,3})$")
 
     /** Linhas da tela (rolagem parcial): cada uma começa pelo número da posição à esquerda. */
-    fun read(o: OcrResult): Pair<String, List<Row>>? {
+    fun read(o: OcrResult, myTeam: String? = null): Pair<String, List<Row>>? {
         val standings = isStandings(o.fullText)
         val values = !standings && isValues(o.fullText)
         if (!standings && !values) return null
-        if (standings) return readStandings(o)?.let { Pair("st", it) }
+        if (standings) return readStandings(o, myTeam)?.let { Pair("st", it) }
         val ranks = o.tokens.filter { it.xc < 0.06f && it.yc > 0.25f && (intOf(it.text) ?: 0) in 1..40 }.sortedBy { it.yc }
         val out = ArrayList<Row>()
         for (r in ranks) {
@@ -69,7 +69,10 @@ object League {
      * costuma falhar): quando falta, vale a ordem na tela (posição anterior + linhas puladas). Números conferidos entre si (J = V+E+D, Pts = 3V+E): erro de OCR de um
      * dígito é corrigido pelo que fecha; o que não fecha é descartado (nunca gravado errado).
      */
-    class RawRow(val name: OcrLine, val nick: OcrLine?, val rankTok: Int?, val ints: List<Int>, val gl: MatchResult?)
+    class RawRow(val name: OcrLine, val nick: OcrLine?, val rankTok: Int?, val ints: List<Int>, val gl: MatchResult?, val statsY: Float? = null)
+
+    /** Numeral com 3+ traços ("Stuttgart III", "Hoffenheim lll") é o OCR somando o traço da borda da linha: nenhum clube do OSM tem III; vira II (o time reserva). */
+    internal fun fixNumeral(n: String): String = Regex("^(.*\\S)\\s+([IlL1|!]{3,})$").find(n)?.let { it.groupValues[1] + " II" } ?: n
 
     /**
      * Linha com 3 ou 4 números (o OCR perdeu uma ou duas colunas do meio): J é o primeiro e Pts o último; V/E/D que faltam saem de J = V+E+D e Pts = 3V+E.
@@ -103,7 +106,7 @@ object League {
         return null
     }
 
-    fun readStandings(o: OcrResult): List<Row>? {
+    fun readStandings(o: OcrResult, myTeam: String? = null): List<Row>? {
         // só linhas INTEIRAS: a primeira/última do scroll aparecem cortadas na borda (prints de 25/11: a 8ª linha de cada rolagem) e o OCR lê um pedaço das letras ("Cantoe", "Dartini Tirar")
         val cand = o.lines.filter { it.l in 0.04f..0.40f && it.yc in 0.285f..0.955f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
         val heads = ArrayList<OcrLine>(); val nicks = HashMap<OcrLine, OcrLine>()
@@ -117,7 +120,7 @@ object League {
             val rk = win.filter { it.xc < 0.07f }.mapNotNull { t -> intOf(t.text)?.takeIf { it in 1..40 }?.let { Pair(t, it) } }.minByOrNull { abs(it.first.yc - h.yc) }?.second
             val ints = win.filter { it.xc > 0.72f && it.xc < 0.94f }.sortedBy { it.xc }.mapNotNull { intOf(it.text) }
             val gl = win.filter { it.xc > 0.90f }.firstNotNullOfOrNull { RX_GOALS.find(it.text.trim()) }
-            RawRow(h, nicks[h], rk, ints, gl)
+            RawRow(h, nicks[h], rk, ints, gl, win.filter { it.xc > 0.78f && intOf(it.text) != null }.map { it.yc }.sorted().let { l -> if (l.isEmpty()) null else l[l.size / 2] })
         }
         // posição de cada linha: o número lido quando bate com a sequência; senão a ordem na tela (anterior + linhas puladas pela altura)
         val gaps = heads.zipWithNext { a, b -> b.yc - a.yc }.filter { it > 0.05f && it < 0.15f }.sorted()
@@ -152,7 +155,14 @@ object League {
         val allZero = raws.size >= 4 && zeroish * 10 >= raws.size * 6 && someZeros >= 2
         for (i in raws.indices) {
             val r = raws[i]; val rank = ranks[i]?.takeIf { it in 1..40 } ?: continue
-            val club = r.name.text.trim().takeIf { it.length >= 3 } ?: continue
+            // a linha do MEU clube vem destacada (amarelo) e o OCR perde o nome do clube: sobra só o apelido ("leandrozzy") como 1ª linha = é o meu clube
+            val nickOnly = r.statsY != null && r.name.yc - r.statsY >= 0.004f
+            val mineNick = Txt.sim(Txt.key(r.name.text), Txt.key(MY_NICK)) >= 0.75
+            val club = when {
+                mineNick && myTeam != null -> myTeam
+                nickOnly -> { runCatching { Diag.log("Classificação: linha sem nome de clube (só o apelido '${r.name.text.trim()}') descartada, posição $rank") }; continue }   // apelido de treinador nunca vira clube
+                else -> fixNumeral(r.name.text.trim())
+            }.takeIf { it.length >= 3 } ?: continue
             val st = if (allZero && r.ints.all { it == 0 }) listOf(0, 0, 0, 0, 0) else repairStats(r.ints)
             if (st == null) { runCatching { Diag.log("Classificação: linha de '$club' descartada (números lidos: ${r.ints}, posição $rank)") }; continue }
             val (j, v, e, d, pts) = st

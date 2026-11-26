@@ -26,3 +26,11 @@ class Round3Test {
         assertTrue(r.status != WorldIdentity.Status.CONFIRMED)
     }
 }
+
+class Round3DedupeTest {
+    @Test fun cutShortNameIsTheSamePlayer() {
+        assertTrue(SquadDedupe.samePlayer("fat", 24, 82, "fati", 24, 82))
+        assertFalse(SquadDedupe.samePlayer("fat", 24, 82, "fati", 24, 70))     // força bem diferente: outro jogador
+        assertFalse(SquadDedupe.samePlayer("fat", 24, 82, "fatima", 24, 82))   // 3 letras só com 1 letra a mais
+    }
+}

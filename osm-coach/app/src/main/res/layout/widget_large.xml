@@ -3,17 +3,19 @@
     <LinearLayout android:id="@+id/h_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="@drawable/w_hero" android:paddingHorizontal="10dp" android:paddingVertical="8dp">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
             <TextView android:id="@+id/h_slot" android:layout_width="22dp" android:layout_height="22dp" android:textSize="12sp" android:background="@drawable/w_badge_none" android:gravity="center" android:textColor="#0B111B" android:textStyle="bold" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:paddingHorizontal="8dp" android:paddingVertical="1dp" android:background="@drawable/w_chip" android:text="próximo jogo" android:textColor="#B9F363" android:textSize="10.5sp" android:textStyle="bold" />
+            <TextView android:id="@+id/h_kind" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:paddingHorizontal="8dp" android:paddingVertical="1dp" android:background="@drawable/w_chip" android:text="próximo jogo" android:textColor="#B9F363" android:textSize="10.5sp" android:textStyle="bold" />
             <TextView android:id="@+id/h_time" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="end" android:textColor="#A8B7C8" android:textSize="10.5sp" android:maxLines="1" android:ellipsize="end" />
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="6dp">
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal">
+                <TextView android:id="@+id/h_emoji" android:layout_width="wrap_content" android:layout_height="44dp" android:gravity="center" android:textSize="34sp" android:visibility="gone" />
                 <ImageView android:id="@+id/h_crest_me" android:layout_width="44dp" android:layout_height="44dp" android:scaleType="fitCenter" />
                 <TextView android:id="@+id/h_me" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#F4F7FB" android:textSize="13sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
             </LinearLayout>
             <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_horizontal" android:paddingHorizontal="4dp">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="FALTAM" android:textColor="#A8B7C8" android:textSize="9.5sp" android:textStyle="bold" android:letterSpacing="0.14" />
                 <TextView android:id="@+id/h_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#F5B942" android:textSize="28sp" android:textStyle="bold" android:maxLines="1" />
+                <Chronometer android:id="@+id/h_chrono" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#F4F7FB" android:textSize="11sp" android:textStyle="bold" android:fontFeatureSettings="tnum" android:visibility="gone" />
                 <TextView android:id="@+id/h_str" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#A8B7C8" android:textSize="10sp" android:textStyle="bold" android:maxLines="1" />
             </LinearLayout>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal">
@@ -25,8 +27,28 @@
         <TextView android:id="@+id/h_probtxt" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#A8B7C8" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="4dp">
             <ImageView android:id="@+id/h_form_me" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:adjustViewBounds="true" android:scaleType="fitStart" />
-            <TextView android:id="@+id/h_status" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="8dp" android:paddingVertical="1dp" android:background="@drawable/w_pill" android:textColor="#4CCB7A" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" android:maxWidth="150dp" />
+            <ViewFlipper android:id="@+id/h_flip" android:layout_width="wrap_content" android:layout_height="wrap_content" android:autoStart="true" android:flipInterval="3500" android:inAnimation="@android:anim/fade_in" android:outAnimation="@android:anim/fade_out">
+                <TextView android:id="@+id/h_status" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="8dp" android:paddingVertical="1dp" android:background="@drawable/w_pill" android:textColor="#4CCB7A" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" android:maxWidth="150dp" />
+                <TextView android:id="@+id/h_alt" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingHorizontal="8dp" android:paddingVertical="1dp" android:background="@drawable/w_pill" android:textColor="#A8B7C8" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" android:maxWidth="150dp" />
+            </ViewFlipper>
             <ImageView android:id="@+id/h_form_opp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:adjustViewBounds="true" android:scaleType="fitEnd" />
+        </LinearLayout>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/e_box" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginTop="4dp" android:paddingHorizontal="8dp" android:paddingVertical="3dp" android:background="@drawable/w_tile" android:visibility="gone">
+        <LinearLayout android:id="@+id/e1" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingVertical="1dp">
+            <TextView android:id="@+id/e1_icon" android:layout_width="20dp" android:layout_height="wrap_content" android:gravity="center" android:textSize="12sp" />
+            <TextView android:id="@+id/e1_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="4dp" android:textColor="#F4F7FB" android:textSize="11sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/e1_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#EF5350" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/e2" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingVertical="1dp">
+            <TextView android:id="@+id/e2_icon" android:layout_width="20dp" android:layout_height="wrap_content" android:gravity="center" android:textSize="12sp" />
+            <TextView android:id="@+id/e2_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="4dp" android:textColor="#F4F7FB" android:textSize="11sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/e2_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#EF5350" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/e3" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingVertical="1dp">
+            <TextView android:id="@+id/e3_icon" android:layout_width="20dp" android:layout_height="wrap_content" android:gravity="center" android:textSize="12sp" />
+            <TextView android:id="@+id/e3_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="4dp" android:textColor="#F4F7FB" android:textSize="11sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/e3_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#EF5350" android:textSize="10.5sp" android:textStyle="bold" android:maxLines="1" />
         </LinearLayout>
     </LinearLayout>
     <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical">

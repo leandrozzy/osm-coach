@@ -1062,17 +1062,34 @@ object Parsers {
         // Notas dos jogadores: bolinhas à esquerda (time da casa) e à direita (visitante).
         val ratingsHome = ArrayList<Pair<String, Int>>()
         val ratingsAway = ArrayList<Pair<String, Int>>()
+        // gols por jogador na lista de notas: "2 ⚽ 9. Hudson-Odoi" (visitante: a quantidade vem ANTES da bola) / "7. A. Silva ⚽ 2" (casa: DEPOIS); OCR lê "2 9. Hudson-Odoi" e "A. Silva 2"
+        val listGoals = ArrayList<Triple<Boolean, String, Int>>()
+        fun rated(raw: String, home: Boolean): String {
+            var t = raw.trim()
+            var n = 0
+            if (!home) Regex("^[\\(\\[]?\\s*([2-9])\\s+(\\d{1,2}\\.\\s*.+)$").find(t)?.let { m -> n = m.groupValues[1].toInt(); t = m.groupValues[2] }
+            else Regex("^(\\d{1,2}\\.\\s*.*\\p{L}.*?)\\s+([2-9])$").find(t)?.let { m -> n = m.groupValues[2].toInt(); t = m.groupValues[1] }
+            val name = t.replace(RX_SHIRT, "").trim()
+            if (n >= 2 && Txt.letters(name) >= 3) listGoals.add(Triple(home, name, n))
+            return name
+        }
         val lr = o.tokens.filter { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.44f..0.49f && it.yc in 0.10f..0.97f }
         for (t in lr) {
             val nm = o.lines.filter { it.xc < 0.35f && abs(it.yc - t.yc) <= 0.03f && Txt.letters(it.text) >= 3 }.minByOrNull { abs(it.yc - t.yc) }?.text?.trim()
-            if (nm != null) ratingsHome.add(Pair(nm.replace(RX_SHIRT, ""), intTok(t) ?: 0))
+            if (nm != null) ratingsHome.add(Pair(rated(nm, true), intTok(t) ?: 0))
         }
         val rr = o.tokens.filter { val n = intTok(it); n != null && n in 1..10 && it.xc in 0.50f..0.56f && it.yc in 0.10f..0.97f }
         for (t in rr) {
             val nm = o.lines.filter { it.xc > 0.65f && abs(it.yc - t.yc) <= 0.03f && Txt.letters(it.text) >= 3 }.minByOrNull { abs(it.yc - t.yc) }?.text?.trim()
-            if (nm != null) ratingsAway.add(Pair(nm.replace(RX_SHIRT, ""), intTok(t) ?: 0))
+            if (nm != null) ratingsAway.add(Pair(rated(nm, false), intTok(t) ?: 0))
         }
 
+        // quem fez 2+ gols na lista de notas: se a lista de eventos trouxe menos gols dele, completa (sem inventar minuto)
+        for ((home, name, n) in listGoals) {
+            val sideTxt = if (home) "casa" else "visitante"
+            val have = events.count { it.contains("($sideTxt) gol de ") && Txt.sim(Txt.key(it.substringAfter(") gol de ").substringBefore(" (")), Txt.key(name)) >= 0.8 }
+            for (i in have until n) events.add("?' ($sideTxt) gol de $name (${i + 1}º gol, pela lista de jogadores)")
+        }
         val rep = MatchReportRead(
             round = round, homeTeam = home, awayTeam = away, homeNick = homeNick, awayNick = awayNick,
             scoreHome = sh, scoreAway = sa, referee = referee, tip = tip, advice = advice, mom = mom,

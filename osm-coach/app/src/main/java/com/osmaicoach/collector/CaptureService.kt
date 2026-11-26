@@ -369,7 +369,9 @@ class CaptureService : AccessibilityService() {
         val done = rs == 2 && recentRead
         val partial = rs == 3 && recentRead
         val col = when { done -> 0xFFB9F363.toInt(); partial -> 0xFFF5B942.toInt(); capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
-        r.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), col) }
+        val spinning = capturing && !done && !partial
+        // lendo/capturando: arco giratório (dá para ver que está trabalhando e quanto tempo ficar na tela); parado: anel cheio; terminou: anel verde + "pulinho"
+        r.background = if (spinning) ArcRing(col, 3.5f * dp) else GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), col) }
         statusView?.let { s ->
             s.visibility = if (capturing || done || partial) View.VISIBLE else View.GONE
             val (txt, bg) = when {
@@ -381,11 +383,33 @@ class CaptureService : AccessibilityService() {
             s.text = txt
             (s.background as? GradientDrawable)?.setColor(bg)
         }
-        if (capturing && !done && !partial) {
-            if (ringAnim == null) ringAnim = android.animation.ObjectAnimator.ofFloat(r, "alpha", 1f, 0.35f).apply {
-                duration = 700; repeatMode = android.animation.ValueAnimator.REVERSE; repeatCount = android.animation.ValueAnimator.INFINITE; start()
+        if (spinning) {
+            if (ringAnim == null) ringAnim = android.animation.ObjectAnimator.ofFloat(r, "rotation", 0f, 360f).apply {
+                duration = 1000; interpolator = android.view.animation.LinearInterpolator(); repeatCount = android.animation.ValueAnimator.INFINITE; start()
             }
-        } else { ringAnim?.cancel(); ringAnim = null; r.alpha = 1f }
+        } else {
+            ringAnim?.cancel(); ringAnim = null; r.rotation = 0f; r.alpha = 1f
+            if (done && lastDonePop != Diag.readAt) {          // uma vez por leitura concluída
+                lastDonePop = Diag.readAt
+                r.animate().scaleX(1.25f).scaleY(1.25f).setDuration(180).withEndAction { r.animate().scaleX(1f).scaleY(1f).setDuration(220).start() }.start()
+            }
+        }
+    }
+
+    private var lastDonePop = 0L
+
+    /** Anel com um arco de 270° (o resto apagado): girando vira o indicador de "lendo". */
+    private class ArcRing(private val color: Int, private val stroke: Float) : android.graphics.drawable.Drawable() {
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = stroke; strokeCap = android.graphics.Paint.Cap.ROUND }
+        override fun draw(c: android.graphics.Canvas) {
+            val b = bounds; val m = stroke / 2f
+            val rect = android.graphics.RectF(b.left + m, b.top + m, b.right - m, b.bottom - m)
+            p.color = (color and 0x00FFFFFF) or 0x40000000; c.drawOval(rect, p)
+            p.color = color; c.drawArc(rect, 0f, 270f, false, p)
+        }
+        override fun setAlpha(a: Int) { p.alpha = a }
+        override fun setColorFilter(f: android.graphics.ColorFilter?) { p.colorFilter = f }
+        @Deprecated("Deprecated in Java") override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
     }
 
     /** Recalcula o que fazer quando a tela/slot muda ou chega leitura nova; dica que sumiu = feito. */

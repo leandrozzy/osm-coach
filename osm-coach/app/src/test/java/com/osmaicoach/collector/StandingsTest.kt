@@ -155,6 +155,25 @@ class StandingsReadingTest {
         assertEquals("Esporte Clube Bahia", rows[0].club)
     }
 
+    @Test fun highlightedOwnRowWithoutClubNameUsesMyTeamAndOtherNicknamesNeverBecomeClubs() {
+        val base = screen(1).lines
+        val clubY = base.first { it.text == "Fluminense".let { _ -> real[3][0] as String } }.yc    // 4ª linha
+        val own = base.filter { !(it.text == real[3][0] as String) }.map { l -> if (l.text == "UzM Treinador4") Fx.line("leandrozzy", l.xc, l.yc, 0.12f) else l }
+        val rows = League.readStandings(Fx.ocr(*own.toTypedArray()), "Fortuna Düsseldorf")!!
+        assertEquals("Fortuna Düsseldorf", rows.first { it.rank == 4 }.club)
+        val other = base.filter { !(it.text == real[3][0] as String) }
+        val rows2 = League.readStandings(Fx.ocr(*other.toTypedArray()), "Fortuna Düsseldorf")!!
+        assertTrue("apelido de outro treinador não pode virar clube", rows2.none { it.club.startsWith("UzM Treinador") })
+        assertEquals(6, rows2.size); assertTrue(clubY > 0f)
+    }
+
+    @Test fun numeralWithThreeStrokesBecomesII() {
+        assertEquals("VfB Stuttgart II", League.fixNumeral("VfB Stuttgart III"))
+        assertEquals("VfB Stuttgart II", League.fixNumeral("VfB Stuttgart lll"))
+        assertEquals("VfB Stuttgart II", League.fixNumeral("VfB Stuttgart II"))
+        assertEquals("Santos", League.fixNumeral("Santos"))
+    }
+
     @Test fun rowWhoseEColumnWasNotReadIsRebuilt() {
         val rows = League.readStandings(screen(1, dropCol = mapOf(3 to 2)))!!          // Grêmio: E (3) não lido
         val g = rows.first { it.club == "Grêmio" }

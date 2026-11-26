@@ -611,9 +611,11 @@ object SquadDedupe {
     /** Iguais, quase iguais, ou um é o outro com a inicial na frente ("jtimber" x "timber"). */
     fun similarNames(a: String, b: String): Boolean {
         if (a == b) return true
-        if (a.length < 4 || b.length < 4) return false
+        if (a.length < 3 || b.length < 3) return false
         val s = if (a.length <= b.length) a else b
         val l = if (a.length <= b.length) b else a
+        // nome curto lido cortado pelo OCR ("Fat" para "Fati", 25/11): 3 letras só valem como início/fim do outro, com 1 letra a mais
+        if (s.length == 3) return l.length - s.length == 1 && (l.startsWith(s) || l.endsWith(s))
         if (l.length - s.length <= 2 && (l.endsWith(s) || l.startsWith(s))) return true
         return Txt.sim(a, b) >= 0.8
     }
