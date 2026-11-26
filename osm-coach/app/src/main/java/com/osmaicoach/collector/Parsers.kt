@@ -536,6 +536,8 @@ object Parsers {
 
             val badge = img?.let { PixelProbe.resultBadge(it, a.line.xc, a.line.yc) }
             val home = img?.let { PixelProbe.homeIcon(it, a.line.xc, a.line.yc) }
+            // taça no canto do card = jogo de copa (mesmo com rival já conhecido)
+            val trophy = if (stage != null) true else img?.let { PixelProbe.cupTrophy(it, a.line.xc, a.line.yc) }
             var mine: Int? = null
             var opp: Int? = null
             var finalHome = home
@@ -553,11 +555,12 @@ object Parsers {
             val key = if (a.round != null) "L" + a.round else "C:" + Txt.key(a.label)
             matches.add(
                 MatchRead(
-                    key = key, label = if (stage != null) "Copa • $stage" else a.label, round = a.round, date = date, time = time,
+                    key = key, label = if (stage != null) "Copa • $stage" else if (trophy == true) "Copa" else a.label, round = a.round, date = date, time = time,
                     home = finalHome, scoreMine = mine, scoreOpp = opp, result = result,
                     opponent = opponent, opponentNick = nick,
                     // escudo do rival: ~0,168 da altura abaixo do "Jornada N" (frame real 2448×1080 de 10/11), na mesma coluna
-                    crestX = if (opponent != null) a.line.xc else null, crestY = if (opponent != null) a.line.yc + 0.168f else null
+                    crestX = if (opponent != null) a.line.xc else null, crestY = if (opponent != null) a.line.yc + 0.168f else null,
+                    cupSeen = trophy
                 )
             )
         }

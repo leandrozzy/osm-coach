@@ -385,6 +385,19 @@ object PixelProbe {
     }
 
     /** Ícone de casinha à esquerda do rótulo: true=casa, false=fora, null=incerto. */
+    /** Taça branca no canto superior esquerdo do card (abaixo da casinha): marca TODO jogo de copa (print real 26/11: ~0,07 à esquerda e ~0,04 abaixo do "Jornada N"). */
+    fun cupTrophy(img: Img, labelX: Float, labelY: Float): Boolean? {
+        val x0 = labelX - 0.088f
+        val x1 = labelX - 0.052f
+        if (x1 <= 0f) return null
+        val white = frac(img, max(0f, x0), x1, labelY + 0.024f, labelY + 0.058f) { _, s, v -> s < 0.12f && v > 0.80f }
+        return when {
+            white >= 0.07f -> true
+            white <= 0.02f -> false
+            else -> null
+        }
+    }
+
     fun homeIcon(img: Img, labelX: Float, labelY: Float): Boolean? {
         val x0 = max(0f, labelX - 0.095f)
         val x1 = labelX - 0.04f

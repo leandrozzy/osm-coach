@@ -40,6 +40,36 @@ object Fixtures {
         return open.firstOrNull { m -> k != null && opponent(m)?.let { Txt.key(it) == k } == true } ?: open.firstOrNull { it.round == round }
     }
 
+    private val STAGE_ORDER = listOf("Fase preliminar", "Oitavos de final", "Quartos de final", "Meias finais", "Final")
+    private fun stageIdx(s: String): Int? {
+        val n = Txt.norm(s)
+        return when {
+            n.contains("prelimin") -> 0
+            n.contains("oitavo") -> 1
+            n.contains("quarto") -> 2
+            n.contains("meia") || n.contains("semi") -> 3
+            n.startsWith("final") -> 4
+            else -> null
+        }
+    }
+
+    /** Copa sem a fase escrita (rival já conhecido): deduz pela ordem dos jogos de copa e as fases que o calendário mostra. mkey → "Copa • fase". */
+    fun inferStages(all: List<MatchEntity>): Map<String, String> {
+        val cups = all.filter { isCup(it) }.sortedBy { it.round ?: Int.MAX_VALUE }
+        val idx = cups.map { c -> stage(c)?.let { stageIdx(it) } }
+        val out = HashMap<String, String>()
+        for ((c, m) in cups.withIndex()) {
+            if (idx[c] != null) continue
+            for (p in cups.indices) {
+                val i = idx[p] ?: continue
+                val k = i - (p - c)
+                if (k in STAGE_ORDER.indices) { out[m.mkey] = "Copa • " + STAGE_ORDER[k] }
+                break
+            }
+        }
+        return out
+    }
+
     fun stage(m: MatchEntity): String? = when {
         m.label.startsWith("Copa • ") -> m.label.removePrefix("Copa • ")
         isStage(m.opponent) -> m.opponent

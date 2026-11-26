@@ -859,7 +859,10 @@ class Repo(private val ctx: Context) {
         for (m in ex.matches) {
             val old = dao.match(slot, m.key)
             val n = MatchEntity(
-                slotId = slot, mkey = m.key, label = m.label,
+                slotId = slot, mkey = m.key,
+                // copa: mantém "Copa • fase" já conhecida se a taça não foi lida de novo (só liga confirmada desfaz)
+                label = if (!m.label.startsWith("Copa") && old != null && old.label.startsWith("Copa") && m.cupSeen != false) old.label
+                else if (m.label == "Copa" && old != null && old.label.startsWith("Copa • ")) old.label else m.label,
                 round = m.round ?: old?.round,
                 date = m.date ?: old?.date,
                 time = m.time ?: old?.time,
@@ -878,6 +881,10 @@ class Repo(private val ctx: Context) {
         }
         // Horário real do próximo jogo (o card mostra "HH:mm"): ignora copa da qual já fui eliminado e jogos
         // cujo horário já passou. O mesmo card confirma rival e mando de campo (evidência cruzada).
+        // fase dos jogos de copa que o card não escreve (rival já conhecido): deduzida da ordem das fases
+        for ((mk, lb) in Fixtures.inferStages(dao.matchesOf(slot))) {
+            dao.match(slot, mk)?.let { dao.putMatch(it.copy(label = lb)); changed++ }
+        }
         val all = dao.matchesOf(slot)
         // Apelido sob o nome do rival nos cards do calendário (ida ou volta): mais uma fonte para confirmar humano.
         val rivalNow = fieldMap(slot)[K.RIVAL_TEAM]?.value?.let { Txt.key(it) }

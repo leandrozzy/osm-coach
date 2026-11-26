@@ -133,4 +133,15 @@ class Round3CupTest {
         assertTrue(Fixtures.isCup(Fixtures.nextFor(listOf(league, cup), "Hansa Rostock", 40)!!))
         assertFalse(Fixtures.isCup(Fixtures.nextFor(listOf(league, cup), "VfB Stuttgart II", 40)!!))
     }
+    @Test fun cupWithKnownRivalGetsStageFromOrder() {
+        val all = listOf(
+            m("Copa • Fase preliminar", null, 6), m("Copa", "Internacional", 14), m("Copa • Quartos de final", null, 22),
+            m("Copa • Meias finais", null, 31), m("Jornada 15", "Mirassol", 15)
+        )
+        val inf = Fixtures.inferStages(all)
+        assertEquals("Copa • Oitavos de final", inf[all[1].mkey])
+        assertEquals(1, inf.size)
+        assertEquals("COPA • Oitavos de final", Fixtures.phase(all[1].copy(label = inf.getValue(all[1].mkey)), 14))
+        assertTrue(Fixtures.isCup(all[1]))
+    }
 }
