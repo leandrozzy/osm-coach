@@ -162,12 +162,12 @@ object Arts {
             val ledger = Ledger.parse(repo.dao.plan(slot, "ledger")?.json)
             val recent = ledger.filter { it.type == "buy" && it.key in keys }.sortedByDescending { it.at }.distinctBy { it.key }.take(3)
             if (recent.isNotEmpty()) out.add(Cand("news|$slot|${recent.first().at}", slot, "NEWS", "Capa de jornal: " + recent.joinToString(", ") { it.name }, recent.first().at, auto = false))
-            if (last != null && last.round != null) out.add(Cand("post|$slot|${last.round}", slot, "POST", "Jornal do jogo: J${last.round} ${last.scoreMine ?: "?"}×${last.scoreOpp ?: "?"} vs ${repo.realClub(last.opponent).orEmpty()}", last.updatedAt))
+            if (last != null && last.round != null) out.add(Cand("post|$slot|${last.round}", slot, "POST", "Jornal do jogo: ${if (Fixtures.isCup(last)) Fixtures.phase(last, last.round) else "J${last.round}"} ${last.scoreMine ?: "?"}×${last.scoreOpp ?: "?"} vs ${repo.realClub(last.opponent).orEmpty()}", last.updatedAt))
             if (last != null && last.result == "V") {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 val diff = (last.scoreMine ?: 0) - (last.scoreOpp ?: 0)
                 if (streak > 10) out.add(Cand("streak|$slot|$streak|${last.round}", slot, "STREAK", "$streak vitórias seguidas", last.updatedAt))     // só com MAIS de 10
-                if (diff >= 3) out.add(Cand("win|$slot|${last.round}", slot, "GOLEADA", "Goleada na J${last.round}: ${last.scoreMine}×${last.scoreOpp}", last.updatedAt))
+                if (diff >= 3) out.add(Cand("win|$slot|${last.round}", slot, "GOLEADA", "Goleada ${if (Fixtures.isCup(last)) "na " + Fixtures.phase(last, last.round) else "na J${last.round}"}: ${last.scoreMine}×${last.scoreOpp}", last.updatedAt))
             }
             // liderança: só quando EU assumo a ponta (na foto anterior da tabela eu não era o 1º)
             if (pos == 1 && ms.size >= 3 && tookLead(repo, slot, f[K.TEAM]?.value)) out.add(Cand("leader|$slot|${ms.last().round}", slot, "LEADER", "Assumiu a liderança na J${ms.last().round}", System.currentTimeMillis()))
@@ -185,7 +185,7 @@ object Arts {
             val rival = f[K.RIVAL_TEAM]?.value
             if (round != null && rival != null && f[K.RIVAL_STRENGTH]?.value?.toIntOrNull() != null && f[K.MY_STRENGTH]?.value?.toIntOrNull() != null) {
                 val soon = matchAt != null && matchAt > now && matchAt - now <= 24 * 3600_000L
-                out.add(Cand("match|$slot|$round", slot, "MATCHDAY", "Dia de jogo: J$round vs ${repo.realClub(rival)}", now, auto = soon))
+                out.add(Cand("match|$slot|$round", slot, "MATCHDAY", "Dia de jogo: ${Fixtures.nextFor(repo.dao.matchesOf(slot), rival, round)?.takeIf { Fixtures.isCup(it) }?.let { Fixtures.phase(it, round) } ?: "J$round"} vs ${repo.realClub(rival)}", now, auto = soon))
             }
         } else if (ms.isNotEmpty()) {
             val comp = Txt.key(f[K.COMPETITION]?.value.orEmpty())
@@ -352,8 +352,11 @@ object Arts {
         val whenTxt = matchAt?.let { java.text.SimpleDateFormat("dd/MM HH:mm", loc).format(java.util.Date(it)) }
         val names = if (shortNames.size == 1) shortNames[0] else shortNames.dropLast(1).joinToString(", ") + " e " + shortNames.last()
         val sub = "$team oficializa a chegada de $names"
-        val subLine = if (rival != null) "Reforços já à disposição para o jogo contra $rival" + (round?.let { ", pela rodada $it" } ?: "") else "Reforços já à disposição para a sequência da temporada"
-        val footer = if (rival != null) listOfNotNull("PRÓXIMO JOGO: ${team.uppercase()} x ${rival.uppercase()}", round?.let { "RODADA $it" }, whenTxt, homeTxt?.uppercase()).joinToString("  •  ")
+        val nextM = Fixtures.nextFor(repo.dao.matchesOf(c.slot), rival, round)
+        val cupNext = nextM != null && Fixtures.isCup(nextM)
+        val phaseTxt = if (cupNext) Fixtures.phase(nextM, round, f[K.COMP_TYPE]?.value) else round?.let { "RODADA $it" }
+        val subLine = if (rival != null) "Reforços já à disposição para o jogo contra $rival" + (if (cupNext) ", pela ${phaseTxt!!.replace(" • ", " — ").lowercase().replaceFirstChar { it.uppercase() }}" else round?.let { ", pela rodada $it" } ?: "") else "Reforços já à disposição para a sequência da temporada"
+        val footer = if (rival != null) listOfNotNull("PRÓXIMO JOGO: ${team.uppercase()} x ${rival.uppercase()}", phaseTxt, whenTxt, homeTxt?.uppercase()).joinToString("  •  ")
         else "${team.uppercase()}  •  ${comp.orEmpty().uppercase()}".trim(' ', '•')
         val facts = listOfNotNull(
             my?.let { "força do time $it" }, rv?.let { "força do rival $it" }, f[K.MY_ATK]?.value?.let { "ataque $it" }, f[K.MY_MID]?.value?.let { "meio-campo $it" },
@@ -432,7 +435,7 @@ object Arts {
         val where = when (mineHome) { true -> "em casa"; false -> "fora de casa"; else -> null }
         val roleFact = when (mineHome) { true -> "o $team foi o MANDANTE (jogou em casa) e o $opp foi o visitante"; false -> "o $team foi o VISITANTE (jogou fora de casa, no campo do $opp, que foi o mandante)"; else -> null }
         val facts = listOfNotNull(
-            "$team ${mine} x ${theirs} $opp ($resWord do $team${where?.let { " $it" } ?: ""})", roleFact, "rodada $round", comp?.takeIf { it.isNotBlank() }?.let { "competição: $it" },
+            "$team ${mine} x ${theirs} $opp ($resWord do $team${where?.let { " $it" } ?: ""})", roleFact, if (Fixtures.isCup(m)) "jogo de COPA (${Fixtures.phase(m, round, null)}), NÃO é rodada da liga" else "rodada $round", comp?.takeIf { it.isNotBlank() }?.let { "competição: $it" },
             pos?.let { "$team ocupa o ${it}º lugar na liga" }, "campanha do $team: ${v}V ${e}E ${d}D",
             if (my != null && rv != null) "força do $team $my contra $rv do $opp" else null,
             if (goalFacts.isNotEmpty()) "gols: " + goalFacts.joinToString("; ") else null,
@@ -440,9 +443,9 @@ object Arts {
         ).joinToString(". ")
         val story = ArtsAi.matchStory(ctx, facts)
         val headline = story?.first ?: when (res) { "V" -> "$team vence o $opp por $mine a $theirs"; "D" -> "$team perde para o $opp por $theirs a $mine"; else -> "$team e $opp empatam em $mine a $theirs" }
-        val sub = story?.second ?: "Pela rodada $round" + (comp?.let { " do $it" } ?: "") + (pos?.let { ", o time ocupa o ${it}º lugar" } ?: "") + "."
+        val sub = story?.second ?: (if (Fixtures.isCup(m)) "Pela ${Fixtures.phase(m, round, null).replace(" • ", " — ").lowercase().replaceFirstChar { it.uppercase() }}" else "Pela rodada $round") + (comp?.let { " do $it" } ?: "") + (pos?.let { ", o time ocupa o ${it}º lugar" } ?: "") + "."
         val body = story?.third ?: listOf(
-            "O $team ${when (res) { "V" -> "venceu"; "D" -> "perdeu"; else -> "empatou" }} com o $opp por $mine a $theirs${where?.let { " $it" } ?: ""}, pela rodada $round." +
+            "O $team ${when (res) { "V" -> "venceu"; "D" -> "perdeu"; else -> "empatou" }} com o $opp por $mine a $theirs${where?.let { " $it" } ?: ""}, ${if (Fixtures.isCup(m)) "pela ${Fixtures.phase(m, round, null).replace(" • ", " — ").lowercase()}" else "pela rodada $round"}." +
                 (if (goalFacts.isNotEmpty()) " Gols: " + goalFacts.joinToString(", ") + "." else ""),
             "A campanha do time na competição é de ${v} vitória(s), ${e} empate(s) e ${d} derrota(s)" + (if (my != null && rv != null) ", com força $my contra $rv do adversário no confronto." else ".")
         )
@@ -454,7 +457,7 @@ object Arts {
             th, crest, "JORNAL DO " + team.uppercase(), date, headline, sub, body, photo,
             if (awayM) oppCrest else crest, if (awayM) crest else oppCrest, if (awayM) opp else team, if (awayM) team else opp,
             if (awayM) "$theirs × $mine" else "$mine × $theirs", goalLines,
-            listOfNotNull("RODADA $round", comp?.uppercase(), pos?.let { "${it}º LUGAR" }, "CAMPANHA ${v}V ${e}E ${d}D").joinToString("  •  ")
+            listOfNotNull(if (Fixtures.isCup(m)) Fixtures.phase(m, round, null) else "RODADA $round", comp?.uppercase(), if (Fixtures.isCup(m)) null else pos?.let { "${it}º LUGAR" }, "CAMPANHA ${v}V ${e}E ${d}D").joinToString("  •  ")
         )
         photo?.recycle()
         return out
@@ -506,7 +509,7 @@ object Arts {
                 val streak = ms.reversed().takeWhile { it.result == "V" }.size
                 // quem joga em casa fica à ESQUERDA (placar e escudos)
                 banner = "GOLEADA!"; big = if (m.home == false) "${m.scoreOpp ?: 0} × ${m.scoreMine ?: 0}" else "${m.scoreMine ?: 0} × ${m.scoreOpp ?: 0}"
-                info = "J${m.round} • ${repo.realClub(m.opponent).orEmpty()}"
+                info = (if (Fixtures.isCup(m)) Fixtures.phase(m, m.round, null) else "J${m.round}") + " • ${repo.realClub(m.opponent).orEmpty()}"
                 plate = if (streak >= 2) "SEQUÊNCIA" to "$streak vitórias" else "JOGO" to (if (m.home == true) "em casa" else if (m.home == false) "fora" else "—")
                 foot = "Vamos pra cima, $team!"
             }
@@ -565,7 +568,8 @@ object Arts {
                 val home = f[K.HOME]?.value
                 val awayM = f[K.HOME]?.value?.lowercase() == "fora"   // em casa à esquerda
                 banner = "DIA DE JOGO"; big = if (my != null && rv != null) (if (awayM) "$rv × $my" else "$my × $rv") else "J${round ?: ""}"
-                info = listOfNotNull(round?.let { "Rodada $it" }, home?.lowercase(), if (f[K.RIVAL_HUMAN]?.value == "Sim") "rival humano" else "rival CPU").joinToString("  •  ")
+                val nextMd = Fixtures.nextFor(repo.dao.matchesOf(slot), rivalRaw, round)
+                info = listOfNotNull(if (nextMd != null && Fixtures.isCup(nextMd)) Fixtures.phase(nextMd, round, null) else round?.let { "Rodada $it" }, home?.lowercase(), if (f[K.RIVAL_HUMAN]?.value == "Sim") "rival humano" else "rival CPU").joinToString("  •  ")
                 plate = prob?.let { "CHANCE DE VITÓRIA" to (if (awayM) "${it.loss}%|${it.draw}%|${it.win}%" else "${it.win}%|${it.draw}%|${it.loss}%") }
                 foot = "Hoje é dia de decidir!"
                 val sceneV = ArtsAi.scene(ArtsAi.prompt(c.kind, colors, "", ""), seed) ?: return null

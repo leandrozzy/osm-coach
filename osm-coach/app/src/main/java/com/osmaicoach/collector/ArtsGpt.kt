@@ -110,7 +110,12 @@ object ArtsGpt {
         val posNow = numOf(f[K.LEAGUE_POS]?.value)
         val objective = numOf(f[K.MY_OBJECTIVE]?.value)
         /** "V 2×0 Rival (casa)" dos últimos jogos lidos: fatos reais para a arte (nada de campanha zerada quando ninguém jogou). */
-        fun lastGames(n: Int) = ms.takeLast(n).joinToString("; ") { m -> "${m.result} ${m.scoreMine}×${m.scoreOpp} ${repo.realClub(m.opponent) ?: m.opponent ?: "?"}" + (if (m.home == true) " (casa)" else if (m.home == false) " (fora)" else "") }
+        val allMs = repo.dao.matchesOf(slot)
+        val compType = f[K.COMP_TYPE]?.value
+        /** Liga × Copa (o calendário diz): jogo de copa traz a fase (oitavas, quartas, semi, final); nunca é "rodada da liga". */
+        fun phaseOf(m: MatchEntity?) = Fixtures.phase(m, m?.round ?: numOf(f[K.ROUND]?.value), compType)
+        fun phaseNote(m: MatchEntity?): String = if (m != null && Fixtures.isCup(m)) "Tipo de jogo: ${phaseOf(m)} — jogo de COPA (mata-mata), NÃO é jogo da liga nem tem \"rodada\": escreva COPA e a fase na arte.\n" else "Tipo de jogo: ${phaseOf(m)} (jogo da LIGA).\n"
+        fun lastGames(n: Int) = ms.takeLast(n).joinToString("; ") { m -> "${m.result} ${m.scoreMine}×${m.scoreOpp} ${repo.realClub(m.opponent) ?: m.opponent ?: "?"}" + (if (m.home == true) " (casa)" else if (m.home == false) " (fora)" else "") + (if (Fixtures.isCup(m)) " [${phaseOf(m)}]" else "") }
         val campanha = if (ms.isEmpty()) "a temporada ainda não teve jogos lidos (NÃO escreva campanha, vitórias, gols nem aproveitamento: ainda não existem)" else "${v}V ${e}E ${d}D, aproveitamento $aprov%, gols ${ms.sumOf { it.scoreMine ?: 0 }} × ${ms.sumOf { it.scoreOpp ?: 0 }}"
         /** Gols do jogo (os DOIS lados, com minuto e autor quando lidos), como na capa de jornal. */
         suspend fun goalsBlock(m: MatchEntity, opp: String): String {
@@ -146,15 +151,20 @@ object ArtsGpt {
         val stRows = League.table(repo.dao.plan(slot, "league")?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }, "st").filter { it.rank != null }.sortedBy { it.rank }
         val myRow = League.find(stRows, teamRaw) ?: League.find(stRows, team)
         val sb = StringBuilder()
-        fun head(kind: String, fmt: String = "vertical 1080x1350") =
-            sb.append("ARTE NOVA E INDEPENDENTE: ignore o conteúdo, os nomes e o estilo das imagens anteriores desta conversa.\nCrie um pôster de futebol $fmt: $kind. Siga as instruções do projeto (realista, estádio à noite, futebol de campo, escudos e nomes exatos). Gere uma composição NOVA e criativa, diferente das anteriores.\n\n")
+        fun head(kind: String, fmt: String = "vertical 1080x1350") {
+            sb.append("ARTE NOVA E INDEPENDENTE: ignore o conteúdo, os nomes e o estilo das imagens anteriores desta conversa.\nCrie um pôster de futebol $fmt: $kind. Siga as instruções do projeto (realista, estádio à noite, futebol de campo, escudos e nomes exatos). Gere uma composição NOVA e criativa, diferente das anteriores.\n")
+            sb.append("Tipo de competição deste slot: " + when (compType) { "Copa" -> "COPA (mata-mata, com fases)"; "Batalha" -> "BATALHA DE GRUPOS"; else -> "LIGA (pontos corridos; o calendário pode ter jogos de COPA, que vêm marcados)" } + ".\n\n")
+        }
         when (c.kind) {
             "MATCHDAY" -> {
                 val r = rival ?: return null
                 val p = runCatching { Director.winProb(repo, slot) }.getOrNull()
                 val (l, rt) = if (away) r to team else team to r
                 head("DIA DE JOGO")
-                sb.append("Jogo: $l × $rt (casa à esquerda, fora à direita). Rodada ${round ?: "—"}. Meu clube: $club. Rival: $r.\n")
+                val nextM = Fixtures.nextFor(allMs, rivalRaw, numOf(round))
+                val phaseTxt = if (nextM != null && Fixtures.isCup(nextM)) phaseOf(nextM) else "Rodada ${round ?: "—"}"
+                sb.append("Jogo: $l × $rt (casa à esquerda, fora à direita). $phaseTxt. Meu clube: $club. Rival: $r.\n")
+                sb.append(phaseNote(nextM))
                 val myN = my?.toIntOrNull(); val rvN = rv?.toIntOrNull()
                 if (myN != null && rvN != null) sb.append("Força geral: $team $myN × $r $rvN.\n")
                 val cmp = sectors.mapNotNull { (n, a, b) -> val x = f[a]?.value; val y = f[b]?.value; if (x != null && y != null) "$n: $team $x × $r $y" else null }
@@ -166,7 +176,7 @@ object ArtsGpt {
                 sb.append("Jogadores (use os rostos reais deles): melhor do meu time = ${myLine ?: "um jogador do $team"}, em destaque, de braços cruzados; melhor do adversário = ${rivLine ?: "um jogador do $r"}, menor, ao fundo do outro lado, com a camisa do $r.\n")
                 if (p != null) {
                     val (pl, pr) = if (away) p.loss to p.win else p.win to p.loss
-                    sb.append("Texto na imagem: \"DIA DE JOGO\"; \"Rodada ${round ?: ""} • $l × $rt\"; faixa esquerda: \"${l.uppercase()}\" e \"$pl%\"; centro: \"Empate ${p.draw}%\"; faixa direita: \"${rt.uppercase()}\" e \"$pr%\"; linha pequena: \"Força ${if (away) "$rv × $my" else "$my × $rv"}\".\n")
+                    sb.append("Texto na imagem: \"DIA DE JOGO\"; \"$phaseTxt • $l × $rt\"; faixa esquerda: \"${l.uppercase()}\" e \"$pl%\"; centro: \"Empate ${p.draw}%\"; faixa direita: \"${rt.uppercase()}\" e \"$pr%\"; linha pequena: \"Força ${if (away) "$rv × $my" else "$my × $rv"}\".\n")
                 }
                 val edge = if (myN != null && rvN != null) myN - rvN else 0
                 sb.append("Texto de apoio: fale MAIS do $team, com tom de torcida do meu clube. " + when {
@@ -201,7 +211,8 @@ object ArtsGpt {
                 }
                 head("PÓS-JOGO / CAPA DE JORNAL", "horizontal 1600x1120")
                 sb.append("Estilo desta vez: ${pick(POST_STYLES)}.\n")
-                sb.append("Jornal do $team. Resultado: $res de $team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}" + (if (mineHome == true) " (em casa)" else if (mineHome == false) " (fora)" else "") + ". Clube: $club. Campanha: ${v}V ${e}E ${d}D.\n")
+                sb.append(phaseNote(m))
+                sb.append("Jornal do $team. Resultado: $res de $team ${m.scoreMine} × ${m.scoreOpp} $opp, ${if (Fixtures.isCup(m)) phaseOf(m) else "rodada ${m.round}"}" + (if (mineHome == true) " (em casa)" else if (mineHome == false) " (fora)" else "") + ". Clube: $club. Campanha: ${v}V ${e}E ${d}D.\n")
                 val ourGoals = shown.filter { it.third == true }; val theirGoals = shown.filter { it.third == false }; val sideless = shown.filter { it.third == null }
                 val mineScore = m.scoreMine ?: 0; val oppScore = m.scoreOpp ?: 0
                 suspend fun goalText(g: Triple<String?, String, Boolean?>): String {
@@ -250,7 +261,8 @@ object ArtsGpt {
                 if (m.result != "V" || (m.scoreMine ?: 0) - (m.scoreOpp ?: 0) < 3) return null        // só goleada A MEU FAVOR
                 val opp = repo.realClub(m.opponent) ?: m.opponent ?: return null
                 head("GOLEADA")
-                sb.append("$team ${m.scoreMine} × ${m.scoreOpp} $opp, rodada ${m.round}" + (if (m.home == true) " (em casa)" else if (m.home == false) " (fora)" else "") + ". Clube: $club.\n")
+                sb.append(phaseNote(m))
+                sb.append("$team ${m.scoreMine} × ${m.scoreOpp} $opp, ${if (Fixtures.isCup(m)) phaseOf(m) else "rodada ${m.round}"}" + (if (m.home == true) " (em casa)" else if (m.home == false) " (fora)" else "") + ". Clube: $club.\n")
                 sb.append("GOLS (mostre quem marcou, com minuto quando informado):\n" + goalsBlock(m, opp))
                 sb.append("Cite pelo NOME os autores informados; para \"gol sem autor identificado\" escreva só \"gol do <clube>\". Nunca invente nome nem minuto.\n")
                 if (squadMine.isNotEmpty()) sb.append("Elenco do $team (nomes reais, para rostos e camisas): $squadMine.\n")
@@ -347,6 +359,7 @@ object ArtsGpt {
             else -> return null
         }
         if (c.kind !in listOf("POST", "NEWS")) sb.append("\nEstilo desta vez: ${pick(GENERIC_STYLES)} (varie a cena, o enquadramento e a luz em relação às artes anteriores).")
+        sb.append("\nLIGA × COPA: se o pedido diz COPA, escreva COPA e a fase exata (ex.: OITAVOS DE FINAL, QUARTOS DE FINAL, MEIA-FINAL, FINAL) e NUNCA chame de \"rodada\" nem de liga; se diz LIGA, use a rodada. Não troque um pelo outro.")
         sb.append("\nEscreva nos textos os nomes reais dos clubes exatamente como informei acima (o nome que aparece como \"no OSM\" é só do jogo, não use na imagem), sem acrescentar nem trocar palavras. Não invente números nem nomes além dos informados. Texto em português, letras grandes e nítidas.")
         return sb.toString()
     }

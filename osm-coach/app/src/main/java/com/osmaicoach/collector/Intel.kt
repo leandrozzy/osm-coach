@@ -22,6 +22,24 @@ object Fixtures {
 
     fun isCup(m: MatchEntity): Boolean = m.label.startsWith("Copa") || isStage(m.opponent)
 
+    /** Fase da copa legível ("Oitavos-de-final" → "Oitavos de final"); null se não é copa ou o card não diz a fase. */
+    fun stageLabel(m: MatchEntity): String? = stage(m)?.replace('-', ' ')?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotBlank() }?.replaceFirstChar { it.uppercase() }
+
+    /** Onde o jogo se joga, para as artes: "COPA • Oitavos de final", "BATALHA DE GRUPOS • rodada 3" ou "LIGA • rodada 13". Copa nunca vira "rodada". */
+    fun phase(m: MatchEntity?, round: Int?, compType: String? = null): String = when {
+        m != null && isCup(m) -> "COPA" + (stageLabel(m)?.let { " • $it" } ?: "")
+        compType == "Copa" -> "COPA"
+        compType == "Batalha" -> "BATALHA DE GRUPOS" + (round?.let { " • rodada $it" } ?: "")
+        else -> "LIGA" + ((m?.round ?: round)?.let { " • rodada $it" } ?: "")
+    }
+
+    /** O próximo jogo (ainda sem resultado) contra [rivalRaw]; sem rival, o da rodada [round]. */
+    fun nextFor(all: List<MatchEntity>, rivalRaw: String?, round: Int?): MatchEntity? {
+        val open = all.filter { it.result == null }
+        val k = rivalRaw?.let { Txt.key(it) }
+        return open.firstOrNull { m -> k != null && opponent(m)?.let { Txt.key(it) == k } == true } ?: open.firstOrNull { it.round == round }
+    }
+
     fun stage(m: MatchEntity): String? = when {
         m.label.startsWith("Copa • ") -> m.label.removePrefix("Copa • ")
         isStage(m.opponent) -> m.opponent
