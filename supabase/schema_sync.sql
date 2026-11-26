@@ -80,12 +80,10 @@ begin
   return jsonb_build_object('inserted', ins, 'updated', upd, 'unchanged', skip);
 end $$;
 
--- ---------- status legível pelo app (chave anon): totais, quantos de cada fonte, fila, progresso e últimas execuções ----------
-create or replace function wf_sync_status() returns jsonb language sql stable security definer set search_path = public as $$
-  select jsonb_build_object(
-    'wanted_pending', (select count(*) from wf_wanted where status = 'novo'),
-    'wanted_done', (select count(*) from wf_wanted where status = 'feito'),
-    'wanted_none', (select count(*) from wf_wanted where status = 'sem'),
+-- ---------- contagens por fonte: PESADAS (varrem ~340 mil jogadores), por isso são calculadas pela função world-sync (sem o limite de 3 s da chave anon) e guardadas ----------
+create or replace function wf_refresh_counts() returns void language plpgsql security definer set search_path = public set statement_timeout = '120s' as $$
+begin
+  insert into wf_sync_state(task, cursor, info, updated_at) values ('counts', null, jsonb_build_object(
     'clubs', jsonb_build_object(
       'total', (select count(*) from wf_clubs),
       'reep', (select count(*) from wf_clubs where reep_id is not null),
@@ -98,10 +96,22 @@ create or replace function wf_sync_status() returns jsonb language sql stable se
       'wikidata', (select count(*) from wf_players where wikidata is not null),
       'apif', (select count(*) from wf_players where apif_id is not null),
       'transfermarkt', (select count(*) from wf_players where tm_id is not null),
-      'added_by_sync', (select count(*) from wf_players where row_hash = 'sync')),
-    'tasks', coalesce((select jsonb_object_agg(task, jsonb_build_object('cursor', cursor, 'at', updated_at, 'info', info)) from wf_sync_state where task <> 'lock'), '{}'::jsonb),
+      'added_by_sync', (select count(*) from wf_players where row_hash = 'sync'))), now())
+  on conflict (task) do update set info = excluded.info, updated_at = now();
+end $$;
+
+-- ---------- status legível pelo app (chave anon): LEVE (só lê o que já está guardado) ----------
+create or replace function wf_sync_status() returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'wanted_pending', (select count(*) from wf_wanted where status = 'novo'),
+    'wanted_done', (select count(*) from wf_wanted where status = 'feito'),
+    'wanted_none', (select count(*) from wf_wanted where status = 'sem'),
+    'clubs', coalesce((select info->'clubs' from wf_sync_state where task = 'counts'), '{}'::jsonb),
+    'players', coalesce((select info->'players' from wf_sync_state where task = 'counts'), '{}'::jsonb),
+    'counts_at', (select updated_at from wf_sync_state where task = 'counts'),
+    'tasks', coalesce((select jsonb_object_agg(task, jsonb_build_object('cursor', cursor, 'at', updated_at, 'info', info)) from wf_sync_state where task not in ('lock', 'counts')), '{}'::jsonb),
     'runs', coalesce((select jsonb_agg(r) from (select started_at, finished_at, rows_changed, status, message from wf_runs where source = 'world-sync' order by id desc limit 8) r), '[]'::jsonb));
 $$;
 
-grant execute on function wf_merge_clubs(jsonb), wf_merge_players(jsonb) to service_role;
+grant execute on function wf_merge_clubs(jsonb), wf_merge_players(jsonb), wf_refresh_counts() to service_role;
 grant execute on function wf_sync_status() to anon, authenticated;

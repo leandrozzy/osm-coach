@@ -228,6 +228,7 @@ Deno.serve(async (req) => {
     }
     out.clubs = acc.clubs; out.players = acc.players;
     const changed = Number((out.clubs as any)?.changed ?? 0) + Number((out.players as any)?.changed ?? 0) + Number((out.apif as any)?.players ?? 0) + Number((out.apif as any)?.clubs ?? 0);
+    await db("rpc/wf_refresh_counts", { method: "POST", body: "{}" }).catch(() => {});      // contagens por fonte para a tela do app
     await db(`wf_runs?id=eq.${run[0].id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ finished_at: new Date().toISOString(), rows_changed: changed, status: "ok", message: JSON.stringify(out).slice(0, 400) }) });
     await setState("lock", null, { until: 0 });
     return new Response(JSON.stringify({ ok: true, ms: Date.now() - T0, ...out }), { headers: cors });

@@ -68,7 +68,7 @@ object WorldRemote {
         val (code, body) = get(ctx, "/rest/v1/rpc/wf_sync_status", 20_000)
         if (code == -1) error("Supabase não configurado")
         if (code == 404) error("falta rodar supabase/schema_sync.sql no SQL Editor")
-        if (code !in 200..299 || body == null) error("HTTP $code")
+        if (code !in 200..299 || body == null) error("HTTP $code ${body.orEmpty().take(140)}")
         JSONObject(body)
     }
 
