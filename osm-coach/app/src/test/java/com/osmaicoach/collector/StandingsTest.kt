@@ -93,7 +93,7 @@ class StandingsReadingTest {
     )
 
     /** Uma tela com 7 linhas a partir da posição `from` (1..); `noRank` = posições sem número lido (taça dourada); `badPts` = pontos lidos errado por posição. */
-    private fun screen(from: Int, noRank: Set<Int> = emptySet(), badPts: Map<Int, String> = emptyMap(), skipNick: Set<Int> = emptySet()): OcrResult {
+    private fun screen(from: Int, noRank: Set<Int> = emptySet(), badPts: Map<Int, String> = emptyMap(), skipNick: Set<Int> = emptySet(), dropCol: Map<Int, Int> = emptyMap(), partialBottom: String? = null): OcrResult {
         val lines = ArrayList<OcrLine>()
         lines.add(Fx.line("Clube", 0.07f, 0.23f)); lines.add(Fx.line("Jog", 0.786f, 0.23f)); lines.add(Fx.line("Pts", 0.91f, 0.23f)); lines.add(Fx.line("Gm-Gs", 0.965f, 0.23f))
         for (k in 0 until 7) {
@@ -102,9 +102,12 @@ class StandingsReadingTest {
             lines.add(Fx.line(r[0] as String, 0.15f, y - 0.018f, 0.12f))
             if (pos !in skipNick) lines.add(Fx.line("UzM Treinador$pos", 0.15f, y + 0.018f, 0.12f))
             lines.add(Fx.line("UZM", 0.74f, y, 0.04f))
-            lines.add(Fx.line("${r[1]}", 0.786f, y, 0.02f)); lines.add(Fx.line("${r[2]}", 0.814f, y, 0.02f)); lines.add(Fx.line("${r[3]}", 0.841f, y, 0.02f)); lines.add(Fx.line("${r[4]}", 0.869f, y, 0.02f))
+            val drop = dropCol[pos]
+            if (drop != 0) lines.add(Fx.line("${r[1]}", 0.786f, y, 0.02f)); if (drop != 1) lines.add(Fx.line("${r[2]}", 0.814f, y, 0.02f)); if (drop != 2) lines.add(Fx.line("${r[3]}", 0.841f, y, 0.02f)); if (drop != 3) lines.add(Fx.line("${r[4]}", 0.869f, y, 0.02f))
             lines.add(Fx.line(badPts[pos] ?: "${r[5]}", 0.910f, y, 0.02f)); lines.add(Fx.line("${r[6]}-${r[7]}", 0.965f, y, 0.04f))
         }
+        // 8ª linha cortada na borda de baixo (como nos prints do slot 2): só um pedaço do nome, sem números
+        partialBottom?.let { lines.add(Fx.line(it, 0.15f, 0.325f + 0.099f * 7 - 0.018f, 0.12f)); lines.add(Fx.line("Uzm", 0.15f, 0.325f + 0.099f * 7 + 0.018f, 0.12f)) }
         return Fx.ocr(*lines.toTypedArray())
     }
 
@@ -136,5 +139,23 @@ class StandingsReadingTest {
         assertTrue("sem o 20º a tabela não pode fechar", !missingLast.complete)
         val missingMid = Standings.build(rowsOf(9), 1L, "Red Bull Bragantino", 11, true)!!
         assertEquals(listOf(9), missingMid.missingRanks); assertTrue(!missingMid.complete)
+    }
+
+    @Test fun rowCutAtTheBottomEdgeIsIgnoredInsteadOfBecomingAGarbageClub() {
+        val rows = League.readStandings(screen(1, partialBottom = "Cantoe"))!!
+        assertEquals(7, rows.size); assertTrue(rows.none { it.club == "Cantoe" })
+    }
+
+    @Test fun rowWhoseEColumnWasNotReadIsRebuilt() {
+        val rows = League.readStandings(screen(1, dropCol = mapOf(3 to 2)))!!          // Grêmio: E (3) não lido
+        val g = rows.first { it.club == "Grêmio" }
+        assertEquals(listOf(11, 8, 3, 0, 27), listOf(g.j, g.v, g.e, g.d, g.pts))
+    }
+
+    @Test fun aNewReadingOfAPositionReplacesTheStaleGarbageRowOfThatPosition() {
+        val old = League.merge(null, "st", listOf(League.Row("Cantoe", null, 8, 21, 10, 2, 9, 32, 40, 20), League.Row("Admira Wacker", null, 9, 21, 9, 5, 7, 32, 29, 27)), 1000L)
+        val now = League.merge(old, "st", listOf(League.Row("Liefering", "leandrozzy", 8, 21, 10, 2, 9, 32, 40, 20)), 2000L)
+        val t = League.table(now, "st").associate { it.rank to it.club }
+        assertEquals("Liefering", t[8]); assertEquals("Admira Wacker", t[9]); assertEquals(2, t.size)
     }
 }

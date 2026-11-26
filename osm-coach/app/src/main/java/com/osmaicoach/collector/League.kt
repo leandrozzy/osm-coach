@@ -104,7 +104,8 @@ object League {
     }
 
     fun readStandings(o: OcrResult): List<Row>? {
-        val cand = o.lines.filter { it.l in 0.04f..0.40f && it.yc > 0.25f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
+        // só linhas INTEIRAS: a primeira/última do scroll aparecem cortadas na borda (prints de 25/11: a 8ª linha de cada rolagem) e o OCR lê um pedaço das letras ("Cantoe", "Dartini Tirar")
+        val cand = o.lines.filter { it.l in 0.04f..0.40f && it.yc in 0.285f..0.955f && Txt.letters(it.text) >= 2 }.sortedBy { it.yc }
         val heads = ArrayList<OcrLine>(); val nicks = HashMap<OcrLine, OcrLine>()
         for (ln in cand) {
             val h = heads.lastOrNull()
@@ -173,6 +174,8 @@ object League {
         val j = old ?: JSONObject()
         val m = j.optJSONObject(kind) ?: JSONObject()
         val prevAt = j.optLong(kind + "At", 0L)
+        // posição que acabou de ser lida de novo por OUTRO nome: a linha antiga daquela posição (leitura cortada/errada como "Cantoe", ou o mesmo clube com outra grafia) sai
+        if (kind == "st") for (r in rows) { val rk = r.rank ?: continue; for (k in m.keys().asSequence().toList()) { val o = m.optJSONObject(k) ?: continue; if (!o.isNull("rank") && o.optInt("rank") == rk && k != key(r.club)) m.remove(k) } }
         for (r in rows) m.put(key(r.club), toJson(r).put("at", now))
         j.put(kind, m).put(kind + "At", now)
         if (kind == "st") snapshotPass(j, m, rows, prevAt, now)
