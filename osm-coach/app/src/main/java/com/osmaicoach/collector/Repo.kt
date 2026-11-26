@@ -44,6 +44,10 @@ class Repo(private val ctx: Context) {
             val o = old[k]?.let { StoredField(it.fvalue, it.conf, it.updatedAt) }
             // leitura de uma tela mais antiga que o dado guardado (reprocessamento, telas aplicadas com atraso) não volta atrás
             if (o != null && now < o.updatedAt && FieldMerge.known(o.value)) continue
+            if (k == K.TEAM && o != null && old[k]?.source != "manual") when (FieldMerge.teamClash(o.value, r.value)) {
+                1 -> continue                                                                    // "Demirovic Red Bull Bragantino": nome de jogador colado no time
+                2 -> { dao.putField(FieldEntity(slot, k, r.value, maxOf(r.conf, o.conf), now, source)); changed++; continue }   // o guardado estava sujo
+            }
             if (k in CHECKED && o != null && old[k]?.source != "manual") noteConflict(slot, k, o, r.value, now)
             val n = FieldMerge.merge(k, o, r, now) ?: continue
             // mesma leitura repetida: só renova a data de leitura (mantém a origem e não conta como mudança)

@@ -94,7 +94,7 @@ object SlotRules {
         if (imgs != null) for (k in imgs.keys()) {
             if (k in manual) continue
             // 1º o país já identificado (fica guardado por jogador); 2º identifica agora (bandeiras do Flagpedia + Atlas); 3º só o Atlas pela miniatura
-            var iso = isos.optString(k).takeIf { it.isNotEmpty() }
+            var iso = isos.optString(k).takeIf { it.isNotEmpty() }?.let { v -> FlagIdent.canon(v).also { c -> if (c != v) { isos.put(k, c); changed = true } } }   // Ilha Bouvet → Noruega
             if (iso == null && filesDir != null) {
                 iso = FlagIdent.identify(filesDir, imgs.optString(k), atlas)
                 if (iso != null) { isos.put(k, iso); changed = true }

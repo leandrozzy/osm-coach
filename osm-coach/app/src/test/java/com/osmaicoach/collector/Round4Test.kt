@@ -50,3 +50,15 @@ class Round4SyncTest {
         assertEquals("kf laci", rows.getJSONObject(1).getString("name_fold"))
     }
 }
+
+class Round4TeamNameTest {
+    @Test fun playerNameGluedBeforeTheTeamIsIgnoredAndRepaired() {
+        assertEquals(1, FieldMerge.teamClash("Red Bull Bragantino", "Demirovic Red Bull Bragantino"))
+        assertEquals(2, FieldMerge.teamClash("Demirovic Red Bull Bragantino", "Red Bull Bragantino"))
+        assertEquals(0, FieldMerge.teamClash("Liefering", "SK Sturm Graz II"))
+        assertEquals(0, FieldMerge.teamClash("Red Bull Bragantino", "Red Bull Bragantino"))
+    }
+    @Test fun lookalikeFlagTerritoriesMapToTheRealCountry() {
+        assertEquals("no", FlagIdent.canon("bv")); assertEquals("no", FlagIdent.canon("SJ")); assertEquals("fr", FlagIdent.canon("gf")); assertEquals("br", FlagIdent.canon("br"))
+    }
+}

@@ -152,7 +152,12 @@ object FlagIdent {
      * O Atlas (nome→bandeira lido dos filtros do OSM) NÃO entra mais na decisão: no aparelho do usuário ele tinha guardado a Albânia como "Turquia", o Mali como
      * "Senegal" e a Argentina como "El Salvador" (bandeiras de cores iguais, diferença só no emblema/estrela) e, com prioridade, trocava o país certo pelo errado.
      */
-    internal fun pick(t16: Cells, lab: FloatArray?, rs: List<Ref>): String? {
+    /** Territórios com bandeira IDÊNTICA à de outro país (Ilha Bouvet e Svalbard = Noruega; Guiana Francesa/Mayotte… = França): o jogo mostra o país de verdade. */
+    private val ALIAS = mapOf("bv" to "no", "sj" to "no", "cp" to "fr", "gf" to "fr", "gp" to "fr", "mq" to "fr", "re" to "fr", "yt" to "fr", "bl" to "fr", "mf" to "fr", "pm" to "fr", "tf" to "fr", "um" to "us", "hm" to "au")
+    fun canon(iso: String): String = ALIAS[iso.lowercase()] ?: iso
+
+    internal fun pick(t16: Cells, lab: FloatArray?, rs0: List<Ref>): String? {
+        val rs = rs0.filter { it.iso.lowercase() !in ALIAS }.ifEmpty { rs0 }
         val ranked = rs.sortedBy { dist(t16, it.c16) }
         if (ranked.isEmpty()) return null
         if (lab == null || ranked.size < 2) return ranked[0].iso

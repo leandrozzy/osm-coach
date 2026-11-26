@@ -189,19 +189,24 @@ async function wikidataSweep(kind: "clubs" | "players", isos: string[], names: M
   const task = `wikidata_${kind}`; const st = await getState(task);
   let [iso, off] = (st.cursor ?? `${isos[0]}:0`).split(":"); let offset = Number(off) || 0;
   let idx = Math.max(0, isos.indexOf(iso)); const info: any = { ...st.info, last: [] };
-  let did = 0, added = 0;
+  let did = 0, added = 0, rateLimited = false;
   while (did < slices && left() > 40_000) {
     iso = isos[idx];
     try {
       const r = kind === "clubs" ? await wikidataClubs(iso, offset) : await wikidataPlayers(iso, offset, names.get(iso) ?? null);
       added += r.res.inserted + r.res.updated; info.last.push(`${iso}:${offset}+${r.n}`);
       if (r.n >= WD_PAGE) offset += WD_PAGE; else { offset = 0; idx = (idx + 1) % isos.length; if (idx === 0) info.cycles = (info.cycles ?? 0) + 1; }
-    } catch (e) { info.error = `${iso}: ${String((e as Error).message ?? e).slice(0, 100)}`; offset = 0; idx = (idx + 1) % isos.length; }   // país que falha é pulado; volta na próxima volta
+    } catch (e) {
+      const msg = String((e as Error).message ?? e);
+      info.error = `${iso}: ${msg.slice(0, 100)}`;
+      if (/429|503/.test(msg)) { rateLimited = true; break; }                                    // Wikidata pediu calma: para esta execução e tenta na próxima (sem pular o país)
+      offset = 0; idx = (idx + 1) % isos.length;                                                   // outro erro: país pulado; volta na próxima volta
+    }
     did++;
   }
   info.last = info.last.slice(-8);
   await setState(task, `${isos[idx]}:${offset}`, info);
-  return { slices: did, changed: added, next: `${isos[idx]}:${offset}` };
+  return { slices: did, changed: added, next: `${isos[idx]}:${offset}`, rateLimited };
 }
 
 Deno.serve(async (req) => {
@@ -221,10 +226,11 @@ Deno.serve(async (req) => {
     const out: Record<string, unknown> = {};
     out.apif = await apifQueue(byName);
     // alterna fatias de clubes e de jogadores enquanto houver tempo (cada fatia = 1 país, até 1500 linhas)
-    const acc = { clubs: { slices: 0, changed: 0, next: "" }, players: { slices: 0, changed: 0, next: "" } };
+    const acc = { stop: false, clubs: { slices: 0, changed: 0, next: "" }, players: { slices: 0, changed: 0, next: "" } };
     for (let round = 0; round < 4; round++) {
-      if (left() > 40_000) { const r = await wikidataSweep("clubs", isos, names, 1); acc.clubs.slices += r.slices; acc.clubs.changed += r.changed; acc.clubs.next = r.next; }
-      if (left() > 40_000) { const r = await wikidataSweep("players", isos, names, 1); acc.players.slices += r.slices; acc.players.changed += r.changed; acc.players.next = r.next; }
+      if (acc.stop) break;
+      if (left() > 40_000) { const r = await wikidataSweep("clubs", isos, names, 1); acc.clubs.slices += r.slices; acc.clubs.changed += r.changed; acc.clubs.next = r.next; if (r.rateLimited) acc.stop = true; }
+      if (left() > 40_000) { const r = await wikidataSweep("players", isos, names, 1); acc.players.slices += r.slices; acc.players.changed += r.changed; acc.players.next = r.next; if (r.rateLimited) acc.stop = true; }
     }
     out.clubs = acc.clubs; out.players = acc.players;
     const changed = Number((out.clubs as any)?.changed ?? 0) + Number((out.players as any)?.changed ?? 0) + Number((out.apif as any)?.players ?? 0) + Number((out.apif as any)?.clubs ?? 0);

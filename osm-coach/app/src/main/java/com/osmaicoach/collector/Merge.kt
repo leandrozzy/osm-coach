@@ -3,6 +3,16 @@ package com.osmaicoach.collector
 data class StoredField(val value: String, val conf: Double, val updatedAt: Long)
 
 object FieldMerge {
+    /**
+     * Nome do time lido com o nome de um JOGADOR colado antes ("Demirovic Red Bull Bragantino", 26/11, tela do Pré-jogo): 1 = a leitura nova só acrescenta palavras antes do nome que já
+     * temos (mantém o antigo); 2 = o nome guardado é que está sujo e a leitura nova é o nome limpo (repara); 0 = nada a fazer.
+     */
+    fun teamClash(old: String, new: String): Int {
+        val a = Txt.key(old); val b = Txt.key(new)
+        if (a == b || a.length < 6 || b.length < 6) return 0
+        return when { b.length > a.length && b.endsWith(a) -> 1; a.length > b.length && a.endsWith(b) -> 2; else -> 0 }
+    }
+
     private val VOLATILE = setOf(
         K.MY_STRENGTH, K.RIVAL_STRENGTH, K.MY_VALUE, K.RIVAL_VALUE, K.CASH, K.ROUND, K.MATCH_AT,
         K.LEAGUE_POS, K.POINTS, K.SELLING, K.ROUND_DONE, K.HOME, K.MY_GOL, K.MY_DEF, K.MY_MID, K.MY_ATK,
