@@ -56,6 +56,36 @@ object WorldOcr {
         } }
     }
 
+    /**
+     * Card grande de jogador que NÃO está no meu elenco (vendido, aberto pelo histórico de transferências): o nome completo + a idade valem para as observações
+     * de nome curto de QUALQUER slot cujo nome é o último nome (ou parte) do card e cuja idade lida bate. Sem idade conhecida na observação não adivinha.
+     */
+    fun bigCardAny(ctx: Context, fullShown: String, age: Int) {
+        val app = ctx.applicationContext
+        exec.execute { runCatching {
+            val full = fullShown.trim().lowercase().split(Regex("\\s+")).joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+            val words = WorldNorm.fold(full).split(' ').filter { it.length >= 2 }
+            if (words.size < 2) return@runCatching
+            val db: WorldSql = AndroidSql(WorldDb.get(app).w)
+            val rows = db.q("SELECT id,norm,slot,context FROM football_ocr_observations WHERE kind='player'") { arrayOf<Any?>(it.getLong(0), it.getString(1), it.getInt(2), it.getString(3)) }
+            val done = HashSet<String>()
+            for (r in rows) {
+                val norm = (r[1] as String?) ?: continue
+                if (norm.length < 3 || norm !in words) continue
+                val j = runCatching { JSONObject((r[3] as String?) ?: "{}") }.getOrDefault(JSONObject())
+                if (!j.has("age") || j.isNull("age") || j.optInt("age", -1) != age) continue
+                if (j.optString("full") == full) continue
+                db.exec("UPDATE football_ocr_observations SET context=?,status='novo' WHERE id=?", arrayOf(j.put("full", full).toString(), r[0] as Long))
+                done.add(norm + "|" + (r[2] as Int))
+            }
+            for (d in done) {
+                val (norm, slot) = d.split('|')
+                db.exec("DELETE FROM football_osm_entity_mappings WHERE osm_kind='player' AND osm_key=? AND slot=? AND status IN ('desconhecido','ambíguo') AND algo<>'manual'", arrayOf(norm, slot.toInt()))
+            }
+            if (done.isNotEmpty()) UiBus.bump()
+        } }
+    }
+
     // ------------------------------------------------------------------ resolução
     internal fun clubCandidates(db: WorldSql, raw: String, key: WorldNorm.ClubKey): List<WorldIdentity.ClubC> {
         val first = key.core.substringBefore(' ')

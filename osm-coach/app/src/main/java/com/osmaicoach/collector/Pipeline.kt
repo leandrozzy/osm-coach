@@ -199,6 +199,8 @@ class FramePipeline private constructor(private val ctx: Context) {
     private suspend fun photosFrom(hint: Int?, ocr: OcrResult, bmp: Bitmap) {
         val slots = listOfNotNull(hint) + (1..4).filter { it != hint }
         val big = runCatching { slots.any { saveBigCard(it, ocr, bmp) } }.getOrDefault(false)
+        // card de jogador que NÃO é do meu elenco (vendido, lista de transferências, histórico): o nome completo + idade ainda identificam quem está na Validação OCR
+        if (!big) runCatching { bigCardOutsideSquad(ocr) }
         if (!big) {
             val idl = ocr.lines.firstOrNull { Txt.norm(it.text).startsWith("idade") && it.xc < 0.40f }
             if (idl != null) {
@@ -208,6 +210,19 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
         }
         runCatching { for (sl in slots) if (saveCardFaces(sl, ocr, bmp) > 0) break }
+    }
+
+    private var lastOutsideCard = ""
+    private fun bigCardOutsideSquad(ocr: OcrResult) {
+        val ageLine = ocr.lines.filter { l -> Txt.norm(l.text).startsWith("idade") && l.xc in 0.08f..0.36f && l.yc in 0.20f..0.46f }.minByOrNull { it.yc } ?: return
+        val nameLine = ocr.lines.filter { l -> l !== ageLine && l.yc < ageLine.yc && ageLine.yc - l.yc < 0.07f && Math.abs(l.xc - ageLine.xc) < 0.10f && l.text.count { it.isLetter() } >= 3 }.maxByOrNull { it.yc } ?: return
+        val age = Regex("\\d{2}").find(ageLine.text)?.value?.toIntOrNull() ?: return
+        val shown = nameLine.text.trim().replace(Regex("^\\d{1,2}\\s+"), "").trim()
+        if (shown.length < 5 || !shown.contains(' ')) return   // sem nome completo não ajuda
+        val sig = "$shown|$age"
+        if (sig == lastOutsideCard) return
+        lastOutsideCard = sig
+        WorldOcr.bigCardAny(ctx, shown, age)
     }
 
     /**
