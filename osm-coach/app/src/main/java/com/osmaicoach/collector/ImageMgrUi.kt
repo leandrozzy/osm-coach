@@ -145,7 +145,8 @@ internal fun CrestManagerFold() {
         }
     }
     val count = { s: String -> entries.count { it.source == s } }
-    Fold("🛡", "Escudos dos clubes", "${entries.count { it.source in listOf("manual", "web", "recorte") }} de ${entries.size}") {
+    // excluídos são erros de leitura (ex.: "25 anniversary"): ficam fora da contagem, só aparecem no filtro "Excluídos"
+    Fold("🛡", "Escudos dos clubes", "${entries.count { it.source in listOf("manual", "web", "recorte") }} de ${entries.count { it.source != "bloqueado" }}") {
         Text("Escudo errado ou clube inventado pela leitura (ex.: \"25 anniversary\")? Exclua: o nome fica bloqueado e o app não recria. Para um clube sem escudo ou com escudo errado, escolha a imagem à mão.", fontSize = 13.sp, color = C.MUTED)
         Panel {
             KV("✋ Manuais", "${count("manual")}")

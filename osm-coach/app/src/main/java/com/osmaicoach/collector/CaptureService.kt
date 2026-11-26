@@ -359,15 +359,29 @@ class CaptureService : AccessibilityService() {
     private fun updateRing() {
         val r = ringView ?: return
         val dp = resources.displayMetrics.density
-        val capturing = System.currentTimeMillis() - Diag.lastShotAt < 5000L && Diag.lastShotAt > 0L
+        val nowMs = System.currentTimeMillis()
+        val capturing = nowMs - Diag.lastShotAt < 5000L && Diag.lastShotAt > 0L
         val pending = hints.any { it.action }
-        val col = when { capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
+        // leitura de lista (Plantel, Calendário, Mercado, Resultado): estado vem do CONTEÚDO lido (chegou ao fim ou não), nunca do tempo; o tempo só decide quanto a mensagem fica na tela
+        val rs = Diag.readState
+        val recentRead = nowMs - Diag.readAt < 25_000L && Diag.readType == Diag.currentType
+        val reading = rs == 1 && capturing
+        val done = rs == 2 && recentRead
+        val partial = rs == 3 && recentRead
+        val col = when { done -> 0xFFB9F363.toInt(); partial -> 0xFFF5B942.toInt(); capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
         r.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), col) }
         statusView?.let { s ->
-            s.visibility = if (capturing) View.VISIBLE else View.GONE
-            if (capturing) s.text = "● Capturando"
+            s.visibility = if (capturing || done || partial) View.VISIBLE else View.GONE
+            val (txt, bg) = when {
+                done -> "✓ Capturado" to 0xF2B9F363.toInt()
+                partial -> "⚠ Incompleto" to 0xF2F5B942.toInt()
+                reading -> "● Lendo… fique e role" to 0xF239BDF8.toInt()
+                else -> "● Capturando" to 0xF239BDF8.toInt()
+            }
+            s.text = txt
+            (s.background as? GradientDrawable)?.setColor(bg)
         }
-        if (capturing) {
+        if (capturing && !done && !partial) {
             if (ringAnim == null) ringAnim = android.animation.ObjectAnimator.ofFloat(r, "alpha", 1f, 0.35f).apply {
                 duration = 700; repeatMode = android.animation.ValueAnimator.REVERSE; repeatCount = android.animation.ValueAnimator.INFINITE; start()
             }

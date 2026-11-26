@@ -35,6 +35,27 @@ object WorldOcr {
         for (p in ex.players) obs(KIND_PLAYER, p.name, JSONObject().put("age", p.age).put("pos", p.posCode).put("cat", p.cat).put("owner", "?").put("nameKey", Txt.key(p.name)))
     }
 
+    /**
+     * CARD GRANDE do jogador (Plantel → toque no jogador): mostra o NOME COMPLETO ("ANSU FATI") e a idade; o elenco só mostra o sobrenome ("Fati"). O nome completo
+     * vai para o contexto da observação do nome curto e o grupo é reavaliado (a identificação passa a casar pelo nome inteiro). Roda na fila baixa, sem rede.
+     */
+    fun bigCard(ctx: Context, slot: Int, shortName: String, fullShown: String) {
+        val app = ctx.applicationContext
+        exec.execute { runCatching {
+            val full = fullShown.trim().lowercase().split(Regex("\\s+")).joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+            if (full.length < 3) return@runCatching
+            val db: WorldSql = AndroidSql(WorldDb.get(app).w); val norm = WorldNorm.fold(shortName)
+            val rows = db.q("SELECT id,context FROM football_ocr_observations WHERE kind='player' AND norm=? AND slot=?", norm, slot.toString()) { Pair(it.getLong(0), it.getString(1)) }
+            var changed = false
+            for ((id, cj) in rows) {
+                val j = runCatching { JSONObject(cj ?: "{}") }.getOrDefault(JSONObject())
+                if (j.optString("full") == full) continue
+                db.exec("UPDATE football_ocr_observations SET context=?,status='novo' WHERE id=?", arrayOf(j.put("full", full).toString(), id)); changed = true
+            }
+            if (changed) { db.exec("DELETE FROM football_osm_entity_mappings WHERE osm_kind='player' AND osm_key=? AND slot=? AND status IN ('desconhecido','ambíguo') AND algo<>'manual'", arrayOf(norm, slot)); UiBus.bump() }
+        } }
+    }
+
     // ------------------------------------------------------------------ resolução
     internal fun clubCandidates(db: WorldSql, raw: String, key: WorldNorm.ClubKey): List<WorldIdentity.ClubC> {
         val first = key.core.substringBefore(' ')
@@ -91,6 +112,7 @@ object WorldOcr {
         for (g in groups) {
             // candidatos vêm do Supabase (só o nome lido); sem rede/limite o grupo continua "novo" para a próxima rodada (não vira "desconhecido" por falta de candidatos)
             if (!runCatching { if (g.kind == KIND_CLUB) env.pullClub(g.raw) else env.pullPlayer(g.raw) }.getOrDefault(false)) continue
+            if (g.kind == KIND_PLAYER) g.context.optString("full").takeIf { it.isNotBlank() && it != "null" }?.let { f -> runCatching { env.pullPlayer(f) } }
             done++
             runCatching { if (g.kind == KIND_CLUB) resolveClub(db, g.slot, g.raw, g.norm, g.independent, g.context) else resolvePlayer(db, env, g.slot, g.raw, g.norm, g.independent, g.context) }
             db.exec("UPDATE football_ocr_observations SET status='avaliado',algo=? WHERE kind=? AND norm=? AND slot=? AND status='novo'", arrayOf(WorldIdentity.ALGO, g.kind, g.norm, g.slot))
@@ -128,19 +150,22 @@ object WorldOcr {
         if (r.status == WorldIdentity.Status.UNRESOLVED) unresolved(db, KIND_CLUB, raw, norm, slot, ctx)
     }
 
-    private fun resolvePlayer(db: WorldSql, env: Env, slot: Int, raw: String, norm: String, independent: Int, c: JSONObject) {
+    private fun resolvePlayer(db: WorldSql, env: Env, slot: Int, rawShort: String, norm: String, independent: Int, c: JSONObject) {
+        val full = c.optString("full").takeIf { it.isNotBlank() && it != "null" }
+        val raw = full ?: rawShort                                     // com o card grande lido, o nome INTEIRO decide
         val pk = WorldNorm.playerKey(raw)
         val age = c.optInt("age", -1).takeIf { it > 0 }
         val iso = env.natIso(slot, c.optString("nameKey"))
         val obs = WorldIdentity.PlayerObs(raw, age, nationality = iso?.let { i -> db.q("SELECT name_en FROM football_countries WHERE iso2=?", i) { it.getString(0) }.firstOrNull() }, position = c.optString("pos").takeIf { it.isNotBlank() && it != "null" }, independent = independent)
-        var r = WorldIdentity.matchPlayer(obs, playerCandidates(db, pk))
+        fun cands(): List<WorldIdentity.PlayerC> = playerCandidates(db, pk).let { a -> if (full == null) a else (a + playerCandidates(db, WorldNorm.playerKey(rawShort))).distinctBy { it.id } }
+        var r = WorldIdentity.matchPlayer(obs, cands())
         // sem candidato forte localmente: busca no Wikidata (assíncrona, limitada, sem bloquear o OCR) e reavalia
-        if ((r.status == WorldIdentity.Status.UNRESOLVED || r.status == WorldIdentity.Status.AMBIGUOUS) && pk.given.isNotEmpty() && env.enrich(raw)) r = WorldIdentity.matchPlayer(obs, playerCandidates(db, pk))
+        if ((r.status == WorldIdentity.Status.UNRESOLVED || r.status == WorldIdentity.Status.AMBIGUOUS) && pk.given.isNotEmpty() && env.enrich(raw)) r = WorldIdentity.matchPlayer(obs, cands())
         val ev = r.reasons.joinToString("; ") + " • margem ${r.margin} • $independent observação(ões) independente(s)"
         setMapping(db, KIND_PLAYER, norm, slot, r.best?.id, statusName(r.status), r.score, ev, independent)
         if (r.status == WorldIdentity.Status.CONFIRMED && r.best != null) {
             db.exec("UPDATE football_players SET osm_seen=osm_seen+1,validation=1,status=CASE WHEN status='desconhecido' THEN 'ativo' ELSE status END WHERE id=?", arrayOf(r.best.id))
-            db.exec("INSERT OR IGNORE INTO football_entity_aliases(entity_type,entity_id,alias,alias_key,kind,source_id) VALUES('player',?,?,?, 'osm','ocr')", arrayOf(r.best.id, raw, norm))
+            db.exec("INSERT OR IGNORE INTO football_entity_aliases(entity_type,entity_id,alias,alias_key,kind,source_id) VALUES('player',?,?,?, 'osm','ocr')", arrayOf(r.best.id, rawShort, norm))
         }
         if (r.status == WorldIdentity.Status.UNRESOLVED) unresolved(db, KIND_PLAYER, raw, norm, slot, c)
     }

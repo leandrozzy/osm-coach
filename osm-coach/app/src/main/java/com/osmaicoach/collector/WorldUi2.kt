@@ -170,8 +170,12 @@ internal fun WorldRealBox(slot: Int, playerName: String) {
     val shape = RoundedCornerShape(DS.RADIUS_CARD)
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(shape).background(DS.SURFACE).border(1.dp, C.INFO.copy(alpha = 0.45f), shape).padding(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { DsIcon("globe", 18.dp, C.INFO); Spacer(Modifier.width(6.dp)); Text("Base Mundial (futebol real)", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, modifier = Modifier.weight(1f)); r?.let { DsChip("${it.status} · ${it.score}", statusColor(it.status)) } }
-        if (r == null) Text("Ainda não identificado na base real (precisa de mais leituras). Em Base → Validação OCR você pode escolher o cadastro certo. Isso não afeta nada do jogo.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-        else {
+        if (r == null) {
+            Text("Ainda não identificado na base real. Abra o CARD GRANDE deste jogador no OSM (toque nele no Plantel) com a captura ligada: o app lê o nome completo e a idade e identifica sozinho. Ou escolha o cadastro certo abaixo. Isso não afeta nada do jogo.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            var pick by remember(playerName) { mutableStateOf(false) }
+            OutlinedButton(onClick = { pick = !pick }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (pick) "Fechar a busca" else "Escolher o cadastro certo") }
+            if (pick) PickReal("player", WorldNorm.fold(playerName), playerName)
+        } else {
             Text(r.fullName ?: r.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp))
             Text(listOfNotNull(r.dob?.let { "nasc. ${it.take(10)}" }, r.nationality, r.position, r.heightCm?.let { "$it cm" }).joinToString(" • ").ifEmpty { "sem mais dados" }, fontSize = 12.5.sp, color = C.MUTED)
             val ids = listOfNotNull(r.wikidata?.let { "Wikidata $it" }, r.tmId?.let { "Transfermarkt $it" }, r.apifId?.let { "API-Football $it" }).joinToString(" • ")

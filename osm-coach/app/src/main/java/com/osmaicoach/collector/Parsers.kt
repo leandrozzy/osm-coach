@@ -642,7 +642,53 @@ object Parsers {
         only(Osm.ATTACK)?.let { j.put("advAttack", it) }
         only(Osm.MIDFIELD)?.let { j.put("advMid", it) }
         only(Osm.DEFENSE)?.let { j.put("advDef", it) }
+        tacticPanel(o).forEach { (k, v) -> j.put(k, v) }
         return j
+    }
+
+    private fun intBox(t: String): Int? = t.trim().takeIf { it.length in 1..3 && it.all { c -> c.isDigit() } }?.toIntOrNull()?.takeIf { it in 0..100 }
+
+    /**
+     * Painel ROLADO do editor de tática (prints/diagnóstico de 25/11, 2448×1080): no meio ficam os rótulos Pressão / Estilo (= mentalidade) / Temporização
+     * com o nome da faixa logo abaixo ("Equilibrado", "Defensivo", "Passes rápidos"); o valor 0–100 está numa caixa à direita (x≈0,95), ~0,19 abaixo do rótulo.
+     * Marcação (esquerda) e "Fazer fora-de-jogo" (direita) trazem o valor logo abaixo. O número só vale se a faixa escrita abaixo do rótulo bate com ele
+     * (OCR errado de dígito nunca vira dado). Devolve só o que apareceu de forma inequívoca.
+     */
+    fun tacticPanel(o: OcrResult): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        val mid = o.lines.filter { it.xc in 0.42f..0.58f }
+        val sliders = listOf(
+            Triple("pressure", "pressao", { v: Int -> Osm.pressureLabel(v) }),
+            Triple("mentality", "estilo", { v: Int -> Osm.mentalityLabel(v) }),
+            Triple("tempo", "tempor", { v: Int -> Osm.tempoLabel(v) })
+        )
+        for ((key, word, labelOf) in sliders) {
+            val lab = mid.filter { val n = Txt.norm(it.text).replace("?", "").trim(); if (key == "mentality") n == "estilo" else n.contains(word) && !n.contains("estilo de jogo") }
+                .singleOrNull() ?: continue
+            val sub = mid.filter { it !== lab && it.yc > lab.yc && it.yc - lab.yc <= 0.08f }.minByOrNull { it.yc - lab.yc }
+            val box = o.tokens.filter { it.xc >= 0.9f && it.yc - lab.yc in 0.10f..0.28f }.mapNotNull { t -> intBox(t.text)?.let { Pair(t, it) } }
+                .minByOrNull { abs((it.first.yc - lab.yc) - 0.19f) } ?: continue
+            val subOk = sub?.let { Txt.norm(it.text).replace("?", "").trim() == Txt.norm(labelOf(box.second)) }
+            if (subOk == false) continue            // faixa escrita ≠ número lido: não grava
+            out[key] = box.second.toString()
+        }
+        val markLab = o.lines.filter { it.xc in 0.15f..0.35f && Txt.norm(it.text).startsWith("marca") }.singleOrNull()
+        if (markLab != null) {
+            val v = o.lines.filter { it.yc > markLab.yc && it.yc - markLab.yc <= 0.08f && abs(it.xc - markLab.xc) <= 0.12f }.minByOrNull { it.yc - markLab.yc }
+            Osm.marking(v?.text)?.let { out["marking"] = it }
+        }
+        val offLab = o.lines.filter { it.xc in 0.62f..0.86f && Txt.norm(it.text).let { n -> n.contains("fora-de-jogo") || n.contains("fora de jogo") } }.singleOrNull()
+        if (offLab != null) {
+            val v = o.lines.filter { it.yc > offLab.yc && it.yc - offLab.yc <= 0.08f && abs(it.xc - offLab.xc) <= 0.12f }.minByOrNull { it.yc - offLab.yc }
+            when (Txt.norm(v?.text ?: "").trim()) { "sim" -> out["offside"] = "Sim"; "nao" -> out["offside"] = "Não" }
+        }
+        return out
+    }
+
+    /** Painel rolado do editor: ao menos um controle com número ou Marcação (esquerda) + fora-de-jogo (direita). */
+    fun isTacticPanel(o: OcrResult): Boolean {
+        val p = tacticPanel(o)
+        return p.keys.any { it in setOf("pressure", "mentality", "tempo") } || (p.containsKey("marking") && p.containsKey("offside"))
     }
 
     /** Diferenças entre o que está montado (`tacmounted`) e a tática gerada. */
@@ -663,6 +709,14 @@ object Parsers {
         val mk = m.optString("marking").takeIf { it.isNotBlank() }?.let { Osm.marking(it) }
         val wantMk = Osm.marking(plan.optString("marking"))
         if (mk != null && wantMk != null && mk != wantMk) out.add("Marcação $mk — a gerada é $wantMk")
+        for ((k, label) in listOf("pressure" to "Pressão", "mentality" to "Mentalidade", "tempo" to "Temporização")) {
+            val got = m.optString(k).toIntOrNull() ?: continue
+            val want = plan.optString(k).toIntOrNull() ?: continue
+            if (abs(got - want) > PlayedTactic.SLIDER_TOL) out.add("$label $got — a gerada é $want")
+        }
+        val of = m.optString("offside").takeIf { it == "Sim" || it == "Não" }
+        val wantOf = plan.optString("offside").takeIf { it == "Sim" || it == "Não" }
+        if (of != null && wantOf != null && of != wantOf) out.add("Fora-de-jogo $of — a gerada é $wantOf")
         return out
     }
 
@@ -991,6 +1045,9 @@ object Parsers {
                     val mn = o.lines.filter { RX_MINUTE.containsMatchIn(it.text.trim()) && it.xc in 0.42f..0.58f && abs(it.yc - by) <= 0.05f }.minByOrNull { abs(it.yc - by) }
                     if (mn == null) continue
                     val min = RX_MINUTE.find(mn.text.trim())!!.groupValues[1]
+                    // o texto do lance já trouxe o autor, só faltou o ícone na leitura dele (diagnóstico 25/11: "lance de Lucas Barbosa" + "gol (autor não lido)" no mesmo minuto): é UM gol
+                    val li = events.indexOfFirst { it.startsWith("$min' ($sideTxt) lance de ") && it.contains("(gol sem assistência ou cartão)") }
+                    if (li >= 0) { events[li] = events[li].replace("lance de ", "gol de ").replace(" (gol sem assistência ou cartão)", ""); continue }
                     if (events.none { it.startsWith("$min' ($sideTxt) gol") }) events.add("$min' ($sideTxt) gol (autor não lido)")
                 }
                 // bola sem minuto lido (o OCR perdeu a linha do minuto): conta o gol do lado sem minuto, se ainda não há gol de texto suficiente

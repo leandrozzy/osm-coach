@@ -123,8 +123,16 @@ object League {
         val gaps = heads.zipWithNext { a, b -> b.yc - a.yc }.filter { it > 0.05f && it < 0.15f }.sorted()
         val spacing = gaps.getOrNull(gaps.size / 2) ?: 0.099f
         val ranks = arrayOfNulls<Int>(raws.size)
+        // consenso: cada número lido vota na "posição da 1ª linha da tela" (número − linhas puladas); o OCR erra um dígito aqui e ali (prints 25/11: o "9" lido como "1" punha o Meppen em 1º e deslocava as outras linhas)
+        val cum = IntArray(raws.size)
+        for (i in 1 until raws.size) cum[i] = cum[i - 1] + maxOf(1, Math.round((heads[i].yc - heads[i - 1].yc) / spacing))
+        val votes = HashMap<Int, Int>()
+        for (i in raws.indices) raws[i].rankTok?.let { t -> votes.merge(t - cum[i], 1, Int::plus) }
+        val best = votes.entries.sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenByDescending { it.key }).firstOrNull()
+        val consensus = best?.takeIf { it.value >= 2 || raws.count { r -> r.rankTok != null } == 1 || votes.size == 1 }?.key
         var prev: Int? = null
-        for (i in raws.indices) {
+        if (consensus != null) for (i in raws.indices) ranks[i] = (consensus + cum[i]).takeIf { it in 1..40 }
+        else for (i in raws.indices) {
             val tok = raws[i].rankTok
             val expected = prev?.let { p -> p + maxOf(1, Math.round((heads[i].yc - heads[i - 1].yc) / spacing)) }
             ranks[i] = when {

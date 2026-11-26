@@ -1747,7 +1747,18 @@ class Repo(private val ctx: Context) {
         }
         mergeRatings("rh", rep.ratingsHome)
         mergeRatings("ra", rep.ratingsAway)
-        val evs = j.optJSONArray("events") ?: org.json.JSONArray()
+        var evs = j.optJSONArray("events") ?: org.json.JSONArray()
+        // gol com autor lido no mesmo minuto/lado substitui o "lance (gol sem assistência ou cartão)" e o "gol (autor não lido)" gravados antes
+        val goalAt = rep.events.mapNotNull { Regex("^(\\S+)' \\((casa|visitante)\\) gol de ").find(it)?.let { m -> m.groupValues[1] + "' (" + m.groupValues[2] + ") " } }.toSet()
+        if (goalAt.isNotEmpty()) {
+            val kept = org.json.JSONArray()
+            for (i in 0 until evs.length()) {
+                val e = evs.optString(i)
+                val stale = goalAt.any { pre -> e.startsWith(pre + "gol (autor não lido)") || (e.startsWith(pre + "lance de ") && e.contains("(gol sem assistência ou cartão)")) }
+                if (!stale) kept.put(e) else changed++
+            }
+            evs = kept
+        }
         val seen = HashSet<String>()
         for (i in 0 until evs.length()) seen.add(Txt.key(evs.optString(i)))
         // o OCR lê o mesmo lance com grafias diferentes ("MCNeil"/"McNeil"): compara sem caixa/acento, senão o gol vira dois

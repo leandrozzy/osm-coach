@@ -53,6 +53,8 @@ object ScreenClassifier {
         if (t.contains("define a tua tatica") || t.contains("taticas por sector") || t.contains("tatica por sector")) {
             return ScreenType.TACTIC
         }
+        // o editor ROLADO (sem esses títulos): controles Pressão/Estilo/Temporização com o número na caixa à direita, ou Marcação + fora-de-jogo
+        if (Parsers.isTacticPanel(ocr)) return ScreenType.TACTIC
         if ((t.contains("capacidade") && t.contains("nivel")) || t.contains("renova o teu estadio")) return ScreenType.STADIUM
         if (jornada.findAll(t).count() >= 3) return ScreenType.CALENDAR
         if (t.contains("idade") && t.contains("valor") && t.contains("jogador")) return ScreenType.SQUAD

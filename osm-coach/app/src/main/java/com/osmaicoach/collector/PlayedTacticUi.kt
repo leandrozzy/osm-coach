@@ -1,6 +1,7 @@
 package com.osmaicoach.collector
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -32,9 +33,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Tabela vertical da aba Tática: cada campo com o valor SUGERIDO, o valor JOGADO (confirmado) e a origem/hora.
@@ -49,7 +47,6 @@ internal fun PlayedTable(slot: Int, plan: JSONObject) {
     val played = rememberLoaded<JSONObject?>(null, tick, UiBus.version) { PlayedTactic.current(Repo(ctx), slot) }
     var editing by remember { mutableStateOf<String?>(null) }
     val verdict = PlayedTactic.classify(plan, played)
-    val hour = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
     val (chip, col) = when (verdict.usage) {
         PlayedTactic.SEGUIU -> "✅ Seguiu a sugestão" to C.OK
         PlayedTactic.ALTEROU -> "↔ Alterou a sugestão" to C.WARN
@@ -60,25 +57,31 @@ internal fun PlayedTable(slot: Int, plan: JSONObject) {
         Text(chip, color = col, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
         Text(verdict.text(), fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(bottom = 6.dp))
         val sug = PlayedTactic.suggestedFields(plan)
+        // tabela compacta: uma linha por campo (Campo | Sugerida | Jogada); toque na linha para confirmar/corrigir à mão
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp)) {
+            Text("Campo", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.weight(0.9f))
+            Text("Sugerida", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.weight(1f))
+            Text("Jogada", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.weight(1.1f))
+        }
         for (f in PlayedTactic.FIELDS) {
             val sv = sug[f]
             val cell = PlayedTactic.cell(played, f)
             val pv = cell?.optString("v")?.takeIf { it.isNotBlank() }
             val diff = sv != null && pv != null && !PlayedTactic.same(f, sv, pv)
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text(PlayedTactic.LABEL[f] ?: f, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.width(92.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Sugerido: " + (sv ?: "—"), fontSize = 13.sp)
-                    Text(
-                        "Jogado: " + (pv ?: "não confirmado"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                        color = if (pv == null) C.MUTED else if (diff) C.WARN else C.OK
-                    )
-                    if (cell != null) Text("origem: ${cell.optString("src")} • ${hour.format(Date(cell.optLong("at")))}", fontSize = 11.sp, color = C.MUTED)
-                }
-                TextButton(onClick = { editing = f }) { Text(if (pv == null) "Confirmar" else "Corrigir", fontSize = 12.sp) }
+            val mark = if (pv == null) "?" else if (diff) "↔" else "✓"
+            Row(
+                Modifier.fillMaxWidth().clickable { editing = f }.padding(vertical = 5.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Text(PlayedTactic.LABEL[f] ?: f, fontSize = 12.sp, color = C.MUTED, modifier = Modifier.weight(0.9f))
+                Text(sv ?: "—", fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                Text(
+                    "$mark " + (pv ?: "não lido"), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                    color = if (pv == null) C.MUTED else if (diff) C.WARN else C.OK, modifier = Modifier.weight(1.1f)
+                )
             }
         }
-        Text("Só entra o que foi LIDO da tela de Tática do OSM, do Resultado ou confirmado por você. Campo que não foi lido de novo vale a última leitura (a tática fica como está até você mudar); sem nenhuma leitura anterior, fica desconhecido e o resultado não é atribuído à sugerida.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
+        Text("Toque numa linha para confirmar ou corrigir. Só vale o que foi lido da tela de Tática, do Resultado ou confirmado por você; campo não lido de novo mantém a última leitura.", fontSize = 11.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
     }
     val f = editing
     if (f != null) {

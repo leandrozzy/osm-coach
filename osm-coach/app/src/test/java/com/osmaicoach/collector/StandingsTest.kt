@@ -146,6 +146,15 @@ class StandingsReadingTest {
         assertEquals(7, rows.size); assertTrue(rows.none { it.club == "Cantoe" })
     }
 
+    @Test fun oneMisreadRankNumberDoesNotShiftTheWholeScreen() {
+        // diagnóstico 25/11 (S1): a posição 9 foi lida como "1": o Meppen virava 1º e as outras linhas ficavam deslocadas
+        val base = screen(9)
+        val lines = base.lines.map { l -> if (l.text == "9" && l.xc < 0.07f) Fx.line("1", l.xc, l.yc, 0.02f) else l }
+        val rows = League.readStandings(Fx.ocr(*lines.toTypedArray()))!!
+        assertEquals(listOf(9, 10, 11, 12, 13, 14, 15), rows.map { it.rank })
+        assertEquals("Esporte Clube Bahia", rows[0].club)
+    }
+
     @Test fun rowWhoseEColumnWasNotReadIsRebuilt() {
         val rows = League.readStandings(screen(1, dropCol = mapOf(3 to 2)))!!          // Grêmio: E (3) não lido
         val g = rows.first { it.club == "Grêmio" }

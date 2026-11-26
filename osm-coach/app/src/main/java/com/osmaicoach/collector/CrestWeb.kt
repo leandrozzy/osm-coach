@@ -49,7 +49,14 @@ object CrestWeb {
         val best = all.maxByOrNull { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) } ?: return null
         best.takeIf { CrestCut.score(Txt.key(it.name.removeSuffix(".png")), k) >= 0.9 }?.let { return it }
         // mesmo clube lido de outro jeito pelo OCR (5V/SV, I/l/|, 0/O): vale o escudo que já existe (e o escolhido à mão)
-        return all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }
+        all.firstOrNull { f -> CrestAdmin.sameReading(f.name.removeSuffix(".png"), team ?: "") }?.let { return it }
+        // time reserva (II): usa o escudo da equipe principal quando não existe um próprio (o escudo é o mesmo)
+        val lk = CrestAdmin.look(team ?: "")
+        if (lk.length >= 9 && lk.endsWith("ii") && !lk.endsWith("iii")) {
+            val base = lk.dropLast(2)
+            return all.firstOrNull { f -> CrestAdmin.look(f.name.removeSuffix(".png")) == base }
+        }
+        return null
     }
 
     /** O time devolvido pela busca é o MESMO clube? (nome parecido, um é início do outro ou todas as palavras de um estão no outro) */

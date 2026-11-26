@@ -234,6 +234,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             }
             .distinctBy { it.nameKey }.singleOrNull()
         if (p == null) return false   // pode ser de outro slot (photosFrom tenta os demais)
+        runCatching { WorldOcr.bigCard(ctx, slot, p.name, shown) }   // o card mostra o NOME COMPLETO: identificação real pelo nome inteiro
         val now = System.currentTimeMillis()
         fun say(msg: String, tell: String? = null) {
             if (msg != lastBigLog) { lastBigLog = msg; Diag.log(msg) }
@@ -292,6 +293,7 @@ class FramePipeline private constructor(private val ctx: Context) {
                 val merged = old ?: JSONObject()
                 for (k in seen.keys()) merged.put(k, seen.get(k))
                 dao.putPlan(PlanEntity(slot, "tacmounted", merged.put("at", now).put("round", round).toString(), now))
+                Diag.setRead(2, ScreenType.TACTIC.name)
                 // registro por PARTIDA (slot + competição + rodada + rival), com origem e hora por campo
                 PlayedTactic.record(repo, slot, seen.keys().asSequence().associateWith { k -> seen.optString(k) }, "tela", now)
             }
@@ -446,6 +448,7 @@ class FramePipeline private constructor(private val ctx: Context) {
             else -> return
         }
         pd.offFrames = 0
+        if (!pd.done) Diag.setRead(1, type.name)
         // a lista parou de andar (quadro igual ao anterior depois de já ter rolado) com folga embaixo = chegou ao fim
         // quadro "igual" = as MESMAS linhas nas MESMAS alturas (texto + altura em faixas de 0,02): rolar uma linha desloca todas as alturas,
         // então um quadro que só ganhou 1 jogador novo embaixo NÃO é igual (antes valia ≥85% dos nomes e o plantel "terminava" no 1º goleiro)
@@ -480,6 +483,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         if (!pd.done && complete(pd)) {
             pd.done = true
+            Diag.setRead(2, type.name)
             if (pd.type == ScreenType.SQUAD && pd.owner != "RIVAL") runCatching {
                 val n = repo.reconcileSlot(pd.slot, pd.startAt)
                 if (n > 0) { Diag.log("Elenco S${pd.slot}: $n jogador(es) que não estão mais no plantel saíram da lista"); UiBus.bump() }
@@ -556,6 +560,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         // saiu da tela logo depois de chegar aos goleiros (última seção) com as 4 seções e ≥18 jogadores vistos: a lista foi até o fim
         val atEnd = pd.type == ScreenType.SQUAD && pd.lastHadGk && pd.moved && pd.seen.size >= 18 && pd.cats.containsAll(listOf("GOL", "DEF", "MEI", "ATA"))
         val txt = summary(pd, atEnd)
+        Diag.setRead(if (atEnd) 2 else 3, pd.type.name)
         if (txt != null) { Diag.log("Resumo da tela → $txt"); note(pd.slot, txt, System.currentTimeMillis()) }
     }
 
@@ -1361,6 +1366,8 @@ class FramePipeline private constructor(private val ctx: Context) {
             if (changed > 0) {
                 Diag.extracted.addAndGet(changed)
                 Diag.lastUpdateAt = now
+                // tela que não é lista (Pré-jogo, Relatório, Estádio, Classificação…): o que ela mostrava foi gravado = "Capturado" na bolha
+                if (type != ScreenType.SQUAD && type != ScreenType.CALENDAR && type != ScreenType.MARKET && type != ScreenType.RESULT) Diag.setRead(2, type.name)
                 if (type == ScreenType.PREGAME || type == ScreenType.CALENDAR) {
                     try {
                         Notifier.reschedule(ctx)

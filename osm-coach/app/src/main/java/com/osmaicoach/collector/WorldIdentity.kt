@@ -96,10 +96,14 @@ object WorldIdentity {
             var score = name
             why.add(when { name >= 100 -> "nome igual"; name >= 90 -> "nome compatível (inicial/abreviação)"; name >= 60 -> "só sobrenome/nome parcial" else -> "nome diferente" })
             val c0 = c
+            val ageFits = o.ageNow != null && c0.birthYear != null && kotlin.math.abs((o.year - c0.birthYear) - o.ageNow) <= 1
             if (oNat != null && c0.nationality != null) {
                 val cn = WorldNorm.fold(c0.nationality)
                 val natOk = cn == oNat || cn.contains(oNat) || oNat.contains(cn) || (cn == "united kingdom" && oNat in setOf("england", "scotland", "wales", "northern ireland", "inglaterra", "escocia", "gales"))
-                if (natOk) { sig++; score += 10; why.add("mesma nacionalidade") } else { score -= 25; contra = true; why.add("nacionalidade diferente") }
+                if (natOk) { sig++; score += 10; why.add("mesma nacionalidade") }
+                // nome COMPLETO igual + idade batendo: país diferente costuma ser dupla nacionalidade/país de nascimento (Ansu Fati: Espanha no jogo, Guiné-Bissau no cadastro) — só pesa pouco
+                else if (name >= 100 && ageFits) { score -= 8; why.add("nacionalidade diferente (pode ser dupla)") }
+                else { score -= 25; contra = true; why.add("nacionalidade diferente") }
             }
             if (o.ageNow != null && c0.birthYear != null) {
                 val age = o.year - c0.birthYear

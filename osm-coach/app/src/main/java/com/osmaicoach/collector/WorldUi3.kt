@@ -351,7 +351,7 @@ private fun ExcludeButton(kind: String, key: String, raw: String, onDone: () -> 
 }
 
 @Composable
-private fun PickReal(kind: String, key: String, raw: String) {
+internal fun PickReal(kind: String, key: String, raw: String) {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
     var text by remember(key) { mutableStateOf(raw) }; var busy by remember(key) { mutableStateOf(false) }; var msg by remember(key) { mutableStateOf("") }
     var players by remember(key) { mutableStateOf<List<WorldCatalog.PlayerCand>>(emptyList()) }; var clubs by remember(key) { mutableStateOf<List<WorldCatalog.ClubCand>>(emptyList()) }
@@ -437,6 +437,7 @@ internal fun WorldValidation(nav: WorldNav) {
                 WorldCard(tint = C.GOLD.copy(alpha = 0.5f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(p.raw, fontWeight = FontWeight.Bold, fontSize = 15.sp); Text("${if (p.kind == "club") "clube" else "jogador"} • slot ${p.slots.replace(",", ", ")} • ${p.status}", fontSize = 12.sp, color = C.MUTED) }
                         OutlinedButton(onClick = { open = !open }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(if (open) "Fechar" else "Escolher", fontSize = 12.sp) } }
+                    PendingFacts(p.kind, p.key, p.slots)
                     if (!p.evidence.isNullOrBlank()) Text(p.evidence, fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                     if (open) PickReal(p.kind, p.key, p.raw) else ExcludeButton(p.kind, p.key, p.raw)
                 }
@@ -456,4 +457,34 @@ internal fun WorldValidation(nav: WorldNav) {
             }
         }
     }
+}
+
+/** Tudo que o jogo mostrou sobre o nome pendente (para você saber QUEM é): time do slot, idade, posição, país (bandeira) e quando foi lido; mais o que fazer se não der para saber. */
+@Composable
+private fun PendingFacts(kind: String, key: String, slots: String) {
+    val ctx = LocalContext.current
+    val facts = rememberLoaded(emptyList<String>(), 0, key) {
+        val db = AndroidSql(WorldDb.get(ctx).readableDatabase)
+        val repo = Repo(ctx)
+        val out = ArrayList<String>()
+        val row = db.rows("SELECT context,screen,at FROM football_ocr_observations WHERE kind=? AND norm=? ORDER BY at DESC LIMIT 1", kind, key).firstOrNull()
+        val c = runCatching { org.json.JSONObject(row?.get(0) ?: "{}") }.getOrDefault(org.json.JSONObject())
+        for (sl in slots.split(',').mapNotNull { it.trim().toIntOrNull() }) {
+            val team = repo.fieldMap(sl)[K.TEAM]?.value ?: repo.fieldMap(sl)[K.HUB_TITLE]?.value
+            if (team != null) out.add("Slot $sl: $team")
+        }
+        if (kind == "player") {
+            c.optInt("age", -1).takeIf { it > 0 }?.let { out.add("$it anos") }
+            c.optString("pos").takeIf { it.isNotBlank() && it != "null" }?.let { out.add("posição $it") }
+            c.optString("nameKey").takeIf { it.isNotBlank() && it != "null" }?.let { nk -> WorldCatalog.gameNationalities(ctx)[nk]?.let { out.add("país (bandeira): ${it.uppercase()}") } }
+            c.optString("full").takeIf { it.isNotBlank() && it != "null" }?.let { out.add("nome no card: $it") }
+        } else {
+            c.optString("role").takeIf { it.isNotBlank() && it != "null" }?.let { out.add("papel: $it") }
+            c.optString("league").takeIf { it.isNotBlank() && it != "null" }?.let { out.add("liga: $it") }
+        }
+        row?.get(1)?.takeIf { it.isNotBlank() }?.let { out.add("lido na tela $it") }
+        out
+    }
+    if (facts.isNotEmpty()) Text(facts.joinToString(" • "), fontSize = 12.sp, color = C.INFO, modifier = Modifier.padding(top = 4.dp))
+    if (kind == "player") Text("Não sabe quem é? Abra o CARD GRANDE do jogador no OSM (toque nele no Plantel) com a captura ligada: o app lê o nome completo e a idade e identifica sozinho.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
 }

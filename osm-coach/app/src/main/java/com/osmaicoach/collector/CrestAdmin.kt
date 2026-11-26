@@ -89,6 +89,12 @@ object CrestAdmin {
         return suffix(la) == suffix(lb) && Txt.sim(la, lb) >= 0.92
     }
 
+    /** O OCR perdeu um traço do numeral ("Hoffenheim I" no lugar de "Hoffenheim II", diagnóstico 25/11): o nome da Classificação termina em II e o lido é igual com UM I só. */
+    internal fun droppedStroke(trusted: String, read: String): Boolean {
+        val a = look(trusted); val b = look(read)
+        return a.length >= 6 && a.endsWith("ii") && !a.endsWith("iii") && b == a.dropLast(1)
+    }
+
     /** Agrupa leituras do mesmo clube (união de nomes parecidos). */
     internal fun cluster(names: List<String>): List<List<String>> {
         val groups = ArrayList<MutableList<String>>()
@@ -158,7 +164,8 @@ object CrestAdmin {
             if (snapStamp != stamp) { snapCache.clear(); snapStamp = stamp }
             snapCache[t]?.let { return it }
         }
-        val r = readSet(tf).firstOrNull { sameReading(it, t) } ?: t
+        val trusted = readSet(tf)
+        val r = trusted.firstOrNull { sameReading(it, t) } ?: trusted.firstOrNull { droppedStroke(it, t) } ?: t
         synchronized(snapCache) { snapCache[t] = r }
         return r
     }
