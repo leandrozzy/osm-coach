@@ -55,6 +55,9 @@ object WorldSync {
     }
 
     fun requestRun(ctx: Context) { val app = ctx.applicationContext; AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = true) } } }
+    /** Botão "Atualizar fontes na nuvem": pede AGORA a atualização das fontes (Wikidata, API-Football) feita pelo Supabase e reavalia os pendentes. */
+    fun requestCloud(ctx: Context) { val app = ctx.applicationContext; AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = true, only = "cloud") } } }
+    @Volatile var cloudNote: String = ""
     fun requestSource(ctx: Context, sourceId: String) { val app = ctx.applicationContext; AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = true, only = sourceId) } } }
 
     /** Chamado pelo monitor a cada minuto: barato (só consulta a hora do próximo ciclo). */
@@ -86,6 +89,14 @@ object WorldSync {
             runCatching { ensureCountries(ctx, db) }
             if (pause.get()) { lastMessage = "Pausada."; return }
             runCatching { checkSupabase(ctx, db) }
+            // 1x por dia (ou no botão): a nuvem (Supabase) atualiza as próprias fontes; o app só pede
+            runCatching { WorldRemote.cloudSync(ctx, AndroidSql(db.w), force = only == "cloud") }.getOrNull()?.takeIf { it.isNotBlank() }?.let { cloudNote = it
+                if (it.startsWith("Nuvem atualizada")) runCatching {   // dados novos na nuvem: reavalia o que estava sem cadastro/ambíguo (nada confirmado à mão é tocado)
+                    db.w.execSQL("DELETE FROM football_pull_log WHERE found=0")   // buscas sem resultado podem ser refeitas agora
+                    db.w.execSQL("UPDATE football_ocr_observations SET status='novo' WHERE (kind||'|'||norm||'|'||slot) IN (SELECT osm_kind||'|'||osm_key||'|'||slot FROM football_osm_entity_mappings WHERE status IN ('desconhecido','ambíguo') AND algo<>'manual')")
+                    WorldOcr.resolvePending(ctx)
+                }
+            }
             step = 2; running = "Atualizando o que mudou no Supabase"; Live.on("sync", "Base: o que mudou no Supabase"); UiBus.bump()
             val changed = runCatching { WorldRemote.refreshCache(ctx, AndroidSql(db.w)) }.getOrDefault(0)
             step = 3; running = "Bandeiras, escudos e fotos do OSM"; progress = null; Live.on("sync", "Base: bandeiras, escudos e fotos"); UiBus.bump()

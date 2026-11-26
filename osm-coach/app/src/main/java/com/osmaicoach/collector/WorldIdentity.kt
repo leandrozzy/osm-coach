@@ -6,7 +6,7 @@ package com.osmaicoach.collector
  * margem sobre o 2º candidato e nenhuma contradição relevante. Nunca une homônimos, equipe B/principal ou clubes de países diferentes.
  */
 object WorldIdentity {
-    const val ALGO = "id-v5"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
+    const val ALGO = "id-v6"      // v2: desempate por prominência/cidade; v3: sobrenome + 3 evidências
     class Config(val veryHigh: Int = 98, val probable: Int = 90, val ambiguous: Int = 75, val margin: Int = 6, val minSignals: Int = 2)
     val DEFAULT = Config()
 
@@ -31,11 +31,15 @@ object WorldIdentity {
             var best = 0
             for (k in keys) if (k.marker == ok.marker) best = maxOf(best, WorldNorm.nameSim(ok.core, k.core))
             val why = ArrayList<String>(); var sig = 0; var contra = false
+            // erro de OCR de UMA letra em nome longo ("Esporte Cube Bahia" × "Esporte Clube Bahia"): vale como nome quase igual, não só "parecido 87"
+            var typo = false
+            val oFold = WorldNorm.fold(o.name)
+            if (best < 98) for (n in names) { val nf = WorldNorm.fold(n); if (WorldNorm.clubKey(n).marker == ok.marker && minOf(nf.length, oFold.length) >= 10 && WorldNorm.levenshtein(oFold, nf) <= 1) { best = 93; typo = true } }
             // o jogo costuma escrever "Clube + Cidade" ("EC Cruzeiro Belo Horizonte"): se o final do nome lido é a CIDADE do candidato, compara sem ela
             val cityKey = c.city?.let { WorldNorm.fold(it) }?.takeIf { it.length >= 4 }
             var withCity = false
             if (best < 98 && cityKey != null && ok.core.endsWith(" $cityKey")) { val stripped = ok.core.removeSuffix(" $cityKey").trim(); for (k in keys) if (k.marker == ok.marker) { val sc = WorldNorm.nameSim(stripped, k.core); if (sc > best) { best = sc; withCity = true } } }
-            if (best >= 98) why.add(if (withCity) "nome + cidade" else "nome igual") else why.add("nome parecido $best")
+            if (best >= 98) why.add(if (withCity) "nome + cidade" else "nome igual") else if (typo && best == 93) why.add("uma letra de diferença (provável erro de OCR)") else why.add("nome parecido $best")
             if (!sameMarker) { best = minOf(best, 55); why.add("categoria diferente (${ok.marker.ifEmpty { "principal" }} × ${c.marker.ifEmpty { "principal" }})"); contra = true }
             if (o.iso2 != null && c.iso2 != null) { if (o.iso2.equals(c.iso2, true)) { sig++; best = minOf(100, best + 2); why.add("mesmo país") } else { best = minOf(best, 55); why.add("país diferente"); contra = true } }
             if (o.league != null && c.league != null && WorldNorm.nameSim(WorldNorm.fold(o.league), WorldNorm.fold(c.league)) >= 85) { sig++; why.add("mesma liga") }
@@ -145,7 +149,11 @@ object WorldIdentity {
             top.score >= cfg.probable -> Status.PROBABLE
             else -> Status.AMBIGUOUS
         }
-        return Result(if (status == Status.UNRESOLVED) null else top.c, top.score, status, margin, top.why, scored.getOrNull(1)?.c)
+        // único candidato claramente à frente, sem nenhuma contradição (nome, país, idade): aceita como provável em vez de pedir você (Lato: margem 57; Ndubuisi: margem 27)
+        val solo = !top.contra && ((top.score >= 80 && margin >= 30) || (top.score >= cfg.ambiguous && margin >= 20 && top.signals >= 1))
+        val final = if (status == Status.AMBIGUOUS && solo) Status.PROBABLE else status
+        val why = if (final != status) top.why + "único candidato claramente à frente (margem $margin), sem contradição" else top.why
+        return Result(if (final == Status.UNRESOLVED) null else top.c, top.score, final, margin, why, scored.getOrNull(1)?.c)
     }
 
     fun rankPlayers(o: PlayerObs, cands: List<PlayerC>): List<Ranked<PlayerC>> = cands.map { c -> matchPlayer(o, listOf(c)).let { Ranked(c, it.score, it.reasons) } }.sortedByDescending { it.score }

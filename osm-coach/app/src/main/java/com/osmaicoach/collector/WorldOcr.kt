@@ -147,7 +147,34 @@ object WorldOcr {
             runCatching { if (g.kind == KIND_CLUB) resolveClub(db, g.slot, g.raw, g.norm, g.independent, g.context) else resolvePlayer(db, env, g.slot, g.raw, g.norm, g.independent, g.context) }
             db.exec("UPDATE football_ocr_observations SET status='avaliado',algo=? WHERE kind=? AND norm=? AND slot=? AND status='novo'", arrayOf(WorldIdentity.ALGO, g.kind, g.norm, g.slot))
         }
+        if (done > 0) runCatching { mergeVariants(db) }
         return done
+    }
+
+    /**
+     * Mesmo jogador lido de dois jeitos pelo OCR ("Jiakpona"/"Jiakponna", "Kukharevydh"/"Kukharevych"): no MESMO slot, com a MESMA idade e posição e nome muito parecido,
+     * o que já foi identificado vale para a variante que ficou sem cadastro (como "provável", com a evidência dizendo de quem herdou). Nunca mexe em escolha manual.
+     */
+    internal fun mergeVariants(db: WorldSql) {
+        class O(val slot: Int, val norm: String, val age: Int?, val pos: String?)
+        val obs = HashMap<String, O>()
+        for (r in db.rows("SELECT slot,norm,MAX(context) FROM football_ocr_observations WHERE kind='player' GROUP BY slot,norm")) {
+            val slot = r[0]?.toIntOrNull() ?: continue; val norm = r[1] ?: continue
+            val j = runCatching { JSONObject(r[2] ?: "{}") }.getOrDefault(JSONObject())
+            obs["$slot|$norm"] = O(slot, norm, j.optInt("age", -1).takeIf { it > 0 }, j.optString("pos").takeIf { it.isNotBlank() && it != "null" })
+        }
+        val good = db.rows("SELECT osm_key,slot,entity_id,score FROM football_osm_entity_mappings WHERE osm_kind='player' AND status IN ('confirmado','muito alta','provável') AND entity_id IS NOT NULL")
+            .mapNotNull { r -> val o = obs["${r[1]}|${r[0]}"] ?: return@mapNotNull null; if (o.age == null) null else Triple(o, r[2]!!.toLong(), r[3]?.toIntOrNull() ?: 90) }
+        if (good.isEmpty()) return
+        val bad = db.rows("SELECT osm_key,slot FROM football_osm_entity_mappings WHERE osm_kind='player' AND status IN ('desconhecido','ambíguo') AND algo<>'manual'")
+        for (b in bad) {
+            val o = obs["${b[1]}|${b[0]}"] ?: continue
+            if (o.age == null || o.norm.length < 5) continue
+            val src = good.filter { (g, _, _) -> g.slot == o.slot && g.norm != o.norm && g.age == o.age && g.norm.length >= 5 && (g.pos == null || o.pos == null || WorldIdentity.posGroup(g.pos) == WorldIdentity.posGroup(o.pos)) && WorldNorm.levRatio(g.norm, o.norm) >= 0.80 }
+                .distinctBy { it.second }
+            val one = src.singleOrNull() ?: continue
+            setMapping(db, KIND_PLAYER, o.norm, o.slot, one.second, WorldIdentity.Status.PROBABLE.label, minOf(one.third, 92), "variante de OCR de \"${one.first.norm}\" (mesmo slot, idade e posição, nome quase igual) • margem 0 • 1 observação(ões) independente(s)", 1)
+        }
     }
 
     fun resolvePending(ctx: Context, max: Int = 300): Int {

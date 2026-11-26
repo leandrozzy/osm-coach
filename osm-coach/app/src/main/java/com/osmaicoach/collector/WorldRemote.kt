@@ -57,6 +57,61 @@ object WorldRemote {
             o.optJSONObject("last_run")?.let { r -> "${r.optString("source")} • ${r.optString("status")} • ${r.optLong("rows_changed")} alterados" }, o.optLong("images"))
     }
 
+    // ------------------------------------------------------------------ atualização automática NA NUVEM (Edge Function world-sync + pg_cron)
+    private const val K_CLOUD_AT = "world_cloud_at"; private const val K_CLOUD_MSG = "world_cloud_msg"
+
+    fun cloudMessage(ctx: Context): String = Settings.get(ctx, K_CLOUD_MSG, "")
+    fun cloudDue(ctx: Context): Boolean = System.currentTimeMillis() - (Settings.get(ctx, K_CLOUD_AT, "0").toLongOrNull() ?: 0L) > 22 * 3_600_000L
+
+    /** Linhas da fila: nomes que o app NÃO conseguiu ligar a nenhum cadastro (a função busca na API-Football e no Wikidata). Só nome, idade e posição saem do aparelho. */
+    internal fun wantedRows(db: WorldSql, max: Int = 120): JSONArray {
+        val arr = JSONArray(); val seen = HashSet<String>()
+        val rows = db.rows("SELECT kind,name,attrs FROM football_unresolved_entities ORDER BY last_seen DESC LIMIT $max")
+        for (r in rows) {
+            val kind = r[0] ?: continue
+            val attrs = runCatching { JSONObject(r[2] ?: "{}") }.getOrDefault(JSONObject())
+            val name = ((if (kind == "player") attrs.optString("full").takeIf { it.isNotBlank() && it != "null" } else null) ?: r[1] ?: continue).trim()
+            val fold = WorldNorm.fold(name)
+            if (fold.length !in 2..80 || name.length > 80 || !seen.add("$kind|$fold")) continue
+            if (!WorldClean.nameOk(name) || WorldClean.isWomen(name)) continue
+            val o = JSONObject().put("kind", kind).put("name", name).put("name_fold", fold)
+            attrs.optInt("age", -1).takeIf { it in 14..50 && kind == "player" }?.let { o.put("age", it) }
+            arr.put(o)
+        }
+        return arr
+    }
+
+    /**
+     * Uma vez por dia (ou no botão): envia a fila de nomes sem cadastro e chama a função `world-sync` do Supabase, que atualiza as fontes (Wikidata, API-Football) POR CONTA PRÓPRIA.
+     * Só usa a chave anon (pública): as chaves de escrita e a da API-Football ficam guardadas no Supabase. Devolve a mensagem para a tela ("" = nada a fazer agora).
+     */
+    fun cloudSync(ctx: Context, db: WorldSql, force: Boolean): String {
+        val c = cfg(ctx) ?: return "Supabase não configurado."
+        if (!force && !cloudDue(ctx)) return ""
+        val msg = try {
+            val rows = wantedRows(db)
+            if (rows.length() > 0) runCatching {
+                WorldHttp.post(c.url + "/rest/v1/wf_wanted?on_conflict=kind,name_fold", rows.toString().toByteArray(), "application/json", headers(c) + mapOf("Prefer" to "resolution=ignore-duplicates,return=minimal"), 30_000)
+            }
+            val (code, body) = WorldHttp.post(c.url + "/functions/v1/world-sync", "{}".toByteArray(), "application/json", headers(c), 150_000)
+            val o = runCatching { JSONObject(body ?: "{}") }.getOrDefault(JSONObject())
+            when {
+                code == 404 -> "A função world-sync ainda não foi criada no Supabase (veja supabase/README.md)."
+                code == 401 || code == 403 -> "Supabase recusou a chave (use a anon)."
+                o.optBoolean("busy") -> { "Atualização da nuvem já em andamento (volta em ${o.optInt("retry_in_s")} s)." }
+                code in 200..299 && o.optBoolean("ok") -> {
+                    val ap = o.optJSONObject("apif"); val cl = o.optJSONObject("clubs"); val pl = o.optJSONObject("players")
+                    "Nuvem atualizada: clubes ${cl?.optInt("changed") ?: 0} • jogadores ${pl?.optInt("changed") ?: 0} • API-Football ${ap?.optInt("done") ?: 0} nomes" + (ap?.optString("skipped")?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "")
+                }
+                else -> "Nuvem: HTTP $code ${o.optString("error").take(80)}"
+            }
+        } catch (e: Exception) { "Nuvem indisponível agora (${e.javaClass.simpleName})." }
+        if (!msg.startsWith("A função") && !msg.startsWith("Nuvem indisponível") && !msg.startsWith("Supabase recusou")) Settings.put(ctx, K_CLOUD_AT, System.currentTimeMillis().toString())
+        Settings.put(ctx, K_CLOUD_MSG, msg)
+        Diag.log("Base/Supabase world-sync: $msg")
+        return msg
+    }
+
     // ------------------------------------------------------------------ cópia local (testável: só SQL)
     private fun s(o: JSONObject, k: String): String? = if (o.isNull(k)) null else o.optString(k).trim().takeIf { it.isNotEmpty() }
     private fun i(o: JSONObject, k: String): Long? = if (o.isNull(k)) null else o.optLong(k)

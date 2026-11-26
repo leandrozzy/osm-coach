@@ -72,9 +72,11 @@ internal fun WorldSyncView() {
                 if (c.analyzed > 0) Text("${fmtN(c.analyzed)} lidos • ${fmtN(c.inserted)} novos • ${fmtN(c.updated)} atualizados • ${fmtN(c.deduped)} duplicados", fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
             }
             if (WorldSync.lastMessage.isNotEmpty()) Text(WorldSync.lastMessage, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+            (WorldSync.cloudNote.ifBlank { WorldRemote.cloudMessage(ctx) }).takeIf { it.isNotBlank() }?.let { Text("☁ $it", fontSize = 12.5.sp, color = C.INFO, modifier = Modifier.padding(top = 4.dp)) }
             Text("Rede: ${if (net) "Wi‑Fi ✓" else "dados móveis (consultas pequenas, tudo bem)"} • cópia local: ${fmtBytes(size)}", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { WorldSync.requestRun(ctx) }, modifier = Modifier.weight(1f), enabled = running == null) { Text("Sincronizar agora", fontWeight = FontWeight.ExtraBold) }
+                Button(onClick = { WorldSync.requestCloud(ctx) }, modifier = Modifier.weight(1f), enabled = running == null) { Text("Atualizar fontes na nuvem", fontWeight = FontWeight.ExtraBold) }
                 if (WorldSync.paused) OutlinedButton(onClick = { WorldSync.resume(ctx) }, modifier = Modifier.weight(1f)) { Text("Retomar") } else OutlinedButton(onClick = { WorldSync.pause() }, modifier = Modifier.weight(1f), enabled = running != null) { Text("Pausar") }
             }
         }
