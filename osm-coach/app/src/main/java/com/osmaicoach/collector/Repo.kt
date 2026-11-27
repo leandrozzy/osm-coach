@@ -238,7 +238,10 @@ class Repo(private val ctx: Context) {
                 n
             }
             ScreenType.STADIUM -> {
-                if (ex.timers.isNotEmpty()) runCatching { updateTimers(slot, ex.timers.mapKeys { "stad_" + it.key }.mapValues { (k, v) -> v?.let { Pair(it, "obra: ${k.removePrefix("stad_")}") } }, now) }
+                // card em 3 estrelas (nível máximo): não existe mais obra — apaga o aviso "obra termina" que ficou na Agenda
+                val tm = ex.timers.toMutableMap()
+                for ((key, card) in listOf(K.MY_STAD_CAP to "Capacidade", K.MY_STAD_PITCH to "Relvado", K.MY_STAD_TRAIN to "Treino")) if (ex.fields[key]?.value == "3") tm[card] = null
+                if (tm.isNotEmpty()) runCatching { updateTimers(slot, tm.mapKeys { "stad_" + it.key }.mapValues { (k, v) -> v?.let { Pair(it, "obra: ${k.removePrefix("stad_")}") } }, now) }
                 putFields(slot, ex.fields, source, now)
             }
             ScreenType.RESULT -> applyResult(slot, ex, now)

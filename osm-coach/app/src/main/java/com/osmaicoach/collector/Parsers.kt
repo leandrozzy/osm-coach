@@ -866,7 +866,7 @@ object Parsers {
             val ln = o.lines.firstOrNull { Txt.norm(it.text) == word && it.yc in 0.20f..0.45f } ?: continue
             val region = o.lines.filter { abs(it.xc - ln.xc) <= 0.14f && it.yc in 0.60f..0.95f }
             val text = Txt.norm(region.joinToString(" ") { it.text })
-            val st = if (text.contains("maximo")) "máximo"
+            val st = if (text.contains("maximo") || MAXED_TEXT.containsMatchIn(text)) "máximo"
             else if (text.contains("concluir")) "concluir melhoria"
             else {
                 val cost = Regex("(\\d{1,3}(?:[.,]\\d)?\\s*[km])\\b").find(text)?.groupValues?.get(1)?.replace(" ", "")?.uppercase()
@@ -881,6 +881,9 @@ object Parsers {
         return Extraction(ScreenType.STADIUM, fields = f, timers = stadiumTimers(o, now))
     }
 
+    /** Card no nível MÁXIMO (3 estrelas): "Os teus campos de treino são agora do melhor que há!" — não há mais obra nem tempo. */
+    private val MAXED_TEXT = Regex("(do melhor que ha|nivel maximo|no maximo|melhor que ha)")
+
     fun stadiumTimers(o: OcrResult, now: Long): Map<String, Long?> {
         val timers = LinkedHashMap<String, Long?>()
         for ((word, label) in listOf("capacidade" to "Capacidade", "relvado" to "Relvado", "treino" to "Treino")) {
@@ -889,7 +892,7 @@ object Parsers {
             val secs = near.mapNotNull { timerSecs(it.text) }.firstOrNull()
             val text = Txt.norm(near.joinToString(" ") { it.text })
             if (secs != null) timers[label] = now + secs * 1000L
-            else if (text.contains("comecar") || text.contains("concluir") || text.contains("maximo")) timers[label] = null
+            else if (text.contains("comecar") || text.contains("concluir") || text.contains("maximo") || MAXED_TEXT.containsMatchIn(text)) timers[label] = null
         }
         // uma obra por vez: horários iguais em vários cards são a duração do próximo melhoramento, não obra em andamento
         val run = Work.onlyRunning(timers.map { Pair(it.key, it.value) })

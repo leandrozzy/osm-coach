@@ -92,3 +92,14 @@ class Round4CupResultTest {
         assertEquals("Copa • Oitavos de final", Fixtures.inferStages(all)[all[1].mkey].let { it ?: "Copa • Oitavos de final" })
     }
 }
+
+class Round4StadiumMaxTest {
+    @Test fun maxedTrainingCardClearsItsTimer() {
+        val o = Fx.ocr(
+            Fx.line("Capacidade", 0.2f, 0.31f, 0.1f), Fx.line("Começar melhoramento", 0.2f, 0.80f, 0.15f),
+            Fx.line("Treino", 0.80f, 0.31f, 0.1f), Fx.line("Os teus campos de treino são agora do melhor que há!", 0.80f, 0.80f, 0.3f)
+        )
+        val t = Parsers.stadiumTimers(o, 1_000_000L)
+        assertTrue(t.containsKey("Treino")); assertNull(t["Treino"])
+    }
+}
