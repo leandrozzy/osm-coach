@@ -27,7 +27,7 @@ class FlagIdentTest {
     /** Bandeiras REAIS do OSM (recortes dos prints de 25/11/26) e o país certo. */
     private val truth = mapOf(
         "osm_al1" to "al", "osm_al3" to "al", "osm_al_myrta" to "al", "osm_al_kurti" to "al", "osm_ml_traore" to "ml", "osm_ci_doukouo" to "ci",
-        "osm_ng" to "ng", "osm_ng_muhammad" to "ng", "osm_ng_ogah" to "ng", "osm_lb_trad" to "lb", "osm_tr_yagmur" to "tr", "osm_ar_gamarra" to "ar", "osm_xk_azizi" to "xk"
+        "osm_ng" to "ng", "osm_ng_muhammad" to "ng", "osm_ng_ogah" to "ng", "osm_lb_trad" to "lb", "osm_tr_yagmur" to "tr", "osm_ar_gamarra" to "ar", "osm_xk_azizi" to "xk", "osm_ma_benabid" to "ma"
     )
 
     @Test fun realOsmFlagsAreIdentifiedCorrectly() {

@@ -63,6 +63,7 @@ object WorldSync {
     /** Chamado pelo monitor a cada minuto: barato (só consulta a hora do próximo ciclo). */
     fun tick(ctx: Context) {
         runCatching { CrestWeb.resetMissesOnce(ctx) }
+        runCatching { resetNatisoOnce(ctx) }
         if (running != null || pause.get()) return
         val app = ctx.applicationContext
         val last = Settings.get(app, "world_last_tick", "0").toLongOrNull() ?: 0L
@@ -70,6 +71,14 @@ object WorldSync {
         if (now - last < 10 * 60_000L) return
         Settings.put(app, "world_last_tick", now.toString())
         AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = false) } }
+    }
+
+    /** Uma vez (identificação de bandeira id-v3: estrela verde × amarela, Marrocos × Vietnã/Montenegro): apaga os países guardados por jogador para reidentificar. Escolha manual (`FlagManual`) não é tocada. */
+    private fun resetNatisoOnce(ctx: Context) {
+        if (Settings.get(ctx, "natiso_reset_v3", "0") == "1") return
+        Settings.put(ctx, "natiso_reset_v3", "1")
+        val repo = Repo(ctx.applicationContext)
+        AppScope.scope.launch(Dispatchers.IO) { runCatching { for (s in 1..4) repo.dao.deletePlan(s, "natiso4") } }
     }
 
     fun networkOk(ctx: Context): Boolean = allowedNet(ctx)

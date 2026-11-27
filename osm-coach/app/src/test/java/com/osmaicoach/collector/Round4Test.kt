@@ -103,3 +103,23 @@ class Round4StadiumMaxTest {
         assertTrue(t.containsKey("Treino")); assertNull(t["Treino"])
     }
 }
+
+class Round4FormDotsTest {
+    private fun hsv(h: Float, s: Float, v: Float): Int {
+        val c = v * s; val x = c * (1 - Math.abs((h / 60f) % 2 - 1)); val m = v - c
+        val (r, g, b) = when { h < 60 -> Triple(c, x, 0f); h < 120 -> Triple(x, c, 0f); h < 180 -> Triple(0f, c, x); h < 240 -> Triple(0f, x, c); h < 300 -> Triple(x, 0f, c); else -> Triple(c, 0f, x) }
+        return (0xFF shl 24) or (((r + m) * 255).toInt() shl 16) or (((g + m) * 255).toInt() shl 8) or ((b + m) * 255).toInt()
+    }
+    @Test fun grassBehindTheRowDoesNotTurnTheRivalLossIntoWins() {
+        val w = 2448; val h = 1080
+        val px = IntArray(w * h) { 0xFF101820.toInt() }
+        // faixa de gramado (sat ≈0,64) atrás das bolinhas, como no Pré-jogo da batalha
+        for (y in (0.47f * h).toInt()..(0.55f * h).toInt()) for (x in (0.10f * w).toInt()..(0.90f * w).toInt()) px[y * w + x] = hsv(115f, 0.64f, 0.66f)
+        fun dot(cx: Float, color: Int) { val r = (0.0095f * w).toInt(); for (y in (0.49f * h).toInt()..(0.53f * h).toInt()) for (x in (cx * w).toInt() - r..(cx * w).toInt() + r) px[y * w + x] = color }
+        dot(0.2f, hsv(125f, 0.95f, 0.8f))      // V do meu time
+        dot(0.77f, hsv(0f, 1f, 0.88f))          // D do rival
+        val img = PixelProbe.Img(w, h, px)
+        assertEquals("V", PixelProbe.formDots(img, true))
+        assertEquals("D", PixelProbe.formDots(img, false))
+    }
+}

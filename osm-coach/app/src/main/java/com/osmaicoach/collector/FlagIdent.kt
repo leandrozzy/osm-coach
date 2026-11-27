@@ -118,6 +118,18 @@ object FlagIdent {
         return s / n
     }
 
+    /** Distância Lab só do miolo (grade 24×16: colunas 8..15, linhas 5..10) — onde ficam a estrela/escudo/emblema. */
+    internal fun centerDist(a: FloatArray, b: FloatArray): Float {
+        if (a.size < 24 * 16 * 3 || b.size < 24 * 16 * 3) return 0f
+        var s = 0f; var n = 0
+        for (gy in 5..10) for (gx in 8..15) {
+            val i = (gy * 24 + gx) * 3
+            val dl = a[i] - b[i]; val da = a[i + 1] - b[i + 1]; val db = a[i + 2] - b[i + 2]
+            s += Math.sqrt((0.3f * dl * dl + da * da + db * db).toDouble()).toFloat(); n++
+        }
+        return s / n
+    }
+
     private val cache = HashMap<String, String?>()
 
     /**
@@ -162,7 +174,8 @@ object FlagIdent {
         if (ranked.isEmpty()) return null
         if (lab == null || ranked.size < 2) return ranked[0].iso
         // 2º estágio: entre os 6 mais parecidos por cor nomeada, soma o Lab fino (peso 0,5): separa estrela/emblema e tons (medido: 12/12 e folgas maiores)
-        return ranked.take(6).minByOrNull { dist(t16, it.c16) + 0.5f * labDist(lab, it.lab) / 100f }?.iso
+        // + o CENTRO da bandeira (estrela/emblema pequenos: Marrocos tem estrela VERDE, Vietnã AMARELA; só a cor das células inteiras não separa)
+        return ranked.take(6).minByOrNull { dist(t16, it.c16) + 0.5f * labDist(lab, it.lab) / 100f + 0.9f * centerDist(lab, it.lab) / 100f }?.iso
     }
 
     /**

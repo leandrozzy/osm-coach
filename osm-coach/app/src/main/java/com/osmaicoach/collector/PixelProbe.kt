@@ -72,9 +72,10 @@ object PixelProbe {
         // 1ª passada: cores vivas de verdade (print 06/11: bolinhas com saturação ≥0,95; o gramado ao fundo ≈0,5);
         // 2ª, mais frouxa, para quadro escurecido por janela por cima — só vale se achar mais bolinhas e sem juntar gramado.
         val a = scanDots(img, left, 0.85f, 0.45f, 0.45f)
-        val b = scanDots(img, left, 0.68f, 0.40f, 0.2f)
+        // gramado do estádio chega a saturação ≈0,62 (print 27/11: com 0,68 virava "VVVD" e o D vermelho do rival aparecia como V): a passada frouxa exige ≥0,76 e nunca contradiz a estrita
+        val b = scanDots(img, left, 0.76f, 0.40f, 0.2f)
         val ok = listOf(a, b).filter { it.length in 1..5 }
-        return if (ok.size == 2 && b.length > a.length) b else ok.firstOrNull()
+        return if (ok.size == 2 && b.length > a.length && b.contains(a)) b else ok.firstOrNull()
     }
 
     private fun scanDots(img: Img, left: Boolean, minSat: Float, minVal: Float, widthTol: Float): String {
