@@ -122,7 +122,9 @@ data class MatchReportRead(
     val zones: List<Int> = emptyList(),
     val ratingsHome: List<Pair<String, Int>> = emptyList(),
     val ratingsAway: List<Pair<String, Int>> = emptyList(),
-    val events: List<String> = emptyList()
+    val events: List<String> = emptyList(),
+    /** Fase da copa escrita no cabeçalho do relatório ("Oitavos-de-final") quando não há "Jornada N". */
+    val stage: String? = null
 )
 
 data class Extraction(

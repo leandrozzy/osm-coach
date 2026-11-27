@@ -1689,10 +1689,28 @@ class Repo(private val ctx: Context) {
 
     private fun pct(s: String): Int? = Regex("(\\d{1,3})").find(s)?.groupValues?.get(1)?.toIntOrNull()
 
+    /** Rodada (número do card no Calendário) do jogo de copa a que o relatório se refere: rival igual, ainda sem resultado primeiro; senão a fase igual. */
+    private suspend fun cupRoundFor(slot: Int, rep: MatchReportRead): Int? {
+        val cups = dao.matchesOf(slot).filter { Fixtures.isCup(it) && it.round != null }
+        if (cups.isEmpty()) return null
+        val mineHome = rep.homeNick != null && Txt.sim(Txt.key(rep.homeNick), MY_NICK) >= 0.75
+        val mineAway = rep.awayNick != null && Txt.sim(Txt.key(rep.awayNick), MY_NICK) >= 0.75
+        val opp = when { mineHome -> rep.awayTeam; mineAway -> rep.homeTeam; else -> null }
+        val ok = opp?.let { Txt.key(it) }?.takeIf { it.length >= 3 }
+        val byRival = if (ok != null) cups.filter { m -> Fixtures.opponent(m)?.let { Txt.sim(Txt.key(it), ok) >= 0.8 } == true } else emptyList()
+        byRival.firstOrNull { it.result == null }?.let { return it.round }
+        byRival.lastOrNull()?.let { return it.round }
+        val st = Txt.key(rep.stage ?: "")
+        val byStage = cups.filter { m -> Fixtures.stageLabel(m)?.let { Txt.key(it) == st } == true }
+        return byStage.singleOrNull()?.round ?: cups.filter { it.result == null }.singleOrNull()?.round
+    }
+
     private suspend fun applyResult(slot: Int, ex: Extraction, now: Long): Int {
         val rep = ex.matchReport ?: return 0
         val f = fieldMap(slot)
         var round = rep.round
+        // relatório de COPA (cabeçalho com a fase, sem "Jornada N"): acha o jogo de copa do calendário pelo rival e usa a rodada dele
+        if (round == null && rep.stage != null) round = cupRoundFor(slot, rep)
         if (round != null) {
             ResultCtx.slot = slot
             ResultCtx.round = round

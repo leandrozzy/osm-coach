@@ -937,6 +937,8 @@ object Parsers {
                 if (m != null) round = m.groupValues[1].toIntOrNull()
             }
         }
+        // jogo de COPA: o cabeçalho traz a fase ("Oitavos-de-final") no lugar de "Jornada N" (vídeo 26/11: o placar 2-3 nunca era lido)
+        val stage: String? = if (round != null) null else o.lines.firstOrNull { it.yc < 0.2f && it.xc in 0.4f..0.6f && Fixtures.isStage(it.text.trim()) }?.text?.trim()
         var home: String? = null
         var away: String? = null
         var homeNick: String? = null
@@ -946,7 +948,7 @@ object Parsers {
         var referee: String? = null
         var tip: String? = null
         var advice: String? = null
-        if (round != null) {
+        if (round != null || stage != null) {
             val names = o.lines.filter { it.yc in 0.19f..0.28f && Txt.letters(it.text) >= 3 }
             home = names.filter { it.xc < 0.35f }.maxByOrNull { it.h }?.text?.trim()
             away = names.filter { it.xc > 0.65f }.maxByOrNull { it.h }?.text?.trim()
@@ -1106,7 +1108,7 @@ object Parsers {
             stats = stats, zones = if (zones.size == 3) zones else emptyList(),
             ratingsHome = if (ratingsHome.size >= 3) ratingsHome else emptyList(),
             ratingsAway = if (ratingsAway.size >= 3) ratingsAway else emptyList(),
-            events = events
+            events = events, stage = stage
         )
         // Meu time é o do lado do meu apelido: é ele que diz de qual slot é o relatório (vindo direto da central).
         val mine = when {
