@@ -123,3 +123,18 @@ class Round4FormDotsTest {
         assertEquals("D", PixelProbe.formDots(img, false))
     }
 }
+
+class Round4RivalFormTest {
+    private fun g(r: Int, h: String, a: String, gh: Int, ga: Int) = LeagueResults.Stored(r, h, a, gh, ga, 1, 0L)
+    @Test fun rivalFormComesFromReadResultsWithOneToFiveGames() {
+        assertEquals("D", LeagueResults.formOf(listOf(g(1, "Teuta Durres", "AF Elbasani", 0, 2), g(1, "KF Laci", "Vllaznia", 3, 1)), "Teuta Durres"))
+        val all = (1..7).map { r -> g(r, "Rival FC", "Outro $r", r % 3, 1) }   // r%3: 1-1 E, 2-1 V, 0-1 D ...
+        assertEquals(5, LeagueResults.formOf(all, "Rival FC").length)
+        // rodada faltando: só a sequência seguida até a mais recente
+        assertEquals("V", LeagueResults.formOf(listOf(g(2, "Rival FC", "X", 1, 0), g(5, "Y", "Rival FC", 0, 3)), "Rival FC"))
+        assertEquals("", LeagueResults.formOf(emptyList(), "Rival FC"))
+    }
+    @Test fun readResultsBeatAColorReadOfTheSameLength() {
+        assertEquals("D", FormRead.pickRival("V", "D")); assertEquals("VVD", FormRead.pickRival("VVD", "")); assertEquals("VVD", FormRead.pickRival("VVD", "D"))
+    }
+}

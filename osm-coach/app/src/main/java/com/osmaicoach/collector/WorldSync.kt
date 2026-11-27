@@ -64,6 +64,7 @@ object WorldSync {
     fun tick(ctx: Context) {
         runCatching { CrestWeb.resetMissesOnce(ctx) }
         runCatching { resetNatisoOnce(ctx) }
+        runCatching { resetFormOnce(ctx) }
         if (running != null || pause.get()) return
         val app = ctx.applicationContext
         val last = Settings.get(app, "world_last_tick", "0").toLongOrNull() ?: 0L
@@ -79,6 +80,14 @@ object WorldSync {
         Settings.put(ctx, "natiso_reset_v3", "1")
         val repo = Repo(ctx.applicationContext)
         AppScope.scope.launch(Dispatchers.IO) { runCatching { for (s in 1..4) repo.dao.deletePlan(s, "natiso4") } }
+    }
+
+    /** Uma vez: apaga as bolinhas V/E/D guardadas pela leitura antiga (a passada frouxa pegava o gramado e a leitura "mais completa" nunca era trocada). */
+    private fun resetFormOnce(ctx: Context) {
+        if (Settings.get(ctx, "form_reset_v2", "0") == "1") return
+        Settings.put(ctx, "form_reset_v2", "1")
+        val repo = Repo(ctx.applicationContext)
+        AppScope.scope.launch(Dispatchers.IO) { runCatching { for (s in 1..4) { repo.dao.deletePlan(s, "formread"); repo.dao.deleteField(s, K.MY_FORM); repo.dao.deleteField(s, K.RIVAL_FORM) } } }
     }
 
     fun networkOk(ctx: Context): Boolean = allowedNet(ctx)

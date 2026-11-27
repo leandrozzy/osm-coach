@@ -41,6 +41,9 @@ object FormRead {
         }
     }
 
+    /** Forma do rival: a dos resultados lidos ([lres]) vale quando tem pelo menos tantos jogos quanto as bolinhas (resultado real > cor lida na tela). */
+    fun pickRival(dots: String?, lres: String): String? = if (lres.isNotEmpty() && lres.length >= (dots?.length ?: 0)) lres else dots
+
     /** Corta as bolinhas ao nº de jogos já disputados na competição (rodadas jogadas ou resultados lidos, o maior). */
     fun cap(form: String, matches: List<MatchEntity>, roundDone: Int?, complete: Boolean = false): String {
         val played = maxOf(roundDone ?: 0, matches.count { it.result in listOf("V", "E", "D") })

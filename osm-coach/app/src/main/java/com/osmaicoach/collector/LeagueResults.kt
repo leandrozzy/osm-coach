@@ -334,6 +334,19 @@ object LeagueResults {
     class Radar(val rival: String, val games: List<RadarGame>, val homeAvg: Pair<Double, Double>?, val awayAvg: Pair<Double, Double>?, val reference: String?, val campaign: League.Row? = null)
 
     /** Até 5 partidas CONFIRMADAS (lidas) do rival na mesma competição; a amostra é a que existe (3 jogos = 3). Nada de formação/estilo deduzido. */
+    /** Forma (V/E/D, mais antigo primeiro, até 5) de [team] nos resultados lidos: só rodadas SEGUIDAS até a mais recente (rodada faltando = não adivinha o que veio antes). */
+    fun formOf(all: List<Stored>, team: String?): String {
+        if (team.isNullOrBlank()) return ""
+        val mine = all.filter { same(it.home, team) || same(it.away, team) }.distinctBy { it.round }.sortedBy { it.round }
+        if (mine.isEmpty()) return ""
+        val run = ArrayList<Stored>()
+        for (g in mine.reversed()) { if (run.isEmpty() || run.last().round - g.round == 1) run.add(g) else break }
+        return run.reversed().takeLast(5).joinToString("") { g ->
+            val home = same(g.home, team); val gf = if (home) g.gh else g.ga; val ga = if (home) g.ga else g.gh
+            if (gf > ga) "V" else if (gf < ga) "D" else "E"
+        }
+    }
+
     fun radar(all: List<Stored>, rival: String?, st: List<League.Row>, stAt: Long?): Radar? {
         if (rival.isNullOrBlank()) return null
         val camp = League.find(st, rival)?.takeIf { it.j != null && it.pts != null }
