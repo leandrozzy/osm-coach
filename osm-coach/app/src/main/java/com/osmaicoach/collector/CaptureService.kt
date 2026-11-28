@@ -227,7 +227,7 @@ class CaptureService : AccessibilityService() {
             TacticDecision.State.FALTA -> 0xFF39BDF8.toInt(); TacticDecision.State.SLOT_DESCONHECIDO -> 0xFFEF5350.toInt()
         }
         lv.addView(tv(v.state.label, col, 13f, true))
-        for (l in v.lines) lv.addView(tv(l, 0xFFC3D3EE.toInt(), 12f))
+        for (l in v.lines) lv.addView(if (l.startsWith("🚫")) tv(l, 0xFFFF5252.toInt(), 13.5f, true) else tv(l, 0xFFC3D3EE.toInt(), 12f))
         for (c in v.changes) lv.addView(tv("• ${c.label}: ${c.read} → ${c.rec}", android.graphics.Color.WHITE, 13f))
         v.action?.let { lv.addView(tv("➜ $it", 0xFFB9F363.toInt(), 12.5f, true)) }
         v.tableNote?.let { lv.addView(tv(it, 0xFFF5B942.toInt(), 11.5f)) }
@@ -387,7 +387,8 @@ class CaptureService : AccessibilityService() {
         val reading = rs == 1 && capturing
         val done = rs == 2 && recentRead
         val partial = rs == 3 && recentRead
-        val col = when { done -> 0xFFB9F363.toInt(); partial -> 0xFFF5B942.toInt(); capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
+        val ruleAlert = hints.any { it.title.startsWith("🚫") }
+        val col = when { ruleAlert -> 0xFFFF5252.toInt(); done -> 0xFFB9F363.toInt(); partial -> 0xFFF5B942.toInt(); capturing -> 0xFF39BDF8.toInt(); pending -> 0xFFF5B942.toInt(); else -> 0xFFB9F363.toInt() }
         val spinning = capturing && !done && !partial
         // lendo/capturando: arco giratório (dá para ver que está trabalhando e quanto tempo ficar na tela); parado: anel cheio; terminou: anel verde + "pulinho"
         r.background = if (spinning) ArcRing(col, 3.5f * dp) else GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x00000000); setStroke((3.5f * dp).toInt(), col) }

@@ -26,7 +26,9 @@ object TacticDecision {
         val slot: Int?, val f: Map<String, StoredField>, val plan: JSONObject?, val planAt: Long, val played: JSONObject?,
         val generating: Boolean, val autogenSig: String?, val rivalChange: String?, val now: Long,
         /** tlogs do slot (para a revanche) */
-        val history: List<JSONObject> = emptyList()
+        val history: List<JSONObject> = emptyList(),
+        /** regras da liga (digitadas no slot) em alerta: aparecem ANTES de tudo, em vermelho */
+        val alerts: List<String> = emptyList()
     )
 
     fun sigOf(f: Map<String, StoredField>): String = SIG_KEYS.joinToString("|") { f[it]?.value.orEmpty() }
@@ -76,6 +78,12 @@ object TacticDecision {
     }
 
     fun decide(i: In): View {
+        val v = decideCore(i)
+        if (i.alerts.isEmpty()) return v
+        return View(v.state, v.slot, v.title, i.alerts + v.lines, v.changes, v.action, v.consultable, v.recomputing, v.table, v.tableNote, v.chartFilter)
+    }
+
+    private fun decideCore(i: In): View {
         val slot = i.slot
         if (slot == null || slot !in 1..4) return View(State.SLOT_DESCONHECIDO, null, "Slot não confirmado",
             listOf("Não sei qual slot está aberto. Abra o Pré-jogo do jogo no OSM ou escolha o slot abaixo; não escolho o de outro time pelo horário."), emptyList(),
@@ -146,6 +154,13 @@ object TacticDecision {
         }
     }
 
+    /** Alertas das regras da liga (🚫) deste slot: limite de treino/craque no limite ou a 1 ponto. */
+    suspend fun ruleAlerts(repo: Repo, slot: Int, f: Map<String, StoredField>, now: Long): List<String> {
+        val r = SlotRules.load(repo, slot) ?: return emptyList()
+        return SlotRules.tips(r, repo.playersOf(slot), emptySet(), known(f, K.ROUND)?.toIntOrNull(), known(f, K.ROUND_TOTAL)?.toIntOrNull(), null, now)
+            .filter { it.title.startsWith("🚫") }.map { it.title }
+    }
+
     suspend fun slotNow(): Int? = Diag.currentSlot.takeIf { it in 1..4 }
 
     suspend fun load(repo: Repo, slot: Int?, now: Long = System.currentTimeMillis()): View {
@@ -157,7 +172,8 @@ object TacticDecision {
         val ch = runCatching { rivalChangesOf(repo, slot) }.getOrDefault(emptyList())
         return decide(In(slot, f, plan, p?.at ?: 0L, PlayedTactic.current(repo, slot),
             GenState.running("tactic", slot) || GenState.running("tactic_ai", slot), sig, if (ch.isEmpty()) null else RivalWatch.headline(ch), now,
-            repo.dao.tacticLogs(slot).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() }))
+            repo.dao.tacticLogs(slot).mapNotNull { p -> runCatching { JSONObject(p.json).also { it.put("genAt", p.at) } }.getOrNull() },
+            runCatching { ruleAlerts(repo, slot, f, now) }.getOrDefault(emptyList())))
     }
 
     /** Texto simples (uma tela) para a bolha. */

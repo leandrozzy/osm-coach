@@ -253,15 +253,26 @@ object SlotRules {
         fun nm(p: PlayerEntity) = "${p.name} (${p.strength})"
         val tr = r.maxTrain
         if (tr != null) {
-            val training = mine.filter { it.training == true && (it.strength ?: 0) >= tr }
-            if (training.isNotEmpty()) out.add(Tip("🏋", "Tire do treino (limite over $tr): " + training.take(4).joinToString { nm(it) }, "A liga proíbe ultrapassar over $tr treinando" + (r.maxStar?.let { " (só o craque vai até $it)" } ?: "") + ". Pare o treino desses jogadores e use o treinador em outro.", 97, 2))
-            val near = mine.filter { it.training != true && (it.strength ?: 0) >= tr - 1 && (it.strength ?: 0) < tr }
-            if (near.isNotEmpty()) out.add(Tip("📜", "Perto do limite de treino ($tr): " + near.take(4).joinToString { nm(it) }, "Mais um ponto e passam do que a liga permite. Treine outros jogadores.", 40, 2))
+            fun st(p: PlayerEntity) = p.strength ?: 0
+            // VEEMENTE (🚫): treinando no limite ou a 1 ponto dele → tirar AGORA; no limite e parado → nunca colocar no treino; a 1 ponto → não pode passar
+            val trainingNow = mine.filter { it.training == true && st(it) >= tr - 1 }
+            if (trainingNow.isNotEmpty()) out.add(Tip("🚨", "🚫 REGRA DA LIGA — TIRE DO TREINO AGORA (limite over $tr): " + trainingNow.take(4).joinToString { nm(it) },
+                "A liga PROÍBE passar de over $tr" + (r.maxStar?.let { " (só o craque vai até $it)" } ?: "") + ". Quem está com ${tr - 1} ou $tr e treinando vai estourar o limite: pare o treino e use o treinador em outro jogador.", 100, 2))
+            val atCap = mine.filter { it.training != true && st(it) >= tr }
+            if (atCap.isNotEmpty()) out.add(Tip("🚨", "🚫 REGRA DA LIGA — NÃO COLOQUE NO TREINO DE MANEIRA NENHUMA (limite over $tr): " + atCap.take(4).joinToString { nm(it) },
+                "Já estão no limite ($tr): qualquer treino passa do que a liga permite. Deixe esses jogadores fora do treino.", 100, 2))
+            val oneAway = mine.filter { it.training != true && st(it) == tr - 1 }
+            if (oneAway.isNotEmpty()) out.add(Tip("🚨", "🚫 REGRA DA LIGA — NÃO PODE PASSAR DE $tr: " + oneAway.take(4).joinToString { nm(it) },
+                "Falta 1 ponto para o limite ($tr). Se treinar, passa. Treine outros jogadores.", 99, 2))
+            val near = mine.filter { it.training != true && st(it) in (tr - 3)..(tr - 2) }
+            if (near.isNotEmpty()) out.add(Tip("📜", "Perto do limite de treino ($tr): " + near.take(4).joinToString { nm(it) }, "Mais alguns pontos e chegam ao que a liga permite. Treine outros jogadores quando chegarem perto.", 40, 2))
         }
         val star = r.maxStar
         if (star != null) {
             val over = mine.filter { (it.strength ?: 0) > star }
-            if (over.isNotEmpty()) out.add(Tip("🚨", "Acima do limite de craque ($star): " + over.take(4).joinToString { nm(it) }, "Pela regra da liga, jogador acima do over permitido é venda instantânea (permitida para este caso).", 96, 6))
+            if (over.isNotEmpty()) out.add(Tip("🚨", "🚫 REGRA DA LIGA — ACIMA DO LIMITE DE CRAQUE ($star): " + over.take(4).joinToString { nm(it) }, "Pela regra da liga, jogador acima do over permitido é venda instantânea (permitida para este caso).", 100, 6))
+            val nearStar = mine.filter { (it.strength ?: 0) in (star - 1)..star }
+            if (nearStar.isNotEmpty()) out.add(Tip("🚨", "🚫 REGRA DA LIGA — CRAQUE NO LIMITE ($star), NÃO PODE PASSAR: " + nearStar.take(4).joinToString { nm(it) }, "Não treine nem evolua esse jogador: a liga proíbe over acima de $star para o craque.", 99, 2))
         }
         val maxSq = r.maxSquad
         if (maxSq != null && mine.size > maxSq) out.add(Tip("🚨", "Elenco com ${mine.size} jogadores: limite da liga é $maxSq", "Venda ${mine.size - maxSq} (os que sobram nas posições) antes de passar da regra.", 95, 6))

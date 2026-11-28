@@ -141,7 +141,7 @@ internal fun DecisionCard(slot: Int) {
     Panel {
         Text(v.title, fontWeight = FontWeight.Bold)
         Text(v.state.label, color = col, fontWeight = FontWeight.ExtraBold)
-        for (l in v.lines) Text(l, color = C.MUTED, fontSize = 12.5.sp)
+        for (l in v.lines) if (l.startsWith("🚫")) Text(l, color = C.BAD, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold) else Text(l, color = C.MUTED, fontSize = 12.5.sp)
         for (c in v.changes) Text("• ${c.label}: ${c.read} → ${c.rec}", fontSize = 13.sp)
         v.action?.let { Text("➜ $it", color = C.PRIMARY, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold) }
         v.tableNote?.let { Text(it, color = C.GOLD, fontSize = 11.5.sp) }
