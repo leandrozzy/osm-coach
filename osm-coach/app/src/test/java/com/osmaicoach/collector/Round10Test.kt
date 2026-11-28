@@ -91,4 +91,18 @@ class Round10Test {
         val nat = c.values.first { it.text.contains("nacionalidade") }
         assertTrue(nat.how!!.contains("CARTÃO GRANDE") && nat.how!!.contains("Ana")); assertTrue(nat.how!!.contains("Escale") && nat.how!!.contains("Bia"))
     }
+
+    @Test fun bigStylizedDigitsReadAsLettersAreFixed() {
+        assertEquals(8, CardGames.toDigits("B")); assertEquals(9, CardGames.toDigits("g")); assertEquals(0, CardGames.toDigits("O"))
+        assertEquals(12, CardGames.toDigits("12")); assertEquals(6, CardGames.toDigits("G"))
+        assertNull(CardGames.toDigits("GOLOS")); assertNull(CardGames.toDigits("")); assertNull(CardGames.toDigits("123"))
+    }
+
+    @Test fun letterMisreadOfTheValueIsStillUsedFromTheFrame() {
+        val lines = listOf(Fx.line("JOGOS", 0.47f, 0.36f), Fx.line("B", 0.47f, 0.40f))
+        assertEquals(8, CardGames.read(Fx.ocr(*lines.toTypedArray())))
+        val pos = CardGames.labelPos(Fx.ocr(*lines.toTypedArray()))!!
+        val box = CardGames.valueBox(pos)
+        assertTrue(box[1] > pos.second && box[3] < pos.second + 0.1f && box[0] < pos.first && box[2] > pos.first)   // recorte logo abaixo do rótulo
+    }
 }

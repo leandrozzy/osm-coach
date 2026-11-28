@@ -19,6 +19,9 @@ import org.json.JSONObject
 object OcrEngine {
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
+    /** Texto cru de um recorte (sem filtro do botão flutuante): usado para reler numerais pequenos ampliados. */
+    suspend fun readRaw(bmp: Bitmap): String = recognizer.process(InputImage.fromBitmap(bmp, 0)).await().text
+
     suspend fun read(bmp: Bitmap): OcrResult {
         val res = recognizer.process(InputImage.fromBitmap(bmp, 0)).await()
         val w = bmp.width.toFloat()
@@ -194,6 +197,8 @@ class FramePipeline private constructor(private val ctx: Context) {
     }
     private var lastFaceLog = ""
     private var lastBigLog = ""
+    private var lastGamesLog = ""
+    private val gamesOkAt = HashMap<String, Long>()
 
     /** Cartões do campo/Banco e cartão grande, testando o slot da tela primeiro e depois os outros (o slot herdado da sessão pode estar errado). */
     private suspend fun photosFrom(hint: Int?, ocr: OcrResult, bmp: Bitmap) {
@@ -241,8 +246,32 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (k.length < 3) return false
         // "JOGOS" do cartão grande (regra de jogos da nacionalidade): grava para QUALQUER jogador do meu elenco, com casamento próprio e mais tolerante
         runCatching {
-            val g = CardGames.read(ocr)
-            if (g != null) CardGames.match(shown, age, dao.playersOf(slot).filter { it.owner == "MY" })?.let { m -> CardGames.put(repo, slot, m.nameKey, g, System.currentTimeMillis()) }
+            val who = CardGames.match(shown, age, dao.playersOf(slot).filter { it.owner == "MY" })
+            val pos = CardGames.labelPos(ocr)
+            val nowMs = System.currentTimeMillis()
+            if (who != null && pos != null && nowMs - (gamesOkAt[who.nameKey] ?: 0L) < 15_000L) return@runCatching   // acabou de ler este jogador
+            if (who != null && pos != null) {
+                // o numeral grande sai errado no OCR do quadro inteiro (8 lido como 3, 9 como "g"): relê um recorte ampliado só do número
+                var zoom: Int? = null; var zoomTxt = ""
+                runCatching {
+                    val bx = CardGames.valueBox(pos)
+                    val x0 = (bx[0] * bmp.width).toInt().coerceIn(0, bmp.width - 2); val y0 = (bx[1] * bmp.height).toInt().coerceIn(0, bmp.height - 2)
+                    val x1 = (bx[2] * bmp.width).toInt().coerceIn(x0 + 1, bmp.width); val y1 = (bx[3] * bmp.height).toInt().coerceIn(y0 + 1, bmp.height)
+                    val crop = Bitmap.createBitmap(bmp, x0, y0, x1 - x0, y1 - y0)
+                    val big = Bitmap.createScaledBitmap(crop, (x1 - x0) * 4, (y1 - y0) * 4, true)
+                    zoomTxt = OcrEngine.readRaw(big).trim().replace("\n", " ")
+                    zoom = CardGames.toDigits(zoomTxt.substringBefore(' '))
+                    big.recycle(); crop.recycle()
+                }
+                val frame = CardGames.read(ocr)
+                val g = zoom ?: frame
+                val msg = "JOGOS de ${who.name}: ${g ?: "não lido"} (recorte ampliado: '${zoomTxt}', quadro: ${frame ?: "—"})"
+                if (msg != lastGamesLog) { lastGamesLog = msg; Diag.log(msg) }
+                if (g != null) { CardGames.put(repo, slot, who.nameKey, g, nowMs); gamesOkAt[who.nameKey] = nowMs }
+            } else if (who != null && pos == null) {
+                val msg = "JOGOS de ${who.name}: bloco de estatísticas não visto neste quadro"
+                if (msg != lastGamesLog) { lastGamesLog = msg; Diag.log(msg) }
+            }
         }
         val p = dao.playersOf(slot).filter { it.owner == "MY" }
             .filter { pl ->
