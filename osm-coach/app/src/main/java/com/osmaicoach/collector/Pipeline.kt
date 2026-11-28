@@ -239,6 +239,11 @@ class FramePipeline private constructor(private val ctx: Context) {
         val shown = nameLine.text.trim().replace(Regex("^\\d{1,2}\\s+"), "").trim()
         val k = Txt.key(shown)
         if (k.length < 3) return false
+        // "JOGOS" do cartão grande (regra de jogos da nacionalidade): grava para QUALQUER jogador do meu elenco, com casamento próprio e mais tolerante
+        runCatching {
+            val g = CardGames.read(ocr)
+            if (g != null) CardGames.match(shown, age, dao.playersOf(slot).filter { it.owner == "MY" })?.let { m -> CardGames.put(repo, slot, m.nameKey, g, System.currentTimeMillis()) }
+        }
         val p = dao.playersOf(slot).filter { it.owner == "MY" }
             .filter { pl ->
                 val mine = Txt.norm(pl.name).split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }
@@ -251,8 +256,6 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (p == null) return false   // pode ser de outro slot (photosFrom tenta os demais)
         runCatching { WorldOcr.bigCard(ctx, slot, p.name, shown) }   // o card mostra o NOME COMPLETO: identificação real pelo nome inteiro
         val now = System.currentTimeMillis()
-        // "JOGOS" do cartão grande: vale para a regra de jogos da nacionalidade da liga (a bolha conta sozinha)
-        runCatching { CardGames.read(ocr.lines)?.let { g -> CardGames.put(repo, slot, p.nameKey, g, now) } }
         fun say(msg: String, tell: String? = null) {
             if (msg != lastBigLog) { lastBigLog = msg; Diag.log(msg) }
             if (tell != null) note(slot, tell, now, 20_000L)

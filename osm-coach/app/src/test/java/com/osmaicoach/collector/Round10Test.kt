@@ -64,4 +64,31 @@ class Round10Test {
         val c = SlotRules.checks(r, emptyList(), 5, 22, null, 0L)
         assertEquals(SlotRules.St.UNKNOWN, c.single().st)
     }
+
+    @Test fun gamesReadEvenWhenOcrMergesTheLabelsIntoOneLine() {
+        // JOGOS GOLOS ASSISTÊNCIAS CLASSIFICAÇÃO numa linha só e "9 0 1 6,3" noutra (palavras com posição própria)
+        val labels = Fx.line("JOGOS GOLOS ASSISTÊNCIAS CLASSIFICAÇÃO", 0.6575f, 0.36f, w = 0.5f)
+        val values = Fx.line("9 0 1 6,3", 0.6575f, 0.40f, w = 0.5f)
+        assertEquals(9, CardGames.read(Fx.ocr(labels, values)))
+    }
+
+    @Test fun cardNameMatchesTheRightSquadPlayer() {
+        fun p(n: String, age: Int) = PlayerEntity(3, "MY", Txt.key(n), n, age, "DC", "DEF", 79, "4,8M", false, false, 0L)
+        val squad = listOf(p("Marques", 25), p("Lucas Barbosa", 25), p("Alix", 27), p("Cleiton", 22))
+        assertEquals("Marques", CardGames.match("GUSTAVO MARQUES ALVES DOS SANTOS", 25, squad)?.name)
+        assertEquals("Lucas Barbosa", CardGames.match("LUCAS HENRIQUE BARBOSA", 25, squad)?.name)
+        assertNull(CardGames.match("GUSTAVO MARQUES ALVES DOS SANTOS", 30, squad))                 // idade diferente: outra pessoa
+        assertNull(CardGames.match("PEDRO SILVA", 25, squad))
+    }
+
+    @Test fun rulesBlockTellsHowToFulfil() {
+        val r = SlotRules.parse("Proibido ultrapassar over de treinamento 95. Proibido ter mais de 20 jogadores no elenco. Obrigatório ter 2 jogadores da nacionalidade da liga, e cada jogador entrar em campo 5 vezes no mínimo.")
+        val info = listOf(SlotRules.NativeP("Ana", null, false), SlotRules.NativeP("Bia", 3, true))
+        val ps = (1..22).map { pl("X$it", 60) } + pl("Fulano", 95, training = true)
+        val c = SlotRules.checks(r, ps, 5, 22, null, 0L, SlotRules.Extra(natives = info.map { it.name to (it.games ?: 0) }, flagsKnown = true, nativeInfo = info)).associateBy { it.text.substringBefore(":") }
+        assertTrue(c.getValue("Treino").how!!.contains("Fulano"))
+        assertTrue(c.getValue("Elenco").how!!.contains("Venda"))
+        val nat = c.values.first { it.text.contains("nacionalidade") }
+        assertTrue(nat.how!!.contains("CARTÃO GRANDE") && nat.how!!.contains("Ana")); assertTrue(nat.how!!.contains("Escale") && nat.how!!.contains("Bia"))
+    }
 }

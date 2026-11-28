@@ -254,7 +254,7 @@ object SlotRules {
 
     enum class St { OK, BAD, UNKNOWN }
     /** Uma regra principal com a situação AGORA: ✅ cumprida, ❌ precisa cumprir, ❔ sem dado para saber. */
-    data class Check(val text: String, val st: St, val detail: String? = null)
+    data class Check(val text: String, val st: St, val detail: String? = null, val how: String? = null)
 
     /** Situação de cada regra reconhecida (só as regras em negrito/numéricas; o texto colado não é repetido). */
     fun checks(r: Rules, players: List<PlayerEntity>, round: Int?, roundTotal: Int?, lastReadAt: Long?, now: Long, x: Extra = Extra()): List<Check> {
@@ -265,32 +265,37 @@ object SlotRules {
         r.maxTrain?.let { tr ->
             val bad = mine.filter { (it.training == true && (it.strength ?: 0) >= tr - 1) || (it.training != true && (it.strength ?: 0) >= tr - 1) }
             out.add(Check("Treino: até over $tr", if (bad.isEmpty()) St.OK else St.BAD,
-                if (bad.isEmpty()) null else bad.take(3).joinToString { nm(it) } + (if (bad.any { it.training == true }) " — tire do treino" else " — não coloque no treino")))
+                if (bad.isEmpty()) null else bad.take(3).joinToString { nm(it) } + (if (bad.any { it.training == true }) " — tire do treino" else " — não coloque no treino"),
+                if (bad.isEmpty()) null else "No OSM: Treino → tire " + bad.take(3).joinToString { it.name } + " do treinador e use o treinador em outro jogador."))
         }
         r.maxStar?.let { star ->
             val bad = mine.filter { (it.strength ?: 0) >= star }
-            out.add(Check("Craque: até over $star", if (bad.isEmpty()) St.OK else St.BAD, if (bad.isEmpty()) null else bad.take(3).joinToString { nm(it) } + " no limite/acima"))
+            out.add(Check("Craque: até over $star", if (bad.isEmpty()) St.OK else St.BAD, if (bad.isEmpty()) null else bad.take(3).joinToString { nm(it) } + " no limite/acima",
+                if (bad.isEmpty()) null else "Não treine " + bad.take(3).joinToString { it.name } + "; acima do limite a venda instantânea é permitida."))
         }
         r.maxSquad?.let { m ->
-            out.add(Check("Elenco: até $m jogadores", if (mine.size <= m) St.OK else St.BAD, "${mine.size}/$m"))
+            out.add(Check("Elenco: até $m jogadores", if (mine.size <= m) St.OK else St.BAD, "${mine.size}/$m",
+                if (mine.size <= m) null else "Venda ${mine.size - m} jogador(es) — os que sobram nas posições."))
         }
         if (r.noTransferSecondHalf) {
             val late = round != null && roundTotal != null && round > roundTotal / 2
-            out.add(Check("Sem transferências no 2º turno", if (late) St.BAD else St.OK, if (late) "estamos no 2º turno: não compre nem liste" else "1º turno: transferências liberadas"))
+            out.add(Check("Sem transferências no 2º turno", if (late) St.BAD else St.OK, if (late) "estamos no 2º turno: não compre nem liste" else "1º turno: transferências liberadas",
+                if (late) "Não compre, não venda e não liste jogadores até o fim da liga." else null))
         }
         r.maxAwayDays?.let { d ->
             if (lastReadAt == null) out.add(Check("Entrar na liga a cada $d dias", St.UNKNOWN, "sem leitura recente"))
             else {
                 val h = (now - lastReadAt) / 3_600_000L
                 val bad = h >= (d - 1) * 24L
-                out.add(Check("Entrar na liga a cada $d dias", if (bad) St.BAD else St.OK, "última leitura há ${h / 24}d ${h % 24}h" + (if (bad) " — entre hoje" else "")))
+                out.add(Check("Entrar na liga a cada $d dias", if (bad) St.BAD else St.OK, "última leitura há ${h / 24}d ${h % 24}h" + (if (bad) " — entre hoje" else ""),
+                    if (bad) "Abra o jogo neste slot hoje (qualquer tela vale)." else null))
             }
         }
         if (r.natCount != null) {
             val label = "${r.natCount} jogadores da nacionalidade da liga" + (r.natGames?.let { ", $it jogos cada" } ?: "")
             val info = x.nativeInfo
             val nat = x.natives
-            if (nat == null) out.add(Check(label, St.UNKNOWN, "escolha a bandeira da liga no cartão de regras do app"))
+            if (nat == null) out.add(Check(label, St.UNKNOWN, "bandeira da liga ainda não escolhida", "No app: slot → Visão geral → cartão de regras → escolha a bandeira da liga."))
             else {
                 val need = r.natGames
                 val rows = info ?: nat.map { NativeP(it.first, it.second.takeIf { g -> g > 0 }, false) }
@@ -309,20 +314,37 @@ object SlotRules {
                         else -> "👉 ${p.name} — abra o cartão grande (jogos não lidos)"
                     })
                 }
-                out.add(Check(label, if (ready >= r.natCount) St.OK else St.BAD, lines.joinToString("\n")))
+                val unread = rows.filter { it.games == null || !it.fromCard }.map { it.name }
+                val low = rows.filter { need != null && it.games != null && it.games < need }.map { it.name }
+                val how = if (ready >= r.natCount) null else buildList {
+                    if (unread.isNotEmpty()) add("Abra o CARTÃO GRANDE (Plantel → toque no jogador) de: ${unread.take(6).joinToString()} — o app lê os jogos sozinho.")
+                    if (low.isNotEmpty()) add("Escale no 11 para chegarem a ${need} jogos: ${low.take(6).joinToString()}.")
+                    if (rows.size < r.natCount) add("Faltam ${r.natCount - rows.size} jogador(es) da nacionalidade no elenco.")
+                }.joinToString(" ")
+                out.add(Check(label, if (ready >= r.natCount) St.OK else St.BAD, lines.joinToString("\n"), how))
             }
         }
         r.evolveX?.let { e ->
             val now2 = x.valueNow; val base = x.valueBase
-            if (now2 == null || base == null || base <= 0.0) out.add(Check("Evoluir ${e}× o valor inicial", St.UNKNOWN, "valor do elenco ainda não lido"))
-            else { val k = now2 / base; out.add(Check("Evoluir ${e}× o valor inicial", if (k >= e) St.OK else St.BAD, "agora ${"%.1f".format(k).replace('.', ',')}×")) }
+            if (now2 == null || base == null || base <= 0.0) out.add(Check("Evoluir ${e}× o valor inicial", St.UNKNOWN, "valor do elenco ainda não lido", "Abra o Plantel no OSM para eu ler o valor do elenco."))
+            else { val k = now2 / base; out.add(Check("Evoluir ${e}× o valor inicial", if (k >= e) St.OK else St.BAD, "agora ${"%.1f".format(k).replace('.', ',')}×", if (k >= e) null else "Valorize o elenco: treine os jovens e não venda quem está valorizando.")) }
         }
         if (r.relegated > 0) {
             val pos = x.pos; val teams = x.teams
-            if (pos == null || teams == null) out.add(Check("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}", St.UNKNOWN, "posição não lida"))
-            else out.add(Check("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}", if (pos <= teams - r.relegated) St.OK else St.BAD, "${pos}º de $teams" + (if (pos > teams - r.relegated) " — zona de rebaixamento" else "")))
+            if (pos == null || teams == null) out.add(Check("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}", St.UNKNOWN, "posição não lida", "Abra a Classificação no OSM para eu ler a posição."))
+            else out.add(Check("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}", if (pos <= teams - r.relegated) St.OK else St.BAD, "${pos}º de $teams" + (if (pos > teams - r.relegated) " — zona de rebaixamento" else ""),
+                if (pos > teams - r.relegated) "Some pontos para sair da zona: priorize vitórias nos próximos jogos." else null))
         }
         return out
+    }
+
+    /** Regras + situação AGORA do slot (usado pelo bloco do app e pela bolha: uma conta só). */
+    suspend fun checksFor(repo: Repo, slot: Int, now: Long = System.currentTimeMillis()): List<Check> {
+        val r = load(repo, slot) ?: return emptyList()
+        val f = repo.fieldMap(slot)
+        return runCatching {
+            checks(r, repo.playersOf(slot), f[K.ROUND]?.value?.toIntOrNull(), f[K.ROUND_TOTAL]?.value?.toIntOrNull(), f.values.maxOfOrNull { it.updatedAt }, now, gather(repo, slot, r, f, now))
+        }.getOrDefault(emptyList())
     }
 
     /** Texto para o prompt da IA: obrigatório respeitar (compra, treino, craque, elenco, escalação). */

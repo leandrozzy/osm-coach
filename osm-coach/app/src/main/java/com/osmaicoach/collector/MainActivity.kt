@@ -3359,6 +3359,7 @@ internal fun SlotSummaryTab(slot: Int, d: SlotData) {
         Panel { WinCard(d.win) }
     }
     LastGameCard(d)
+    RulesProgressCard(slot)
     RulesCard(slot)
     // números da temporada em blocos
     val goalPos = fv(d, K.MY_OBJECTIVE).toIntOrNull()
@@ -3995,4 +3996,42 @@ internal fun TeamCrest(name: String?, size: Dp) {
         runCatching { (CrestWeb.find(ctx.filesDir, name) ?: CrestCut.find(ctx.filesDir, name))?.takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap() } }.getOrNull()
     }
     if (bmp != null) { Image(bmp, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size)); Spacer(Modifier.width(4.dp)) }
+}
+
+
+/** Bloco do slot (só quando há regras): quantas regras estão cumpridas, o que falta e COMO cumprir. Mesma conta da bolha (`SlotRules.checksFor`). */
+@Composable
+internal fun RulesProgressCard(slot: Int) {
+    val ctx = LocalContext.current
+    val checks = rememberLoaded<List<SlotRules.Check>?>(null, UiBus.version, "rulesprog$slot") { runCatching { SlotRules.checksFor(Repo(ctx), slot) }.getOrNull() }
+    if (checks.isNullOrEmpty()) return
+    val ok = checks.count { it.st == SlotRules.St.OK }
+    val bad = checks.count { it.st == SlotRules.St.BAD }
+    val frac = ok.toFloat() / checks.size
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(24.dp))
+        .background(Brush.verticalGradient(listOf((if (bad == 0) C.OK else C.GOLD).copy(alpha = 0.16f), DS.SURFACE)))
+        .border(1.dp, (if (bad == 0) C.OK else C.GOLD).copy(alpha = 0.45f), RoundedCornerShape(24.dp)).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("📜", fontSize = 22.sp)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Regras da liga", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                Text(if (bad == 0) "Tudo em dia" else "$bad para cumprir", color = if (bad == 0) C.OK else C.GOLD, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text("$ok/${checks.size}", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = if (bad == 0) C.OK else C.GOLD)
+        }
+        Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp).height(8.dp).clip(RoundedCornerShape(4.dp)).background(C.BORDER)) {
+            Box(Modifier.fillMaxWidth(frac.coerceIn(0.02f, 1f)).height(8.dp).clip(RoundedCornerShape(4.dp)).background(if (bad == 0) C.OK else C.GOLD))
+        }
+        for (c in checks) {
+            val col = when (c.st) { SlotRules.St.OK -> C.OK; SlotRules.St.BAD -> C.BAD; SlotRules.St.UNKNOWN -> C.MUTED }
+            Column(Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.04f)).padding(12.dp)) {
+                Text((when (c.st) { SlotRules.St.OK -> "✅ "; SlotRules.St.BAD -> "❌ "; SlotRules.St.UNKNOWN -> "❔ " }) + c.text, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (c.st == SlotRules.St.BAD) C.BAD else Color.White)
+                c.detail?.split("\n")?.forEach { d ->
+                    Text(d, fontSize = 12.5.sp, color = when { d.startsWith("✅") -> C.OK; d.startsWith("❌") || d.startsWith("👉") -> C.GOLD; else -> col }, modifier = Modifier.padding(top = 2.dp))
+                }
+                c.how?.let { Text("Como cumprir: $it", fontSize = 12.5.sp, color = C.GOLD, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp)) }
+            }
+        }
+    }
 }
