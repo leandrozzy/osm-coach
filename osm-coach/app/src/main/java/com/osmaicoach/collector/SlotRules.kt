@@ -206,14 +206,26 @@ object SlotRules {
         return Extra(natives, groups.isNotEmpty(), pos, teams, gap, now1, base)
     }
 
+    /**
+     * Regras valem SÓ para a liga em que foram digitadas (mudam a cada liga nova): gravadas com o nome da competição; se a competição do slot mudou,
+     * as regras da liga anterior são apagadas (e `Repo.archiveSeason` também as apaga ao arquivar a liga).
+     */
     suspend fun load(repo: Repo, slot: Int): Rules? {
-        val j = repo.dao.plan(slot, "rules")?.json ?: return null
-        val txt = runCatching { JSONObject(j).optString("text") }.getOrDefault("")
-        return if (txt.isBlank()) null else parse(txt)
+        val j = repo.dao.plan(slot, "rules")?.json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+        val txt = j.optString("text")
+        if (txt.isBlank()) return null
+        val savedFor = j.optString("comp").takeIf { it.isNotBlank() }
+        val cur = repo.fieldMap(slot)[K.COMPETITION]?.value?.takeIf { FieldMerge.known(it) }
+        if (savedFor != null && cur != null && Txt.sim(Txt.key(savedFor), Txt.key(cur)) < 0.8) {
+            repo.dao.deletePlan(slot, "rules")
+            return null
+        }
+        return parse(txt)
     }
 
     suspend fun save(repo: Repo, slot: Int, text: String, now: Long) {
-        val body = if (text.isBlank()) "{}" else JSONObject().put("text", text.trim()).toString()
+        val comp = repo.fieldMap(slot)[K.COMPETITION]?.value?.takeIf { FieldMerge.known(it) }
+        val body = if (text.isBlank()) "{}" else JSONObject().put("text", text.trim()).apply { comp?.let { put("comp", it) } }.toString()
         repo.dao.putPlan(PlanEntity(slot, "rules", body, now))
     }
 

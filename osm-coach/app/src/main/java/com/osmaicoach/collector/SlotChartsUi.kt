@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.layout.fillMaxWidth as fillW
 
 /** Ordem de exibição das abas do slot: "Gráficos" (id 9) fica ao lado de Histórico e os ids antigos (7 Diretor, 8 Aprendizado) não mudam. */
 object SlotNav {
@@ -33,110 +33,159 @@ object SlotNav {
     val ORDER = listOf(0, 1, 2, 3, 4, 5, 6, CHARTS, 7, 8)
 }
 
-/** Aba "Gráficos" do slot (índice 9, exibida ao lado de Histórico). Cada barra traz o valor e a amostra em texto (não depende só de cor). */
+/** Aba "Gráficos" (estilo BI, automática): o app escolhe o que mostrar; só dá para alternar "Este slot / Todos os slots" e, havendo mais de um tipo de competição, qual deles. */
 @Composable
 internal fun SlotChartsTab(slot: Int, onOpenResult: (Int) -> Unit) {
     val ctx = LocalContext.current
-    val loaded = rememberLoaded<Pair<String, List<SlotCharts.Game>>?>(null, UiBus.version, "charts$slot") { runCatching { SlotCharts.load(Repo(ctx), slot) }.getOrNull() }
-    // filtro vindo da bolha (confirmado no confronto): vale uma vez para este slot
-    val initial = remember(slot) { Route.chartFilter?.takeIf { Route.chartSlot == slot }?.let { SlotCharts.Filter.fromJson(it) }.also { if (Route.chartSlot == slot) { Route.chartFilter = null; Route.chartSlot = 0 } } }
-    var f by remember(slot) { mutableStateOf(initial ?: SlotCharts.Filter()) }
-    if (loaded == null) { Text("Carregando…", color = C.MUTED); return }
-    val all = loaded.second
-    val g = SlotCharts.apply(all, f)
-    Title("Gráficos do slot $slot")
-    if (all.none { it.result != null }) { EmptyState("📈", "Sem partidas lidas neste slot", "Os gráficos usam só placares e leituras reais deste slot e desta competição. Leia o Calendário/Resultados no OSM."); return }
-    // filtros
-    fun row(content: @Composable () -> Unit) = content
-    Row(Modifier.fillW().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        FilterPill("Edição atual", !f.archived) { f = copyF(f, archived = false) }
-        if (all.any { it.archived }) FilterPill("Anteriores", f.archived) { f = copyF(f, archived = true) }
-        for (m in listOf("Batalha", "Liga", "Copa")) if (all.any { it.mode == m && it.archived == f.archived }) FilterPill(m, f.mode == m) { f = copyF(f, mode = if (f.mode == m) "" else m) }
-        FilterPill("Casa", f.home == true) { f = copyF(f, home = if (f.home == true) null else true, homeSet = true) }
-        FilterPill("Fora", f.home == false) { f = copyF(f, home = if (f.home == false) null else false, homeSet = true) }
-        FilterPill("Só humanos", f.humanOnly) { f = copyF(f, humanOnly = !f.humanOnly) }
+    var all by remember(slot) { mutableStateOf(false) }
+    var modeSel by remember(slot, all) { mutableStateOf<String?>(null) }
+    val data = rememberLoaded<List<SlotCharts.Game>?>(null, UiBus.version, "bi$slot$all") {
+        runCatching {
+            val repo = Repo(ctx)
+            if (all) (1..4).flatMap { s -> SlotCharts.load(repo, s).second } else SlotCharts.load(repo, slot).second
+        }.getOrNull()
     }
-    val buckets = all.map { it.bucket }.distinct().filter { it != "força desconhecida" }
-    if (buckets.isNotEmpty()) Row(Modifier.fillW().horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (b in buckets) FilterPill(b, f.bucket == b) { f = copyF(f, bucket = if (f.bucket == b) "" else b) }
+    Title(if (all) "Gráficos — todos os slots" else "Gráficos — slot $slot")
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilterPill("Este slot", !all) { all = false }
+        FilterPill("Todos os slots", all) { all = true }
     }
-    val forms = all.mapNotNull { it.rivalFormation }.distinct(); val sts = all.mapNotNull { it.rivalStyle }.distinct()
-    if (forms.isNotEmpty() || sts.isNotEmpty()) Row(Modifier.fillW().horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (x in forms) FilterPill("Rival $x", f.rivalFormation == x) { f = copyF(f, rivalFormation = if (f.rivalFormation == x) "" else x) }
-        for (x in sts) FilterPill("Rival: $x", f.rivalStyle == x) { f = copyF(f, rivalStyle = if (f.rivalStyle == x) "" else x) }
+    if (data == null) { Text("Carregando…", color = C.MUTED); return }
+    val current = data.filter { !it.archived }
+    val modes = current.filter { it.result != null }.map { it.mode }.distinct()
+    val mode = modeSel?.takeIf { it in modes } ?: SlotBi.mainMode(current)
+    if (mode == null) { EmptyState("📈", "Ainda sem partidas lidas", "Os gráficos aparecem sozinhos quando o app lê o Calendário/Resultados dos jogos. Nada precisa ser configurado."); return }
+    if (modes.size > 1) Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (m in modes) FilterPill("$m (${current.count { it.mode == m && it.result != null }})", m == mode) { modeSel = m }
     }
-    Text(if (f.active().isEmpty()) "Filtro: edição atual, todos os jogos (${g.size})" else "Filtro: " + f.active().joinToString(" • ") + " (${g.size} jogo(s))", color = C.MUTED, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
-    if (g.isEmpty()) { Panel { Text("Nenhum jogo com este filtro. Tire um filtro para ver mais.", color = C.MUTED) }; return }
+    val g = current.filter { it.mode == mode }
+    val k = SlotBi.kpi(g)
+    Text("Temporada atual • $mode" + (if (modes.size > 1) " (Liga, Copa e Batalha nunca são somadas)" else ""), color = C.MUTED, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
 
-    // 1) planos em jogos parecidos
-    val pc = SlotCharts.plans(g)
-    Panel {
-        PanelTitle("Planos em jogos parecidos")
-        Text("Pontos por jogo (0–3) por configuração REALMENTE aplicada, contra humanos confirmados.", color = C.MUTED, fontSize = 12.sp)
-        if (pc.rows.isEmpty()) Text(pc.note, color = C.MUTED, modifier = Modifier.padding(top = 6.dp))
-        else {
-            for (r in pc.rows) {
-                Bar(r.label, r.ppg / 3.0, if (r === pc.best) C.OK else C.INFO, "%.2f pts/jogo • ${r.w}V ${r.e}E ${r.d}D • ${r.n} jogo(s)".format(r.ppg)) { }
-                Text("   jogos: " + r.games.joinToString(", ") { "J${it.round ?: "?"} ${it.result}" }, color = C.MUTED, fontSize = 11.sp)
-            }
-            Text(pc.note, color = if (pc.comparable) C.MUTED else C.GOLD, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-        }
+    // KPIs
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Kpi("Aproveitamento", "${k.rate}%", "${k.pts} pts em ${k.n} jogos", Modifier.weight(1f), if (k.rate >= 60) C.OK else if (k.rate >= 40) C.GOLD else C.BAD)
+        Kpi("Campanha", "${k.w}V ${k.e}E ${k.d}D", SlotBi.streak(g) ?: "", Modifier.weight(1f), C.INFO)
     }
-    // 2) finalizações
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Kpi("Pts por jogo", "%.2f".format(k.ppg).replace('.', ','), "máximo 3,00", Modifier.weight(1f), C.PRIMARY)
+        Kpi("Gols", if (k.goalGames > 0) "${k.gf}–${k.ga}" else "sem leitura", if (k.goalGames > 0) "saldo ${if (k.gf - k.ga > 0) "+" else ""}${k.gf - k.ga} (${k.goalGames} jogos com placar)" else "", Modifier.weight(1f), C.INFO)
+    }
+
+    // achados automáticos
+    val ins = SlotBi.insights(g)
+    if (ins.isNotEmpty()) Panel {
+        PanelTitle("O que o app percebeu")
+        for (i in ins) Text((when (i.kind) { "good" -> "✅ "; "warn" -> "⚠ "; else -> "ℹ " }) + i.text, fontSize = 13.sp, color = if (i.kind == "warn") C.GOLD else C.TEXT, modifier = Modifier.padding(vertical = 2.dp))
+    }
+
+    // evolução
+    val ev = SlotBi.evolution(g)
+    if (ev.rounds.size >= 2) Panel {
+        PanelTitle("Evolução na temporada")
+        Text("Pontos acumulados (linha) e resultado de cada rodada (quadrados; toque abre o jogo)", color = C.MUTED, fontSize = 11.5.sp)
+        LineChart(ev.cumulative.map { it.toFloat() }, C.PRIMARY)
+        Text("Aproveitamento nos últimos 5 jogos (%)", color = C.MUTED, fontSize = 11.5.sp, modifier = Modifier.padding(top = 6.dp))
+        LineChart(ev.rolling.map { it.toFloat() }, C.INFO, maxFixed = 100f)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (i in ev.rounds.indices) {
+                val r = ev.results[i]
+                Box(Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)).background(when (r) { "V" -> C.OK; "E" -> C.GOLD; else -> C.BAD }).clickable { onOpenResult(ev.rounds[i]) }, contentAlignment = Alignment.Center) {
+                    Text(r, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = androidx.compose.ui.graphics.Color(0xFF081A3C))
+                }
+            }
+        }
+        Text("Rodadas: " + ev.rounds.joinToString(" ") { "J$it" }, color = C.MUTED, fontSize = 10.5.sp)
+    }
+
+    // o que funciona
+    val (conf, sug) = SlotBi.tactics(g)
     Panel {
-        PanelTitle("Finalizações a favor e contra")
-        val withR = g.filter { it.result != null && it.round != null }.sortedBy { it.round }
-        val maxS = (withR.flatMap { listOfNotNull(it.shotsFor, it.shotsAgainst) }.maxOrNull() ?: 1).coerceAtLeast(1)
-        if (withR.none { it.hasStats }) Text("Nenhum jogo com remates lidos. Abra a Análise/Resultado do jogo no OSM para ler as estatísticas (não é zero: é falta de leitura).", color = C.MUTED, fontSize = 12.sp)
+        PanelTitle("Qual tática está funcionando")
+        if (conf.isEmpty() && sug.isEmpty()) Text("Ainda sem táticas registradas neste período.", color = C.MUTED, fontSize = 12.sp)
+        if (conf.isNotEmpty()) { Text("Jogada e confirmada (tela Tática lida)", color = C.OK, fontSize = 12.sp, fontWeight = FontWeight.SemiBold); for (r in conf) RowBar(r) }
+        if (sug.isNotEmpty()) {
+            Text("Sugerida pelo app — aplicação NÃO confirmada (pode ter sido outra)", color = C.GOLD, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            for (r in sug) RowBar(r)
+        }
+        Text("Verde = funcionando (≥2,0 pts/jogo com 3+ jogos); vermelho = atenção (≤1,0). Amostra pequena não conclui nada.", color = C.MUTED, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+
+    // casa/fora e humano/cpu
+    val ha = SlotBi.homeAway(g); val hb = SlotBi.humanBot(g)
+    if (ha.isNotEmpty() || hb.isNotEmpty()) Panel {
+        PanelTitle("Onde rende mais")
+        for (r in ha + hb) RowBar(r)
+    }
+    val st = SlotBi.rivalStyles(g)
+    if (st.isNotEmpty()) Panel {
+        PanelTitle("Contra o estilo do rival")
+        for (r in st) RowBar(r)
+        Text("Só estilos realmente lidos; jogos sem estilo lido ficam de fora.", color = C.MUTED, fontSize = 11.sp)
+    }
+    if (all) {
+        val bs = SlotBi.bySlot(g)
+        if (bs.size > 1) Panel { PanelTitle("Comparação entre slots"); for (r in bs) RowBar(r) }
+    }
+
+    // gols e finalizações por jogo
+    val withR = g.filter { it.result != null && it.round != null && !all }.sortedBy { it.round }
+    if (withR.isNotEmpty()) Panel {
+        PanelTitle("Gols e finalizações por jogo")
+        val maxS = (withR.flatMap { listOfNotNull(it.shotsFor, it.shotsAgainst, it.gf, it.ga) }.maxOrNull() ?: 1).coerceAtLeast(1)
         for (x in withR) {
             val score = if (x.gf != null && x.ga != null) "${x.gf}–${x.ga}" else "placar sem leitura"
-            if (x.hasStats) Bar("J${x.round} vs ${x.rival ?: "?"} ($score)", x.shotsFor!!.toDouble() / maxS, C.PRIMARY, "a favor ${x.shotsFor} • contra ${x.shotsAgainst}") { onOpenResult(x.round!!) }
-            else Text("J${x.round} vs ${x.rival ?: "?"} ($score): remates sem leitura", color = C.MUTED, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp).clickable { onOpenResult(x.round!!) })
+            val shots = if (x.hasStats) "remates ${x.shotsFor} × ${x.shotsAgainst}" else "remates sem leitura"
+            Bar("J${x.round} vs ${x.rival ?: "?"}: $score • $shots", (x.shotsFor ?: x.gf ?: 0).toDouble() / maxS, when (x.result) { "V" -> C.OK; "E" -> C.GOLD; else -> C.BAD }, "resultado ${x.result}") { onOpenResult(x.round!!) }
         }
-        Text("Chutes no alvo não são lidos separadamente: só \"remates\" totais. Expulsão/acampamento não são mostrados sem confirmação.", color = C.MUTED, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+        Text("Falta de leitura aparece como \"sem leitura\", nunca como zero.", color = C.MUTED, fontSize = 11.sp)
     }
-    // 3) pontos e saldo por rodada
-    val rp = SlotCharts.rounds(g)
-    Panel {
-        PanelTitle("Pontos por rodada")
-        Text("Pontos de partida (V=3, E=1, D=0); não é o total oficial da Batalha.", color = C.MUTED, fontSize = 11.5.sp)
-        for (r in rp) Bar("J${r.round}", (r.points ?: 0) / 3.0, when (r.points) { 3 -> C.OK; 1 -> C.GOLD; else -> C.BAD }, "${r.points} pt (" + (r.game.result ?: "?") + ")") { onOpenResult(r.round) }
-        PanelTitle("Saldo de gols por rodada")
-        val maxD = (rp.mapNotNull { it.goalDiff }.maxOfOrNull { Math.abs(it) } ?: 1).coerceAtLeast(1)
-        for (r in rp) if (r.goalDiff != null) Bar("J${r.round}", Math.abs(r.goalDiff) / maxD.toDouble(), if (r.goalDiff >= 0) C.OK else C.BAD, (if (r.goalDiff > 0) "+" else "") + "${r.goalDiff} gols") { onOpenResult(r.round) }
-        else Text("J${r.round}: placar sem leitura", color = C.MUTED, fontSize = 12.sp)
-    }
-    // 4) estilo do rival
-    val sc = SlotCharts.styles(g)
-    Panel {
-        PanelTitle("Desempenho por estilo do rival")
-        if (sc.rows.isEmpty()) Text("Nenhum estilo do rival lido nos jogos deste filtro.", color = C.MUTED, fontSize = 12.sp)
-        for (r in sc.rows) Bar(r.style, r.ppg / 3.0, C.INFO, "%.2f pts/jogo • ${r.w}V ${r.e}E ${r.d}D • ${r.n} jogo(s)".format(r.ppg)) { }
-        if (sc.unknown > 0) Text("${sc.unknown} jogo(s) com estilo do rival não lido: ficam fora (estilo desconhecido não vira estilo confirmado).", color = C.MUTED, fontSize = 11.5.sp)
-    }
-    // 5) cobertura
+
+    // cobertura
     val cv = SlotCharts.coverage(g)
-    Panel {
-        PanelTitle("Cobertura das leituras")
-        Text("${cv.total} partida(s) com resultado • ${cv.withScore} com placar • ${cv.withStats} com estatísticas • ${cv.withApplied} com tática aplicada confirmada • ${cv.inComparison} entram no comparativo de táticas.", fontSize = 13.sp)
-        for (r in cv.reasons) Text("• $r", color = C.MUTED, fontSize = 12.sp)
-        Text("Dado que falta não é desempenho ruim: o jogo continua no placar e no histórico, só não entra onde falta confirmação.", color = C.MUTED, fontSize = 11.5.sp, modifier = Modifier.padding(top = 4.dp))
+    Text("Base dos gráficos: ${cv.total} jogos com resultado • ${cv.withScore} com placar • ${cv.withStats} com remates • ${cv.withApplied} com tática jogada confirmada.", color = C.MUTED, fontSize = 11.5.sp, modifier = Modifier.padding(top = 8.dp))
+}
+
+@Composable
+private fun Kpi(title: String, value: String, sub: String, modifier: Modifier, color: androidx.compose.ui.graphics.Color) {
+    Column(modifier.clip(RoundedCornerShape(16.dp)).background(C.SURFACE).padding(12.dp)) {
+        Text(title, fontSize = 11.5.sp, color = C.MUTED)
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = color)
+        if (sub.isNotBlank()) Text(sub, fontSize = 11.sp, color = C.MUTED)
     }
 }
 
-private fun copyF(f: SlotCharts.Filter, archived: Boolean? = null, mode: String? = null, home: Boolean? = null, homeSet: Boolean = false, humanOnly: Boolean? = null,
-                  bucket: String? = null, rivalFormation: String? = null, rivalStyle: String? = null) = SlotCharts.Filter(
-    archived ?: f.archived, if (mode == null) f.mode else mode.ifEmpty { null }, if (homeSet) home else f.home, humanOnly ?: f.humanOnly,
-    if (bucket == null) f.bucket else bucket.ifEmpty { null }, if (rivalFormation == null) f.rivalFormation else rivalFormation.ifEmpty { null }, if (rivalStyle == null) f.rivalStyle else rivalStyle.ifEmpty { null })
+@Composable
+private fun RowBar(r: SlotBi.Row) {
+    val col = when (r.verdict) { "funcionando" -> C.OK; "atenção" -> C.BAD; "poucos jogos" -> C.MUTED; else -> C.INFO }
+    Bar(r.label, r.ppg / 3.0, if (r.confirmed) col else col.copy(alpha = 0.55f), "%.2f pts/jogo • ${r.w}V ${r.e}E ${r.d}D • ${r.n} jogo(s) • ${r.verdict}".format(r.ppg).replace('.', ',')) { }
+}
+
+@Composable
+private fun LineChart(values: List<Float>, color: androidx.compose.ui.graphics.Color, maxFixed: Float? = null) {
+    if (values.size < 2) return
+    val maxV = (maxFixed ?: values.max()).coerceAtLeast(1f)
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(90.dp).padding(vertical = 4.dp)) {
+        val w = size.width; val h = size.height
+        val step = w / (values.size - 1)
+        val path = androidx.compose.ui.graphics.Path()
+        values.forEachIndexed { i, v ->
+            val x = i * step; val y = h - (v / maxV) * h
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawLine(color.copy(alpha = 0.25f), androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(w, h), strokeWidth = 2f)
+        drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 5f))
+        values.forEachIndexed { i, v -> drawCircle(color, 6f, androidx.compose.ui.geometry.Offset(i * step, h - (v / maxV) * h)) }
+    }
+    Text("de ${values.first().toInt()} a ${values.last().toInt()} (pico ${values.max().toInt()})", color = C.MUTED, fontSize = 10.5.sp)
+}
 
 @Composable
 private fun Bar(label: String, fraction: Double, color: androidx.compose.ui.graphics.Color, value: String, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onClick() }) {
-        Text(label, fontSize = 12.sp, maxLines = 2)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(5.dp)).background(C.BORDER)) {
-                Box(Modifier.fillMaxWidth(fraction.coerceIn(0.02, 1.0).toFloat()).height(10.dp).clip(RoundedCornerShape(5.dp)).background(color))
-            }
+        Text(label, fontSize = 12.sp, maxLines = 3)
+        Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(C.BORDER)) {
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0.02, 1.0).toFloat()).height(10.dp).clip(RoundedCornerShape(5.dp)).background(color))
         }
         Text(value, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = C.MUTED)
     }

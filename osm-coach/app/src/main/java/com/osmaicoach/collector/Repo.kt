@@ -474,6 +474,8 @@ class Repo(private val ctx: Context) {
         dao.deleteMatches(slot)
         // competição nova = linha de base nova: semanas (valor do elenco) e livro de caixa do que acabou não valem
         dao.deletePlan(slot, "weekly"); dao.deletePlan(slot, "ledger")
+        // as regras digitadas valiam só para a liga que acabou (mudam a cada liga nova)
+        dao.deletePlan(slot, "rules")
         for (p in dao.matchReports(slot)) {
             dao.putPlan(PlanEntity(slot, "old_" + tag + "_" + p.kind, p.json, p.at))
             dao.deletePlan(slot, p.kind)

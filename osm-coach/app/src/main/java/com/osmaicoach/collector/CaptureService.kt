@@ -189,9 +189,9 @@ class CaptureService : AccessibilityService() {
 
     /** Slot escolhido à mão na bolha (vale só enquanto o OSM não deixa o app reconhecer o slot sozinho). */
     private var pickedSlot: Int? = null
-    private var showFullTable = false
+    private var showFullTable = true
 
-    private fun onTacticTap() { showFullTable = false; refreshDecision() }
+    private fun onTacticTap() { showFullTable = true; refreshDecision() }
 
     private fun refreshDecision() {
         scope.launch {
@@ -245,7 +245,7 @@ class CaptureService : AccessibilityService() {
         } else {
             if (v.table != null) btns.addView(chip(if (showFullTable) "Ocultar tática" else "Ver tática completa", 0xFF1C2938.toInt(), dp).apply {
                 setOnClickListener { showFullTable = !showFullTable; refreshDecision() } }, lp())
-            btns.addView(chip("Ver jogos parecidos", 0xFF1C2938.toInt(), dp).apply { setOnClickListener { openAppAt(v.slot, 9, v.chartFilter) } }, lp())
+            btns.addView(chip("📈 Gráficos do slot", 0xFF1C2938.toInt(), dp).apply { setOnClickListener { openAppAt(v.slot, 9, null) } }, lp())
         }
         lv.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(btns) })
         card.visibility = View.VISIBLE

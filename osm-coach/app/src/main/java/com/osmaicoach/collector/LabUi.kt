@@ -136,7 +136,7 @@ internal fun DecisionCard(slot: Int) {
     val ctx = LocalContext.current
     val v = rememberLoaded<TacticDecision.View?>(null, UiBus.version, "decision$slot") { runCatching { TacticDecision.load(Repo(ctx), slot) }.getOrNull() }
     if (v == null) return
-    var full by remember(slot) { mutableStateOf(false) }
+    var full by remember(slot) { mutableStateOf(true) }
     val col = when (v.state) { TacticDecision.State.MANTENHA -> C.OK; TacticDecision.State.AJUSTE -> C.GOLD; TacticDecision.State.FALTA -> C.INFO; TacticDecision.State.SLOT_DESCONHECIDO -> C.BAD }
     Panel {
         Text(v.title, fontWeight = FontWeight.Bold)

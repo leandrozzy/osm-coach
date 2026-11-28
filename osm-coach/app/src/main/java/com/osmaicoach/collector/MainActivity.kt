@@ -3278,6 +3278,7 @@ internal fun RulesCard(slot: Int) {
                 val s = SlotRules.summary(r)
                 Text(if (s.isEmpty()) "Texto salvo; a IA recebe tudo como regra obrigatória." else "Entendi: " + s.joinToString(" • "), fontSize = 13.sp, color = Color.White, modifier = Modifier.padding(top = 4.dp))
                 Text("O restante do texto também vai para a IA da tática e do mercado.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+                Text("Valem só para esta liga: quando outra liga começar neste slot, as regras somem sozinhas e você cola as novas.", fontSize = 12.sp, color = C.GOLD, modifier = Modifier.padding(top = 2.dp))
             }
             if (r?.natCount != null) FlagPicker(slot)
             GhostButton(if (r == null) "Colar regras" else "Editar regras", modifier = Modifier.padding(top = 8.dp)) { editing = true }
