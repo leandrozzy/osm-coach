@@ -23,4 +23,18 @@ class Round10Test {
         val s = SlotRules.summary(r)
         assertTrue(s.any { it.contains("Treino") && it.contains("88") }); assertTrue(s.any { it.contains("30") })
     }
+
+    private fun g(r: Int) = LeagueResults.Stored(r, "Rival FC", "Outro $r", 0, 2, 1, 0L)   // rival perdeu
+
+    @Test fun preGameDotsBeatAShorterConfirmedSeriesThatCoversTheRound() {
+        // print real: o jogo mostra D D D D D, mas só 1 placar confirmado (rodada 15, a atual) escondia as bolinhas
+        val f = FormRead.rivalForm(listOf(g(15)), "Rival FC", 15, "DDDDD", true, false)!!
+        assertEquals("prejogo", f.source); assertEquals("DDDDD", f.dots)
+        assertTrue(f.note.contains("1 resultado"))
+    }
+
+    @Test fun confirmedSeriesStillWinsWhenAsLongAsTheDots() {
+        val f = FormRead.rivalForm((11..15).map { g(it) }, "Rival FC", 15, "DDDDD", true, false)!!
+        assertEquals("resultados", f.source); assertEquals(5, f.dots.length)
+    }
 }

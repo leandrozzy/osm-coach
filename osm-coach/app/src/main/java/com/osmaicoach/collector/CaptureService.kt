@@ -147,6 +147,9 @@ class CaptureService : AccessibilityService() {
     private var overlayBox: LinearLayout? = null
     private var toggleView: TextView? = null
     private var rulesBtn: TextView? = null
+    @Volatile private var rulesHas = false
+    @Volatile private var rulesFor = -1
+    @Volatile private var rulesCheckedAt = 0L
     private var noticeView: TextView? = null
     private var cardView: LinearLayout? = null
     private var listView: LinearLayout? = null
@@ -192,12 +195,20 @@ class CaptureService : AccessibilityService() {
     private var pickedSlot: Int? = null
     private var showFullTable = true
 
-    /** A aba "📜 Regras" só aparece quando o slot atual TEM regras digitadas. */
+    /**
+     * A aba "📜 Regras" só aparece quando o slot atual TEM regras digitadas. O estado fica guardado e é reaplicado a cada volta do laço
+     * (antes só rodava ao mudar de tela e se perdia quando a bolha ainda não existia ou era recriada).
+     */
     private fun updateRulesButton(slot: Int) {
-        scope.launch {
-            val has = slot in 1..4 && runCatching { SlotRules.load(Repo(applicationContext), slot) != null }.getOrDefault(false)
-            withContext(Dispatchers.Main) { rulesBtn?.visibility = if (has) View.VISIBLE else View.GONE }
+        val now = System.currentTimeMillis()
+        if (slot != rulesFor || now - rulesCheckedAt > 8_000L) {
+            rulesFor = slot; rulesCheckedAt = now
+            scope.launch {
+                rulesHas = slot in 1..4 && runCatching { SlotRules.load(Repo(applicationContext), slot) != null }.getOrDefault(false)
+                withContext(Dispatchers.Main) { rulesBtn?.visibility = if (rulesHas) View.VISIBLE else View.GONE }
+            }
         }
+        rulesBtn?.post { rulesBtn?.visibility = if (rulesHas && slot in 1..4) View.VISIBLE else View.GONE }
     }
 
     private fun onRulesTap() {
@@ -488,7 +499,6 @@ class CaptureService : AccessibilityService() {
                 val key = "$type|$slot|${Diag.lastUpdateAt}"
                 if (key != hintKey && type != ScreenType.NON_OSM.name) {
                     hintKey = key
-                    updateRulesButton(slot)
                     val st = runCatching { ScreenType.valueOf(type) }.getOrDefault(ScreenType.OTHER_OSM)
                     val fresh = runCatching { Hints.forScreen(applicationContext, slot, st) }.getOrDefault(emptyList())
                     val sameScreen = slot == hintSlot && type == hintType
@@ -504,6 +514,7 @@ class CaptureService : AccessibilityService() {
                         }
                     }
                 }
+                updateRulesButton(slot)
                 withContext(Dispatchers.Main) { updateRing() }
                 delay(1500L)
             }

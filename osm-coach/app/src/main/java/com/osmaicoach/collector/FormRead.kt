@@ -53,10 +53,11 @@ object FormRead {
         val d = dots?.takeIf { it.isNotEmpty() && dotsFresh }
         if (cupOrBattle) return d?.let { RivalForm(it, "prejogo", null, false, "Bolinhas do Pré-jogo (não são placares confirmados; Copa/Batalha não usam a tabela da liga)") }
         val (res, last) = LeagueResults.formRun(games, rival)
-        val current = res.isNotEmpty() && (roundDone == null || last >= roundDone)
+        // placares confirmados cobrindo a rodada MAS com menos jogos que as bolinhas lidas agora no Pré-jogo (que mostram os últimos 5 do próprio OSM): vale a leitura mais completa
+        val current = res.isNotEmpty() && (roundDone == null || last >= roundDone) && (d == null || res.length >= d.length)
         return when {
             current -> RivalForm(res, "resultados", last, false, "${res.length} resultado${if (res.length > 1) "s" else ""} confirmado${if (res.length > 1) "s" else ""}, até a rodada $last")
-            d != null -> RivalForm(d, "prejogo", null, false, "Bolinhas do Pré-jogo (não são placares confirmados)" + (if (res.isNotEmpty()) "; resultados lidos só até a rodada $last" else ""))
+            d != null -> RivalForm(d, "prejogo", null, false, "Bolinhas do Pré-jogo (não são placares confirmados)" + (if (res.isNotEmpty()) "; só ${res.length} resultado(s) confirmado(s) até a rodada $last" else ""))
             res.isNotEmpty() -> RivalForm(res, "resultados", last, true, "Série desatualizada: resultados só até a rodada $last (faltam as mais recentes). Abra Resultados no OSM.")
             else -> null
         }
