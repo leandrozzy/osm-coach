@@ -146,6 +146,7 @@ class CaptureService : AccessibilityService() {
 
     private var overlayBox: LinearLayout? = null
     private var toggleView: TextView? = null
+    private var rulesBtn: TextView? = null
     private var noticeView: TextView? = null
     private var cardView: LinearLayout? = null
     private var listView: LinearLayout? = null
@@ -190,6 +191,51 @@ class CaptureService : AccessibilityService() {
     /** Slot escolhido à mão na bolha (vale só enquanto o OSM não deixa o app reconhecer o slot sozinho). */
     private var pickedSlot: Int? = null
     private var showFullTable = true
+
+    /** A aba "📜 Regras" só aparece quando o slot atual TEM regras digitadas. */
+    private fun updateRulesButton(slot: Int) {
+        scope.launch {
+            val has = slot in 1..4 && runCatching { SlotRules.load(Repo(applicationContext), slot) != null }.getOrDefault(false)
+            withContext(Dispatchers.Main) { rulesBtn?.visibility = if (has) View.VISIBLE else View.GONE }
+        }
+    }
+
+    private fun onRulesTap() {
+        scope.launch {
+            val slot = TacticDecision.slotNow() ?: pickedSlot
+            val repo = Repo(applicationContext)
+            val r = if (slot != null) SlotRules.load(repo, slot) else null
+            val f = if (slot != null) repo.fieldMap(slot) else emptyMap()
+            val alerts = if (slot != null && r != null) runCatching { TacticDecision.ruleAlerts(repo, slot, f, System.currentTimeMillis()) }.getOrDefault(emptyList()) else emptyList()
+            withContext(Dispatchers.Main) { showRules(slot, f[K.COMPETITION]?.value, r, alerts) }
+        }
+    }
+
+    /** Cartão das regras da liga: alertas em vermelho primeiro, depois cada regra entendida em letra grande e o texto completo. */
+    private fun showRules(slot: Int?, comp: String?, r: SlotRules.Rules?, alerts: List<String>) {
+        val card = cardView ?: return
+        val lv = listView ?: return
+        val dp = resources.displayMetrics.density
+        headView?.text = "Regras da liga" + (slot?.let { " • S$it" } ?: "")
+        lv.removeAllViews()
+        fun tv(t: String, color: Int, size: Float, bold: Boolean = false) = TextView(this).apply {
+            text = t; setTextColor(color); textSize = size
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding((4 * dp).toInt(), (3 * dp).toInt(), (4 * dp).toInt(), (3 * dp).toInt())
+        }
+        if (r == null) { lv.addView(tv("Este slot não tem regras digitadas.", 0xFFC3D3EE.toInt(), 13f)) }
+        else {
+            comp?.takeIf { FieldMerge.known(it) }?.let { lv.addView(tv(it, 0xFFF5B942.toInt(), 13f, true)) }
+            for (a in alerts) lv.addView(tv(a, 0xFFFF5252.toInt(), 15f, true))
+            val sum = SlotRules.summary(r)
+            for (l in sum) lv.addView(tv("• $l", android.graphics.Color.WHITE, 15f, true))
+            if (sum.isEmpty()) lv.addView(tv("O app não reconheceu números nas regras; o texto abaixo vale para a IA.", 0xFFC3D3EE.toInt(), 12.5f))
+            lv.addView(tv("Texto completo", 0xFF9FB4D6.toInt(), 11.5f, true))
+            lv.addView(tv(r.text.take(900), 0xFFC3D3EE.toInt(), 12f))
+        }
+        card.visibility = View.VISIBLE
+        overlayBox?.post { overlayBox?.let { markBounds(it) } }
+    }
 
     private fun onTacticTap() { showFullTable = true; refreshDecision() }
 
@@ -442,6 +488,7 @@ class CaptureService : AccessibilityService() {
                 val key = "$type|$slot|${Diag.lastUpdateAt}"
                 if (key != hintKey && type != ScreenType.NON_OSM.name) {
                     hintKey = key
+                    updateRulesButton(slot)
                     val st = runCatching { ScreenType.valueOf(type) }.getOrDefault(ScreenType.OTHER_OSM)
                     val fresh = runCatching { Hints.forScreen(applicationContext, slot, st) }.getOrDefault(emptyList())
                     val sameScreen = slot == hintSlot && type == hintType
@@ -452,7 +499,7 @@ class CaptureService : AccessibilityService() {
                     withContext(Dispatchers.Main) {
                         updateBadge()
                         if (gone.isNotEmpty()) notice("✅ Feito: " + gone.first().title)
-                        if (cardView?.visibility == View.VISIBLE && headView?.text?.startsWith("Tática") != true) {
+                        if (cardView?.visibility == View.VISIBLE && headView?.text?.startsWith("Tática") != true && headView?.text?.startsWith("Regras") != true) {
                             showCard(hints, (if (slot > 0) "S$slot • " else "OSM • ") + Hints.screenLabel(st))
                         }
                     }
@@ -519,11 +566,13 @@ class CaptureService : AccessibilityService() {
         val end = chip("■ Encerrar", 0xFFEF5350.toInt(), dp)
         val toggle = chip("📱 App", 0xFFB9F363.toInt(), dp).apply { setTextColor(0xFF0B111B.toInt()) }
         val tactic = chip("📋 Tática", 0xFF1C2938.toInt(), dp)
+        val rules = chip("📜 Regras", 0xFFB45309.toInt(), dp).apply { visibility = View.GONE; setTypeface(typeface, android.graphics.Typeface.BOLD) }
+        rulesBtn = rules
         val statusPill = chip("● Capturando", 0xF239BDF8.toInt(), dp).apply { setTextColor(0xFF0B111B.toInt()); setTypeface(typeface, android.graphics.Typeface.BOLD); visibility = View.GONE }
         val buttons = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             fun lp() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = (6 * dp).toInt() }
-            addView(toggle, lp()); addView(tactic, lp()); addView(end, lp())
+            addView(toggle, lp()); addView(tactic, lp()); addView(rules, lp()); addView(end, lp())
         }
         val scroll = android.widget.ScrollView(this).apply { addView(list) }
         val card = LinearLayout(this).apply {
@@ -624,6 +673,7 @@ class CaptureService : AccessibilityService() {
         dragOrTap(end, snap = false) { onOverlayTap() }
         dragOrTap(toggle, snap = false) { onToggleTap() }
         dragOrTap(tactic, snap = false) { onTacticTap() }
+        dragOrTap(rules, snap = false) { onRulesTap() }
         dragOrTap(notice, snap = false) { notice.visibility = View.GONE }
         box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> markBounds(v) }
         try {

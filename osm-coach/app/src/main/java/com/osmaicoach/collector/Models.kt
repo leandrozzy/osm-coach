@@ -303,8 +303,13 @@ object Txt {
         return 1.0 - dp[b.length].toDouble() / max(a.length, b.length).toDouble()
     }
 
+    private val DUP_ACCENT = Regex("([áàâãäéèêëíìîïóòôõöúùûüç])\\1+", RegexOption.IGNORE_CASE)
+
+    /** O OCR às vezes repete uma letra acentuada ("Brasileirãão"); nome de clube/liga nunca tem a mesma letra acentuada duas vezes seguidas. */
+    fun fixDupAccent(s: String): String = DUP_ACCENT.replace(s) { it.groupValues[1] }
+
     fun titleCase(s: String): String =
-        s.lowercase().split(" ").filter { it.isNotEmpty() }
+        fixDupAccent(s).lowercase().split(" ").filter { it.isNotEmpty() }
             .joinToString(" ") { w -> w.replaceFirstChar { c -> c.uppercase() } }
 }
 

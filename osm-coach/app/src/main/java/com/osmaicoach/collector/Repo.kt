@@ -89,7 +89,10 @@ class Repo(private val ctx: Context) {
     }
 
     suspend fun fieldMap(slot: Int): Map<String, StoredField> =
-        dao.fieldsOf(slot).associate { it.fkey to StoredField(it.fvalue, it.conf, it.updatedAt) }
+        dao.fieldsOf(slot).associate { it.fkey to StoredField(if (it.fkey in NAME_KEYS) Txt.fixDupAccent(it.fvalue) else it.fvalue, it.conf, it.updatedAt) }
+
+    /** Campos de NOME em que uma letra acentuada repetida pelo OCR ("Brasileirãão") é corrigida ao ler (cura o que já estava gravado). */
+    private val NAME_KEYS = setOf(K.COMPETITION, K.TEAM, K.HUB_TITLE, K.RIVAL_TEAM)
 
     /** Rodadas que já têm placar lido da análise do jogo. */
     suspend fun scoredRounds(slot: Int): Set<Int> = dao.matchReports(slot).mapNotNull { p ->
