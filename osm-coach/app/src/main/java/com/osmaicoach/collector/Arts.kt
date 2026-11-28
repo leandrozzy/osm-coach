@@ -29,7 +29,14 @@ object Arts {
     const val W = 1080
     const val H = 1350
 
-    data class Item(val id: String, val slot: Int, val kind: String, val title: String, val at: Long, val file: String)
+    /**
+     * Uma imagem de arte. [group] = id da arte original (as versões "Gerar outra" e as imagens do ChatGPT são itens SEPARADOS do mesmo grupo, com [ver] 2, 3…);
+     * [matchKey]/[comp]/[round]/[phase] = a quem do jogo ela pertence (guardado na criação: a versão nova nunca muda os dados originais da partida).
+     */
+    data class Item(val id: String, val slot: Int, val kind: String, val title: String, val at: Long, val file: String,
+                    val group: String = id, val ver: Int = 1, val matchKey: String? = null, val comp: String? = null, val round: Int? = null, val phase: String? = null)
+    /** Para onde a arte vai: slot, jogo (chave do calendário), competição e rodada/fase, com um rótulo legível. */
+    data class Target(val slot: Int, val matchKey: String?, val comp: String?, val round: Int?, val phase: String?, val label: String)
     data class Cand(val id: String, val slot: Int, val kind: String, val title: String, val at: Long, val key: String? = null, val auto: Boolean = true)
 
     private fun dir(ctx: Context): File = File(ctx.filesDir, "arts").apply { mkdirs() }
@@ -45,18 +52,30 @@ object Arts {
     }
 
     // ------------------------------------------------------------------ guardado (plano global `arts`, ids vistos em `artsseen`)
-    suspend fun items(repo: Repo): List<Item> {
-        val arr = runCatching { JSONArray(repo.dao.plan(0, "arts")?.json ?: "[]") }.getOrDefault(JSONArray())
+    suspend fun items(repo: Repo): List<Item> = parseItems(repo.dao.plan(0, "arts")?.json).filter { File(it.file).exists() }.sortedByDescending { it.at }
+
+    /** Lê a lista guardada (formato antigo SEM grupo/versão/jogo continua válido: grupo = id, versão 1). Puro, testado com dados sintéticos. */
+    internal fun parseItems(json: String?): List<Item> {
+        val arr = runCatching { JSONArray(json ?: "[]") }.getOrDefault(JSONArray())
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
-            Item(o.optString("id"), o.optInt("slot"), o.optString("kind"), o.optString("title"), o.optLong("at"), o.optString("file"))
-        }.filter { File(it.file).exists() }.sortedByDescending { it.at }
+            val id = o.optString("id")
+            Item(id, o.optInt("slot"), o.optString("kind"), o.optString("title"), o.optLong("at"), o.optString("file"),
+                group = o.optString("group").ifBlank { id }, ver = o.optInt("ver", 1).coerceAtLeast(1),
+                matchKey = o.optString("matchKey").takeIf { it.isNotBlank() }, comp = o.optString("comp").takeIf { it.isNotBlank() },
+                round = if (o.has("round") && !o.isNull("round")) o.optInt("round") else null, phase = o.optString("phase").takeIf { it.isNotBlank() })
+        }
+    }
+
+    internal fun itemsToJson(list: List<Item>): String {
+        val arr = JSONArray()
+        for (i in list) arr.put(JSONObject().put("id", i.id).put("slot", i.slot).put("kind", i.kind).put("title", i.title).put("at", i.at).put("file", i.file)
+            .put("group", i.group).put("ver", i.ver).put("matchKey", i.matchKey ?: "").put("comp", i.comp ?: "").put("round", i.round ?: JSONObject.NULL).put("phase", i.phase ?: ""))
+        return arr.toString()
     }
 
     private suspend fun saveItems(repo: Repo, list: List<Item>) {
-        val arr = JSONArray()
-        for (i in list) arr.put(JSONObject().put("id", i.id).put("slot", i.slot).put("kind", i.kind).put("title", i.title).put("at", i.at).put("file", i.file))
-        repo.dao.putPlan(PlanEntity(0, "arts", arr.toString(), System.currentTimeMillis()))
+        repo.dao.putPlan(PlanEntity(0, "arts", itemsToJson(list), System.currentTimeMillis()))
     }
 
     suspend fun delete(repo: Repo, item: Item) {
@@ -242,7 +261,7 @@ object Arts {
     suspend fun createAll(ctx: Context): Pair<Int, Int> {
         migrate(ctx)
         val repo = Repo(ctx)
-        val have = items(repo).map { it.id }.toSet()
+        val have = items(repo).map { it.group }.toSet()
         val seenSet = seen(repo) ?: mutableSetOf()
         var made = 0; var skipped = 0; var streak = 0
         loop@ for (slot in 1..4) {
@@ -269,19 +288,19 @@ object Arts {
     fun setAuto(ctx: Context, on: Boolean) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putBoolean("auto_off", !on).apply() }
 
     /** Refaz a arte de um item com outra cena da IA ("Gerar outra"). */
-    suspend fun regenerate(ctx: Context, item: Item): Item? = make(ctx, candOf(item), reroll = (item.at % 1000).toInt() + 1)
+    suspend fun regenerate(ctx: Context, item: Item): Item? = make(ctx, candOf(item), reroll = (item.at % 1000).toInt() + 1, asVersion = true)
 
     private fun candOf(item: Item): Cand {
-        val p = item.id.split("|")
+        val p = item.group.split("|")
         val key = if (item.kind == "BUY" || item.kind == "PLAYER") p.getOrNull(2) else null
-        return Cand(item.id, item.slot, item.kind, item.title, item.at, key)
+        return Cand(item.group, item.slot, item.kind, item.title.substringBefore(" (v"), item.at, key)
     }
 
     // ------------------------------------------------------------------ montar e desenhar
     private fun bmp(f: File?): Bitmap? = f?.takeIf { it.exists() }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
 
     /** Cria a arte (cena da IA + acabamento do app) e guarda. null = falhou (motivo em `ArtsAi.lastError`). */
-    suspend fun make(ctx: Context, c: Cand, reroll: Int = 0): Item? {
+    suspend fun make(ctx: Context, c: Cand, reroll: Int = 0, asVersion: Boolean = false): Item? {
         ArtsAi.lastError = null
         val repo = Repo(ctx)
         val raw = draw(ctx, repo, c, reroll) ?: return null
@@ -290,19 +309,46 @@ object Arts {
             val logo = runCatching { BitmapFactory.decodeResource(ctx.resources, R.drawable.g_logo) }.getOrNull()
             ArtsDraw.withStrip(raw, logo).also { raw.recycle(); logo?.recycle() }
         }
-        return storeBitmap(ctx, repo, c, b)
+        return storeBitmap(ctx, repo, c, b, asVersion)
     }
 
-    /** Guarda a imagem pronta como a arte [c] (substitui a anterior do mesmo evento; no máx. 60). Usado pelo desenho do app e pelo Gemini. */
-    suspend fun storeBitmap(ctx: Context, repo: Repo, c: Cand, b: Bitmap): Item {
+    /** Próximo id/versão de uma arte do grupo [base]: a 1ª usa o id original; as seguintes "id#v2", "id#v3"… (nunca sobrescreve outra versão). Puro, testado. */
+    fun nextVersion(existing: List<Item>, base: String): Pair<String, Int> {
+        val mine = existing.filter { it.group == base }
+        if (mine.isEmpty()) return Pair(base, 1)
+        val v = mine.maxOf { it.ver } + 1
+        return Pair("$base#v$v", v)
+    }
+
+    /** Slot, jogo, competição e rodada/fase da arte [c] (do id e dos dados lidos). */
+    suspend fun targetOf(repo: Repo, c: Cand): Target {
+        val f = repo.fieldMap(c.slot)
+        val comp = f[K.COMPETITION]?.value
+        val round = c.id.split("|").getOrNull(2)?.toIntOrNull()
+        val m = round?.let { r -> repo.dao.matchesOf(c.slot).firstOrNull { it.round == r } }
+        val phase = Fixtures.phase(m, round, f[K.COMP_TYPE]?.value)
+        val opp = m?.let { Fixtures.opponent(it) }
+        val label = "S${c.slot} • ${c.title}" + (if (round != null || m != null) " • $phase" else "") + (opp?.let { " • vs $it" } ?: "")
+        return Target(c.slot, m?.mkey, comp, round, phase.takeIf { round != null || m != null }, label)
+    }
+
+    /**
+     * Guarda a imagem pronta como arte de [c]. [asVersion] = true (ChatGPT, "Gerar outra"): vira uma versão NOVA do mesmo grupo e as anteriores ficam;
+     * false (criação normal): substitui só a versão original (ver 1). Os dados do jogo (slot, partida, competição, rodada/fase) vão junto no item.
+     */
+    suspend fun storeBitmap(ctx: Context, repo: Repo, c: Cand, b: Bitmap, asVersion: Boolean = false): Item {
         val f = File(dir(ctx), "${System.currentTimeMillis()}_${c.slot}.png")
         f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         b.recycle()
-        val item = Item(c.id, c.slot, c.kind, c.title, System.currentTimeMillis(), f.absolutePath)
-        val all = items(repo).filter { it.id != c.id }
-        val keep = (listOf(item) + all).take(60)
-        for (old in all.drop(59)) runCatching { File(old.file).delete() }
-        for (old in items(repo).filter { it.id == c.id }) runCatching { File(old.file).delete() }
+        val current = items(repo)
+        val tg = targetOf(repo, c)
+        val (id, ver) = if (asVersion) nextVersion(current, c.id) else Pair(c.id, 1)
+        val item = Item(id, c.slot, c.kind, if (ver > 1) c.title + " (v$ver)" else c.title, System.currentTimeMillis(), f.absolutePath,
+            group = c.id, ver = ver, matchKey = tg.matchKey, comp = tg.comp, round = tg.round, phase = tg.phase)
+        val all = current.filter { it.id != id }
+        val keep = (listOf(item) + all).take(80)
+        for (old in all.drop(79)) runCatching { File(old.file).delete() }
+        for (old in current.filter { it.id == id }) runCatching { File(old.file).delete() }
         saveItems(repo, keep)
         UiBus.bump()
         return item

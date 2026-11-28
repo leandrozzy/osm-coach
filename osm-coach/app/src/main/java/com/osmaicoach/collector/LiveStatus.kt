@@ -64,7 +64,8 @@ internal fun LiveStrip() {
     Live.version.let { }
     val now = Live.labels()
     var open by remember { mutableStateOf(false) }
-    if (now.isEmpty() && !open) return
+    val err = WorldMaint.error
+    if (now.isEmpty() && !open && err == null) return
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).clip(RoundedCornerShape(10.dp)).background(C.SURFACE).clickable { open = !open }.padding(horizontal = 10.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (now.isNotEmpty()) CircularProgressIndicator(Modifier.size(10.dp), strokeWidth = 1.5.dp, color = C.PRIMARY) else Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(C.OK))
@@ -72,6 +73,7 @@ internal fun LiveStrip() {
             Text(if (now.isEmpty()) "tudo em dia" else now.first() + if (now.size > 1) "  +${now.size - 1}" else "", fontSize = 11.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(if (open) "▴" else "▾", fontSize = 11.sp, color = C.MUTED)
         }
+        if (err != null) Text("⚠ " + err, fontSize = 10.5.sp, color = C.GOLD, modifier = Modifier.padding(top = 2.dp))
         if (open) {
             for (l in now.drop(1)) Text("▸ $l", fontSize = 10.5.sp, color = C.MUTED, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val h = Live.history()

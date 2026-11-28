@@ -262,7 +262,7 @@ private fun OsmPlayerDetail(key: String, nav: WorldNav) {
         if (re.apifId != null && row.nameKey != null) OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { val ok = PhotoWeb.saveFromBaseId(ctx, row.nameKey, re.apifId); msg = if (ok) "✅ Foto salva (vale para os 4 slots)." else "Não achei foto para este jogador." } }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("Buscar a foto pelo cadastro real") }
     }
     if (msg.isNotEmpty()) Text(msg, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-    PickReal("player", row.key, row.raw)
+    PickReal("player", row.key, row.raw, row.slots.split(",").mapNotNull { it.trim().toIntOrNull() }.singleOrNull())
 }
 
 @Composable
@@ -287,7 +287,7 @@ private fun OsmClubDetail(key: String, nav: WorldNav) {
         if (aliases.isNotEmpty()) Text("Outros nomes: " + aliases.joinToString(" • "), fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
         Text("Elenco por temporada não existe nas fontes abertas integradas; os jogadores do clube que o jogo mostrou estão em Jogadores.", fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }
-    PickReal("club", row.key, row.raw)
+    PickReal("club", row.key, row.raw, row.slots.split(",").mapNotNull { it.trim().toIntOrNull() }.singleOrNull())
 }
 
 @Composable
@@ -351,13 +351,25 @@ private fun ExcludeButton(kind: String, key: String, raw: String, onDone: () -> 
 }
 
 @Composable
-internal fun PickReal(kind: String, key: String, raw: String) {
+internal fun PickReal(kind: String, key: String, raw: String, slot: Int? = null) {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
+    // o MESMO nome curto pode ser pessoas/clubes diferentes em slots diferentes: a confirmação vale só para o slot escolhido
+    val slotsFound = rememberLoaded(emptyList<Int>(), 0, key) { WorldCatalog.slotsOf(AndroidSql(WorldDb.get(ctx).readableDatabase), kind, key) }
+    var chosenSlot by remember(key, slot) { mutableStateOf(slot) }
+    val effSlot = chosenSlot ?: slotsFound.singleOrNull()
+    if (effSlot == null) {
+        DsSection("Escolher o cadastro certo")
+        WorldCard {
+            Text(if (slotsFound.isEmpty()) "Esse texto ainda não tem leitura salva em nenhum slot." else "\"$raw\" aparece em mais de um slot e pode ser pessoas diferentes. Escolha de qual slot é este registro (a escolha vale só para ele):", fontSize = 13.sp, color = C.MUTED)
+            for (s in slotsFound) OutlinedButton(onClick = { chosenSlot = s }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("Slot $s", fontWeight = FontWeight.Bold) }
+        }
+        return
+    }
     var text by remember(key) { mutableStateOf(raw) }; var busy by remember(key) { mutableStateOf(false) }; var msg by remember(key) { mutableStateOf("") }
     var msg2 by remember(key) { mutableStateOf("") }; var players by remember(key) { mutableStateOf<List<WorldCatalog.PlayerCand>>(emptyList()) }; var clubs by remember(key) { mutableStateOf<List<WorldCatalog.ClubCand>>(emptyList()) }
-    val game = rememberLoaded(null as GameCtx?, 0, key) {
+    val game = rememberLoaded(null as GameCtx?, 0, Pair(key, effSlot)) {
         val db = AndroidSql(WorldDb.get(ctx).readableDatabase)
-        val row = db.rows("SELECT context,league FROM football_ocr_observations WHERE kind=? AND norm=? ORDER BY at DESC LIMIT 1", kind, key).firstOrNull()
+        val row = db.rows("SELECT context,league FROM football_ocr_observations WHERE kind=? AND norm=? AND slot=? ORDER BY at DESC LIMIT 1", kind, key, effSlot.toString()).firstOrNull()
         val c = runCatching { org.json.JSONObject(row?.get(0) ?: "{}") }.getOrDefault(org.json.JSONObject())
         val iso = c.optString("nameKey").takeIf { it.isNotBlank() && it != "null" }?.let { WorldCatalog.gameNationalities(ctx)[it] }
         GameCtx(c.optInt("age", -1).takeIf { it > 0 }, c.optString("pos").takeIf { it.isNotBlank() && it != "null" }, iso, row?.get(1)?.takeIf { it.isNotBlank() && it != "-" && it != "null" }, c.optString("full").takeIf { it.isNotBlank() && it != "null" })
@@ -399,7 +411,7 @@ internal fun PickReal(kind: String, key: String, raw: String) {
                     }
                     p.iso?.takeIf { it.length == 2 }?.let { FlagBadge(it.uppercase(), null, null, 26.dp, 18.dp); Spacer(Modifier.width(6.dp)) }
                     DsChip("${c.score}", scoreColor(c.score)); Spacer(Modifier.width(6.dp))
-                    OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { WorldCatalog.confirmManual(ctx, "player", key, p.id); msg = "✅ Confirmado: ${nameOf(p)}" } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("É este", fontSize = 12.sp) }
+                    OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { runCatching { WorldCatalog.confirmManual(ctx, "player", key, p.id, effSlot) }.onSuccess { msg = "✅ Confirmado no slot $effSlot: ${nameOf(p)}" }.onFailure { msg = "Não confirmei: ${it.message}" } } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("É este", fontSize = 12.sp) }
                 }
                 if (c.reasons.isNotEmpty()) Text(c.reasons.joinToString("; "), fontSize = 11.sp, color = C.MUTED)
             }
@@ -415,7 +427,7 @@ internal fun PickReal(kind: String, key: String, raw: String) {
                     }
                     cl.iso?.takeIf { it.length == 2 }?.let { FlagBadge(it.uppercase(), null, null, 26.dp, 18.dp); Spacer(Modifier.width(6.dp)) }
                     DsChip("${c.score}", scoreColor(c.score)); Spacer(Modifier.width(6.dp))
-                    OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { WorldCatalog.confirmManual(ctx, "club", key, cl.id); msg = "✅ Confirmado: ${cl.name}" } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("É este", fontSize = 12.sp) }
+                    OutlinedButton(onClick = { scope.launch(Dispatchers.IO) { runCatching { WorldCatalog.confirmManual(ctx, "club", key, cl.id, effSlot) }.onSuccess { msg = "✅ Confirmado no slot $effSlot: ${cl.name}" }.onFailure { msg = "Não confirmei: ${it.message}" } } }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("É este", fontSize = 12.sp) }
                 }
                 Text((c.reasons + (if (cl.prominence > 0) listOf("conhecido em ${cl.prominence} cadastros") else emptyList())).joinToString("; "), fontSize = 11.sp, color = C.MUTED)
             }
@@ -442,7 +454,7 @@ internal fun WorldValidation(nav: WorldNav) {
                         OutlinedButton(onClick = { open = !open }, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text(if (open) "Fechar" else "Escolher", fontSize = 12.sp) } }
                     PendingFacts(p.kind, p.key, p.slots)
                     if (!p.evidence.isNullOrBlank()) Text(p.evidence, fontSize = 11.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
-                    if (open) PickReal(p.kind, p.key, p.raw) else ExcludeButton(p.kind, p.key, p.raw)
+                    if (open) PickReal(p.kind, p.key, p.raw, p.slots.split(",").mapNotNull { it.trim().toIntOrNull() }.singleOrNull()) else ExcludeButton(p.kind, p.key, p.raw)
                 }
             }
             1 -> WorldPaged("ident", "Nada identificado ainda", { db, off -> WorldQuery.mappings(db, listOf("confirmado", "muito alta", "provável"), null, off) }) { m ->

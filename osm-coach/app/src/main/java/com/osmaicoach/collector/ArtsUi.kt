@@ -185,6 +185,50 @@ internal fun ArtsTab() {
             androidx.compose.material3.OutlinedTextField(value = gl, onValueChange = { gl = it; ArtsGpt.setLink(ctx, it) }, singleLine = true,
                 placeholder = { Text("https://chatgpt.com/g/…") }, modifier = Modifier.fillMaxWidth())
         }
+        run {
+            // pedidos do ChatGPT que ainda esperam a imagem (ficam guardados 48 h, mesmo fechando o app)
+            var tickReq by remember { mutableStateOf(0) }
+            val waiting = remember(tickReq, UiBus.version, ShareInbox.files.size) { ArtsRequests.pending(ArtsRequests.load(ctx), System.currentTimeMillis()) }
+            if (waiting.isNotEmpty()) Panel {
+                Text("Aguardando a imagem do ChatGPT (${waiting.size})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Quando a imagem sair, toque em Compartilhar › OSM Coach. Com mais de um pedido esperando, o app mostra a miniatura e pergunta para qual arte ela vai.", fontSize = 12.sp, color = C.MUTED, modifier = Modifier.padding(top = 2.dp))
+                for (r in waiting) Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(r.label, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 2)
+                    TextButton(onClick = { ArtsRequests.remove(ctx, r.id); tickReq++ }) { Text("Cancelar", fontSize = 12.sp, color = C.MUTED) }
+                }
+            }
+            val file = ShareInbox.files.firstOrNull()
+            if (file != null) {
+                var chosen by remember(file) { mutableStateOf<String?>(null) }
+                val thumb = artBitmap(file, 4)
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { },
+                    containerColor = C.SURFACE,
+                    title = { Text("Para qual arte é esta imagem?", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+                    text = {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            if (thumb != null) Image(thumb, contentDescription = "Imagem recebida", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).clip(RoundedCornerShape(10.dp)))
+                            Text("Escolha o destino (nada é adivinhado):", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+                            for (o in ShareInbox.options) Row(Modifier.fillMaxWidth().clickable { chosen = o.id }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.RadioButton(selected = chosen == o.id, onClick = { chosen = o.id })
+                                Text(o.label, fontSize = 13.sp)
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(enabled = chosen != null, onClick = {
+                            val req = ShareInbox.options.firstOrNull { it.id == chosen }
+                            if (req != null) scope.launch {
+                                val ok = withContext(Dispatchers.IO) { ArtsInbox.save(ctx, file, req) }
+                                ShareInbox.pop(); tickReq++
+                                msg = if (ok) "Arte salva: ${req.label}." else "Não consegui salvar; o pedido continua esperando."
+                            }
+                        }) { Text("Salvar") }
+                    },
+                    dismissButton = { TextButton(onClick = { ArtsInbox.discard(file); ShareInbox.pop(); msg = "Nada foi salvo. Os pedidos continuam esperando; compartilhe a imagem de novo quando quiser." }) { Text("Não salvar") } }
+                )
+            }
+        }
         Title("Suas artes")
         if (d.items.isEmpty()) EmptyState("🎨", "Nenhuma arte ainda", "Quando o app confirmar uma contratação, goleada, sequência, liderança, título ou objetivo, a arte aparece aqui. Ou crie uma abaixo.")
         for (row in d.items.chunked(2)) {
@@ -211,7 +255,7 @@ internal fun ArtsTab() {
                 for (c in cs) {
                     var gptTick by remember(c.id) { mutableStateOf(0) }
                     val gdone = remember(c.id, gptTick) { ArtsGpt.isDone(ctx, c.id) }
-                    val done = d.items.any { it.id == c.id } || gdone
+                    val done = d.items.any { it.group == c.id } || gdone
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(c.title, fontSize = 13.5.sp, modifier = Modifier.weight(1f), maxLines = 2)
                         TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { Arts.dismiss(Repo(ctx), listOf(c.id)) } } }, modifier = Modifier.height(36.dp)) { Text("✕", fontSize = 15.sp, color = C.MUTED) }
@@ -283,6 +327,7 @@ private fun ArtTile(it: Arts.Item, modifier: Modifier, onClick: () -> Unit) {
         if (bmp != null) Image(bmp, contentDescription = it.title, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)))
         Text(it.title, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, modifier = Modifier.padding(top = 4.dp))
         Text("S${it.slot} • ${fmtTime(it.at)}", fontSize = 11.sp, color = C.MUTED)
+        it.phase?.let { p -> Text(p + (if (it.ver > 1) " • v${it.ver}" else ""), fontSize = 10.5.sp, color = C.MUTED, maxLines = 1) }
     }
 }
 

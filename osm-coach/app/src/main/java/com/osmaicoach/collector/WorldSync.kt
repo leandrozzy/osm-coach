@@ -74,20 +74,18 @@ object WorldSync {
         AppScope.scope.launch(Dispatchers.IO) { runCatching { runDue(app, force = false) } }
     }
 
-    /** Uma vez (identificação de bandeira id-v3: estrela verde × amarela, Marrocos × Vietnã/Montenegro): apaga os países guardados por jogador para reidentificar. Escolha manual (`FlagManual`) não é tocada. */
+    /** Uma vez (identificação de bandeira id-v3: estrela verde × amarela): apaga os países guardados por jogador (cache automático) para reidentificar. Escolha manual (`FlagManual`) não é tocada. A conclusão só é gravada depois do sucesso. */
     private fun resetNatisoOnce(ctx: Context) {
-        if (Settings.get(ctx, "natiso_reset_v3", "0") == "1") return
-        Settings.put(ctx, "natiso_reset_v3", "1")
+        if (Settings.get(ctx, "natiso_reset_v3", "") == "1") return
         val repo = Repo(ctx.applicationContext)
-        AppScope.scope.launch(Dispatchers.IO) { runCatching { for (s in 1..4) repo.dao.deletePlan(s, "natiso4") } }
+        AppScope.scope.launch(Dispatchers.IO) { WorldMaint.once(ctx, "natiso_reset_v3", "Reidentificação das bandeiras") { kotlinx.coroutines.runBlocking { for (s in 1..4) repo.dao.deletePlan(s, "natiso4") } } }
     }
 
-    /** Uma vez: apaga as bolinhas V/E/D guardadas pela leitura antiga (a passada frouxa pegava o gramado e a leitura "mais completa" nunca era trocada). */
+    /** Uma vez: apaga as bolinhas V/E/D guardadas pela leitura antiga (cache automático; a leitura nova refaz). A conclusão só é gravada depois do sucesso. */
     private fun resetFormOnce(ctx: Context) {
-        if (Settings.get(ctx, "form_reset_v2", "0") == "1") return
-        Settings.put(ctx, "form_reset_v2", "1")
+        if (Settings.get(ctx, "form_reset_v2", "") == "1") return
         val repo = Repo(ctx.applicationContext)
-        AppScope.scope.launch(Dispatchers.IO) { runCatching { for (s in 1..4) { repo.dao.deletePlan(s, "formread"); repo.dao.deleteField(s, K.MY_FORM); repo.dao.deleteField(s, K.RIVAL_FORM) } } }
+        AppScope.scope.launch(Dispatchers.IO) { WorldMaint.once(ctx, "form_reset_v2", "Limpeza das bolinhas antigas") { kotlinx.coroutines.runBlocking { for (s in 1..4) { repo.dao.deletePlan(s, "formread"); repo.dao.deleteField(s, K.MY_FORM); repo.dao.deleteField(s, K.RIVAL_FORM) } } } }
     }
 
     fun networkOk(ctx: Context): Boolean = allowedNet(ctx)

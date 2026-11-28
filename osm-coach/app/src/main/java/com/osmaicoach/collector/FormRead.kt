@@ -41,8 +41,26 @@ object FormRead {
         }
     }
 
-    /** Forma do rival: a dos resultados lidos ([lres]) vale quando tem pelo menos tantos jogos quanto as bolinhas (resultado real > cor lida na tela). */
-    fun pickRival(dots: String?, lres: String): String? = if (lres.isNotEmpty() && lres.length >= (dots?.length ?: 0)) lres else dots
+    /**
+     * Forma do RIVAL para o Pré-jogo, com FONTE e COBERTURA.
+     * [games] = só os resultados da MESMA competição/temporada do slot (plano `lres2`, chave da competição; Copa e Batalha ficam de fora);
+     * [roundDone] = rodadas já disputadas; [dots] = bolinhas do Pré-jogo (só entram se [dotsFresh]); [cupOrBattle] = o próximo jogo é de Copa/Batalha.
+     * A série de placares só vale como ATUAL se chega até a rodada já disputada; cinco placares antigos nunca vencem uma leitura mais recente só por serem cinco.
+     */
+    data class RivalForm(val dots: String, val source: String, val lastRound: Int?, val stale: Boolean, val note: String)
+
+    fun rivalForm(games: List<LeagueResults.Stored>, rival: String?, roundDone: Int?, dots: String?, dotsFresh: Boolean, cupOrBattle: Boolean): RivalForm? {
+        val d = dots?.takeIf { it.isNotEmpty() && dotsFresh }
+        if (cupOrBattle) return d?.let { RivalForm(it, "prejogo", null, false, "Bolinhas do Pré-jogo (não são placares confirmados; Copa/Batalha não usam a tabela da liga)") }
+        val (res, last) = LeagueResults.formRun(games, rival)
+        val current = res.isNotEmpty() && (roundDone == null || last >= roundDone)
+        return when {
+            current -> RivalForm(res, "resultados", last, false, "${res.length} resultado${if (res.length > 1) "s" else ""} confirmado${if (res.length > 1) "s" else ""}, até a rodada $last")
+            d != null -> RivalForm(d, "prejogo", null, false, "Bolinhas do Pré-jogo (não são placares confirmados)" + (if (res.isNotEmpty()) "; resultados lidos só até a rodada $last" else ""))
+            res.isNotEmpty() -> RivalForm(res, "resultados", last, true, "Série desatualizada: resultados só até a rodada $last (faltam as mais recentes). Abra Resultados no OSM.")
+            else -> null
+        }
+    }
 
     /** Corta as bolinhas ao nº de jogos já disputados na competição (rodadas jogadas ou resultados lidos, o maior). */
     fun cap(form: String, matches: List<MatchEntity>, roundDone: Int?, complete: Boolean = false): String {
@@ -58,5 +76,16 @@ object FormRead {
         if (roundDone == null || roundDone < 2) return 0
         val last = fromMatches(matches).lastRound
         return (roundDone - last).takeIf { it >= 2 } ?: 0
+    }
+
+    /** "Reler formação e estilo de jogo do rival": nome EXATO do que falta, tirado da primeira leitura do rival que não vale (Pré-jogo, Análise ou Plantel do rival). */
+    fun gapTitle(groups: List<Director.Group>): String? {
+        val g = groups.take(3).firstOrNull { !it.ok } ?: return null
+        val what = g.missing.joinToString(" e ")
+        return when {
+            g.name.startsWith("Pré-jogo") -> "Reler o Pré-jogo ($what)"
+            g.name.startsWith("Análise") -> "Reler $what do rival"
+            else -> "Reler o plantel do rival ($what)"
+        }
     }
 }

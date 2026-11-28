@@ -115,21 +115,27 @@ object WorldCatalog {
         return out
     }
 
-    /** Confirma à mão (vale mais que a automática e nunca é sobrescrita por ela). */
-    fun confirmManual(ctx: Context, kind: String, key: String, entityId: Long) {
-        val db: WorldSql = AndroidSql(WorldDb.get(ctx).w); val now = System.currentTimeMillis()
-        val slots = db.q("SELECT DISTINCT slot FROM football_ocr_observations WHERE kind=? AND norm=?", kind, key) { it.getInt(0) }.ifEmpty { listOf(0) }
+    /** Slots em que o texto lido [key] aparece (para a Validação perguntar qual quando há mais de um: homônimos não se confundem). */
+    fun slotsOf(db: WorldSql, kind: String, key: String): List<Int> = db.q("SELECT DISTINCT slot FROM football_ocr_observations WHERE kind=? AND norm=? ORDER BY slot", kind, key) { it.getInt(0) }
+
+    /**
+     * Confirma à mão (vale mais que a automática e nunca é sobrescrita por ela) SÓ no [slot] escolhido: o mesmo nome curto em outro slot é outro registro e não muda.
+     * Falha se o texto não existe nesse slot (contexto errado).
+     */
+    fun confirmManual(ctx: Context, kind: String, key: String, entityId: Long, slot: Int) =
+        confirmManualIn(AndroidSql(WorldDb.get(ctx).w), kind, key, entityId, slot).also { UiBus.bump() }
+
+    internal fun confirmManualIn(db: WorldSql, kind: String, key: String, entityId: Long, slot: Int) {
+        val now = System.currentTimeMillis()
+        require(slot in 0..4 && (slot == 0 || slot in slotsOf(db, kind, key))) { "o texto lido não existe neste slot" }
         db.begin()
         try {
-            for (s in slots) {
-                db.exec("DELETE FROM football_osm_entity_mappings WHERE osm_kind=? AND osm_key=? AND slot=?", arrayOf(kind, key, s))
-                db.exec("INSERT INTO football_osm_entity_mappings(osm_kind,osm_key,slot,entity_type,entity_id,status,score,evidence,algo,observations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf(kind, key, s, kind, entityId, "confirmado", 100, "confirmado por você", "manual", 1, now, now))
-                db.exec("INSERT INTO football_validation_history(osm_kind,osm_key,slot,action,from_status,to_status,score,reason,at) VALUES(?,?,?,?,?,?,?,?,?)", arrayOf(kind, key, s, "confirmado", null, "confirmado", 100, "escolha manual", now))
-            }
+            db.exec("DELETE FROM football_osm_entity_mappings WHERE osm_kind=? AND osm_key=? AND slot=?", arrayOf(kind, key, slot))
+            db.exec("INSERT INTO football_osm_entity_mappings(osm_kind,osm_key,slot,entity_type,entity_id,status,score,evidence,algo,observations,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", arrayOf(kind, key, slot, kind, entityId, "confirmado", 100, "escolha manual (slot $slot)", "manual", 1, now, now))
+            db.exec("INSERT INTO football_validation_history(osm_kind,osm_key,slot,action,from_status,to_status,score,reason,at) VALUES(?,?,?,?,?,?,?,?,?)", arrayOf(kind, key, slot, "confirmado", null, "confirmado", 100, "escolha manual (slot $slot)", now))
             db.exec(if (kind == "club") "UPDATE football_clubs SET osm_seen=osm_seen+1 WHERE id=?" else "UPDATE football_players SET osm_seen=osm_seen+1,validation=1 WHERE id=?", arrayOf(entityId))
             db.commit()
         } catch (e: Exception) { runCatching { db.rollback() }; throw e }
-        UiBus.bump()
     }
 
     /** Nomes que o app não conseguiu identificar sozinho (ambíguos/desconhecidos), um por nome, para a tela "Validação OCR". */

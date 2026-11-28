@@ -367,34 +367,25 @@ object ArtsGpt {
 
     /** Copia o texto e abre o link do ChatGPT (ou o app). Devolve a mensagem para o usuário. */
     // ------------------------------------------------------------------ envio direto ao app do ChatGPT e volta da imagem
-    private const val PEND = "gpt_pending"
     private const val CHATGPT_PKG = "com.openai.chatgpt"
 
     /** Texto completo para um chat NOVO (sem Projeto): instruções do guia + o pedido da arte. */
     fun fullText(prompt: String): String = GptGuide.INSTRUCTIONS + "\n\n" + prompt
 
-    /** Marca a arte [c] como a que está sendo feita no ChatGPT: a próxima imagem compartilhada com o OSM Coach vira essa arte (vale 6 h). */
-    fun markPending(ctx: Context, c: Arts.Cand) {
-        ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().putString(PEND,
-            JSONObject().put("id", c.id).put("slot", c.slot).put("kind", c.kind).put("title", c.title).put("key", c.key ?: JSONObject.NULL).put("at", System.currentTimeMillis()).toString()).apply()
-    }
-    fun pending(ctx: Context): Arts.Cand? = runCatching {
-        val o = JSONObject(ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).getString(PEND, null) ?: return null)
-        if (System.currentTimeMillis() - o.optLong("at") > 6 * 3_600_000L) return null
-        Arts.Cand(o.getString("id"), o.getInt("slot"), o.getString("kind"), o.getString("title"), o.optLong("at"), o.optString("key").takeIf { it.isNotBlank() && it != "null" })
-    }.getOrNull()
-    fun clearPending(ctx: Context) { ctx.getSharedPreferences("arts", Context.MODE_PRIVATE).edit().remove(PEND).apply() }
-
     /**
      * Abre o app do ChatGPT com o pedido JÁ ESCRITO numa conversa nova (compartilhamento do Android): é só tocar em enviar. O pedido também fica copiado (reserva).
      * Sem o app do ChatGPT instalado, cai no jeito antigo (copia e abre o link/site).
      */
-    fun sendToApp(ctx: Context, prompt: String, c: Arts.Cand): String {
+    suspend fun sendToApp(ctx: Context, prompt: String, c: Arts.Cand): String {
         runCatching { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("prompt", fullText(prompt))) }
-        markPending(ctx, c)
+        // pedido por ARTE (slot, jogo, competição, rodada/fase): é ele que diz para onde a imagem volta
+        runCatching {
+            val tg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Arts.targetOf(Repo(ctx), c) }
+            ArtsRequests.add(ctx, ArtsRequests.Req(c.id, c.slot, c.kind, c.title, c.key, tg.matchKey, tg.comp, tg.round, tg.phase, tg.label, System.currentTimeMillis()))
+        }
         val share = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, fullText(prompt)).setPackage(CHATGPT_PKG).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val ok = runCatching { ctx.startActivity(share); true }.getOrDefault(false)
-        return if (ok) "ChatGPT aberto com o pedido pronto: toque em enviar. Quando a imagem sair, toque em Compartilhar › OSM Coach e ela vira esta arte."
+        return if (ok) "ChatGPT aberto com o pedido pronto: toque em enviar. Quando a imagem sair, toque em Compartilhar › OSM Coach. O pedido fica guardado por 48 h, mesmo se você fechar o app."
         else send(ctx, prompt)
     }
 

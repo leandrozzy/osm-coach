@@ -266,15 +266,33 @@ object WorldOcr {
     /** Identidade real de um jogador (para a tela do jogador, busca de fotos e prompts): só se confirmada ou provável. */
     class RealPlayer(val name: String, val fullName: String?, val dob: String?, val nationality: String?, val iso: String?, val position: String?, val heightCm: Int?, val status: String, val score: Int, val wikidata: String?,
                      val apifId: String? = null, val tmId: String? = null, val reepId: String? = null)
-    /** Busca a identificação do jogador no slot; se aquele slot ainda não o avaliou, vale a de outro slot (mesmo nome lido = mesmo jogador). */
-    fun realPlayer(ctx: Context, slot: Int, playerName: String): RealPlayer? {
-        val db: WorldSql = AndroidSql(WorldDb.get(ctx).readableDatabase); val k = WorldNorm.fold(playerName)
-        return db.q(
-            """SELECT p.name,p.full_name,p.dob,p.nationality,p.nationality_iso,p.position,p.height_cm,m.status,m.score,p.wikidata,p.apif_id,p.tm_id,p.reep_id
+    /**
+     * Busca a identificação do jogador NO SLOT. A de outro slot só vale se for o MESMO jogador: idade igual e posição compatível lidas nos dois slots
+     * (nome curto igual não basta: dois "Silva" em slots diferentes são pessoas diferentes).
+     */
+    fun realPlayer(ctx: Context, slot: Int, playerName: String): RealPlayer? = realPlayerIn(AndroidSql(WorldDb.get(ctx).readableDatabase), slot, playerName)
+
+    internal class ObsCtx(val age: Int?, val posGroup: String?)
+    private fun obsCtx(db: WorldSql, norm: String, slot: Int): ObsCtx? {
+        val row = db.rows("SELECT MAX(context) FROM football_ocr_observations WHERE kind='player' AND norm=? AND slot=?", norm, slot.toString()).firstOrNull()?.get(0) ?: return null
+        val j = runCatching { JSONObject(row) }.getOrNull() ?: return null
+        return ObsCtx(j.optInt("age", -1).takeIf { it > 0 }, WorldIdentity.posGroup(j.optString("pos").takeIf { it.isNotBlank() && it != "null" }))
+    }
+    /** Mesmo jogador? Precisa ter a idade lida nos dois e igual; posição só pesa se as duas existirem. */
+    internal fun sameContext(a: ObsCtx?, b: ObsCtx?): Boolean =
+        a?.age != null && b?.age != null && a.age == b.age && (a.posGroup == null || b.posGroup == null || a.posGroup == b.posGroup)
+
+    internal fun realPlayerIn(db: WorldSql, slot: Int, playerName: String): RealPlayer? {
+        val k = WorldNorm.fold(playerName)
+        val rows = db.q(
+            """SELECT p.name,p.full_name,p.dob,p.nationality,p.nationality_iso,p.position,p.height_cm,m.status,m.score,p.wikidata,p.apif_id,p.tm_id,p.reep_id,m.slot
                FROM football_osm_entity_mappings m JOIN football_players p ON p.id=m.entity_id
                WHERE m.osm_kind='player' AND m.osm_key=? AND m.status IN ('confirmado','muito alta','provável')
-               ORDER BY (m.slot=?) DESC, CASE m.status WHEN 'confirmado' THEN 0 WHEN 'muito alta' THEN 1 ELSE 2 END, m.score DESC LIMIT 1""", k, slot.toString()
-        ) { RealPlayer(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), if (it.isNull(6)) null else it.getInt(6), it.getString(7), it.getInt(8), it.getString(9), it.getString(10), it.getString(11), it.getString(12)) }.firstOrNull()
+               ORDER BY (m.slot=?) DESC, CASE m.status WHEN 'confirmado' THEN 0 WHEN 'muito alta' THEN 1 ELSE 2 END, m.score DESC""", k, slot.toString()
+        ) { Pair(RealPlayer(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), if (it.isNull(6)) null else it.getInt(6), it.getString(7), it.getInt(8), it.getString(9), it.getString(10), it.getString(11), it.getString(12)), it.getInt(13)) }
+        rows.firstOrNull { it.second == slot }?.let { return it.first }
+        val mine = obsCtx(db, k, slot) ?: return null
+        return rows.firstOrNull { (_, s) -> s != slot && sameContext(mine, obsCtx(db, k, s)) }?.first
     }
 
     /** Nome REAL do clube lido pelo OCR (para achar escudo/foto com o nome certo quando o OCR errou uma letra). */

@@ -127,6 +127,7 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -154,29 +155,24 @@ class MainActivity : ComponentActivity() {
         AppScope.scope.launch(Dispatchers.IO) { Notifier.reschedule(applicationContext) }
     }
 
-    /** Imagem compartilhada (ChatGPT › Compartilhar › OSM Coach): vira a arte marcada ao tocar em "ChatGPT" (vale 6 h). */
+    /**
+     * Imagem compartilhada (ChatGPT › Compartilhar › OSM Coach). Vai para o pedido de arte certo: 1 pedido válido = direto; 2 ou mais = o usuário escolhe vendo a miniatura;
+     * nenhum = não salva e explica. Nunca usa "o último pedido aberto" para adivinhar.
+     */
     private fun receiveSharedImage(i: Intent) {
         val uri: android.net.Uri? = if (android.os.Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java) else @Suppress("DEPRECATION") i.getParcelableExtra(Intent.EXTRA_STREAM)
         val app = applicationContext
-        AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val c = ArtsGpt.pending(app)
-            val msg = when {
-                uri == null -> "Não recebi a imagem."
-                c == null -> "Toque em ChatGPT numa arte (aba Artes) antes de compartilhar a imagem, para eu saber de qual arte ela é."
-                else -> {
-                    val bmp = runCatching {
-                        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
-                        var sample = 1; while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2200) sample *= 2
-                        app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }
-                    }.getOrNull()
-                    if (bmp == null) "Não consegui abrir essa imagem."
-                    else { Arts.storeBitmap(app, Repo(app), c, bmp); ArtsGpt.markDone(app, c.id); ArtsGpt.clearPending(app); "Arte salva: ${c.title}." }
-                }
-            }
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { runCatching { android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show() } }
-        }
         Route.main = 4; Route.nonce++
+        AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            fun say(t: String) { runBlocking(kotlinx.coroutines.Dispatchers.Main) { runCatching { android.widget.Toast.makeText(app, t, android.widget.Toast.LENGTH_LONG).show() } } }
+            val file = if (uri == null) null else ArtsInbox.copy(app, uri)
+            if (file == null) { say("Não consegui abrir essa imagem."); return@launch }
+            when (val r = ArtsRequests.route(ArtsRequests.load(app), System.currentTimeMillis())) {
+                is ArtsRequests.Route.None -> { runCatching { java.io.File(file).delete() }; say("Nenhuma arte está esperando imagem. Na aba Artes, toque em ChatGPT na arte desejada (o pedido fica guardado por 48 h) e compartilhe a imagem de novo.") }
+                is ArtsRequests.Route.Auto -> say(if (ArtsInbox.save(app, file, r.req)) "Arte salva: ${r.req.label}." else "Não consegui salvar a arte; o pedido continua esperando.")
+                is ArtsRequests.Route.Choose -> ShareInbox.offer(file, r.options)
+            }
+        }
     }
 
     private fun handleIntent(i: Intent?) {
@@ -1347,6 +1343,9 @@ data class SlotSummary(
     val readAna: Boolean = false,
     val readSquad: Boolean = false,
     val readMine: Boolean = false,
+    /** Primeira leitura do rival que falta/está velha, com o nome EXATO da tela do OSM (ex.: "Reler formação e estilo de jogo do rival") e onde abri-la. */
+    val readGapTitle: String? = null,
+    val readGapWhere: String? = null,
     /** A tática que está no OSM foi conferida e bate com a gerada (plano `tacticdone`): nada a montar. */
     val mounted: Boolean = false,
     /** Li a Tática do OSM depois de gerada e ela difere da gerada: o que difere (a pendência "montar" mostra isso em vez de repetir "já está pronta"). */
@@ -1356,6 +1355,9 @@ data class SlotSummary(
     /** Forma recente (ex. "VVDEV") dos dois times e nível da preparação, lidos no pré-jogo (≤12 h). */
     val myForm: String? = null,
     val rivalForm: String? = null,
+    /** De onde vem a forma do rival e até que rodada vai (placares confirmados × bolinhas do Pré-jogo); stale = série desatualizada. */
+    val rivalFormNote: String? = null,
+    val rivalFormStale: Boolean = false,
     val prepLevel: String? = null,
     val missing: Int = 0,
     /** O card do calendário (data e hora) já passou e o jogo ainda não tem placar: pede o resultado. */
@@ -1619,8 +1621,10 @@ internal suspend fun loadToday(ctx: Context): TodayData {
         )
         val gameMissing = Completeness.gameMissing(f)
         val fr = repo.dao.plan(slot, "formread")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-        // forma do RIVAL também pelos resultados da liga que o app já leu (tela Resultados): vale com 1, 2, 3, 4 ou 5 jogos, mesmo sem as bolinhas
-        val rivalLres = LeagueResults.compKey(f)?.let { ck -> LeagueResults.formOf(LeagueResults.games(repo.dao.plan(slot, "lres2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, ck), f[K.RIVAL_TEAM]?.value) } ?: ""
+        // forma do RIVAL: placares confirmados da MESMA competição (tela Resultados) com cobertura, ou bolinhas do Pré-jogo identificadas como tal (FormRead.rivalForm)
+        val rivalGames = LeagueResults.compKey(f)?.let { ck -> LeagueResults.games(repo.dao.plan(slot, "lres2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, ck) } ?: emptyList()
+        val nextMatch = Fixtures.nextFor(all, f[K.RIVAL_TEAM]?.value, f[K.ROUND]?.value?.toIntOrNull())
+        val cupOrBattle = f[K.COMP_TYPE]?.value.let { it == "Copa" || it == "Batalha" } || (nextMatch != null && Fixtures.isCup(nextMatch))
         val tplan = repo.dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
         val market = repo.dao.snapshots("TRANSFER", slot).isNotEmpty()
         val c = Completeness.compute(f, players, matches, market, f[K.ROUND_TOTAL]?.value?.toIntOrNull())
@@ -1632,6 +1636,10 @@ internal suspend fun loadToday(ctx: Context): TodayData {
             "preepoca" -> known(f, K.HUB_TITLE) ?: known(f, K.TEAM)
             else -> known(f, K.TEAM) ?: known(f, K.HUB_TITLE)
         }
+        val dotsStr: String? = ((if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
+                    ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value)
+                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull(), complete = true) })?.takeIf { it.isNotEmpty() }
+        val rf = FormRead.rivalForm(rivalGames, f[K.RIVAL_TEAM]?.value, f[K.ROUND_DONE]?.value?.toIntOrNull(), dotsStr, dotsStr != null, cupOrBattle)
         list.add(
             SlotSummary(
                 slot = slot, title = name ?: "Slot $slot ainda não lido", known = name != null, state = state,
@@ -1650,6 +1658,8 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                 readAna = Director.groups(f, now)[1].ok,
                 readSquad = Director.groups(f, now)[2].ok,
                 readMine = Director.groups(f, now)[3].ok,
+                readGapTitle = FormRead.gapTitle(Director.groups(f, now)),
+                readGapWhere = Director.groups(f, now).firstOrNull { !it.ok && it.name != "Seu plantel (setores)" }?.where,
                 mounted = repo.dao.plan(slot, "tactic").let { tp -> tp != null && repo.dao.plan(slot, "tacticdone")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }.let { dj ->
                     dj != null && (dj.optLong("at") == tp.at || dj.optString("sig").let { sg -> sg.isNotBlank() && runCatching { sg == Director.mountSig(JSONObject(tp.json)) }.getOrDefault(false) }) } },
                 mountDiff = repo.dao.plan(slot, "tactic")?.let { tp -> runCatching { Hints.mountDiffs(repo, slot, tp, JSONObject(tp.json), f) }.getOrDefault(emptyList()) } ?: emptyList(),
@@ -1659,9 +1669,9 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                 myForm = (if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
                     ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }))
                     ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) },
-                rivalForm = FormRead.pickRival((if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
-                    ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value)
-                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull(), complete = true) }, rivalLres),
+                rivalForm = rf?.dots,
+                rivalFormNote = rf?.note,
+                rivalFormStale = rf?.stale ?: false,
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,
@@ -2128,19 +2138,21 @@ internal fun todoItems(data: TodayData, now: Long): List<TodoItem> {
         val at = s.nextAt
         if (s.needsResult) todo.add(TodoItem(s.slot, "📊", "Registrar o resultado do jogo", "O jogo já passou: o app aprende com o placar", 5, 5))
         if (at != null && at > now && (s.tacticStale || s.rivalGaps) && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
-            todo.add(TodoItem(s.slot, "🔎", "Reler Pré-jogo e Análise do rival", "Confira se ele mudou antes de usar a tática (jogo em ${countdownShort(at)})", if (at - now <= 3600000L) 6 else 4, 4))
+            todo.add(TodoItem(s.slot, "🔎", s.readGapTitle ?: "Reler Pré-jogo e Análise do rival", (s.readGapWhere?.let { "$it · " } ?: "Confira se ele mudou antes de usar a tática · ") + "jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, if (s.readGapTitle != null) 1 else 4))
         else if (at != null && at > now && !s.tacticReady && at - now <= Director.TACTIC_WINDOW_MS)
             todo.add(TodoItem(s.slot, "⚡", "Gerar a tática", "Jogo em ${countdownShort(at)}", if (at - now <= 3600000L) 6 else 4, 4))
         if (s.rivalChanged.isNotEmpty()) todo.add(TodoItem(s.slot, "⚠", "Revisar tática", (if (at != null && at > now) (if (s.compType?.contains("atalha", true) == true) "batalha em " else "jogo em ") + countdownShort(at) + " · " else "") + "rival mudou: " + s.rivalChanged.take(2).joinToString(", ") { c -> c.label.lowercase() + " " + c.from + "→" + c.to }, 6, 4))
         if (s.tacticReady && !s.tacticStale && !s.mounted && at != null && at > now && at - now <= Director.TACTIC_WINDOW_MS) todo.add(if (s.mountDiff.isNotEmpty()) TodoItem(s.slot, "📋", "Ajustar a tática montada no OSM", "Li a Tática do jogo e está diferente da gerada: " + s.mountDiff.joinToString(" • "), 3, 4)
             else TodoItem(s.slot, "📋", "Montar a tática no OSM", "Já está pronta: abra a tela de Tática do jogo", 3, 4))
+        // tática disponível e leituras válidas: só avisa que está pronta (nada de pedir releitura)
+        if (s.tacticReady && !s.tacticStale && s.mounted && at != null && at > now) todo.add(TodoItem(s.slot, "✅", "Tática pronta", "Já montada no OSM · jogo em ${countdownShort(at)}", 1, 4))
     }
     for (w in data.work) {
         val idle = w.seats.filter { it.role != "UNI" && (it.state == "empty" || it.state == "done" || (it.endAt != null && it.endAt <= now)) }
         if (idle.isNotEmpty()) todo.add(TodoItem(w.slot, "🏋", "Treinador parado: " + idle.joinToString { Timers.roleLabel(it.role) }, "Treino parado é evolução perdida", 3, 6))
     }
     // "Reler Pré-jogo e Análise do rival" já cobre essas duas telas: não repete como "Atualizar: Pré-jogo/Análise" no mesmo slot
-    val reread = todo.filter { it.title.startsWith("Reler Pré-jogo") }.map { it.slot }.toSet()
+    val reread = todo.filter { it.title.startsWith("Reler ") }.map { it.slot }.toSet()
     for (n in data.needs.filter { it.urgency >= 1 && !(it.slot in reread && (it.type == ScreenType.PREGAME || it.type == ScreenType.REPORT)) }) {
         todo.add(TodoItem(n.slot, "🔄", "Atualizar: " + (Fresh.NAME[n.type] ?: n.type.name), n.reason.substringBefore(":").replaceFirstChar { it.uppercase() }, 2, 0))
     }
@@ -2148,14 +2160,15 @@ internal fun todoItems(data: TodayData, now: Long): List<TodoItem> {
 }
 
 /** UMA ação prioritária por slot (a mais urgente), slots urgentes primeiro; slot sem pendência fica de fora (aparece compacto como "em dia"). */
-internal fun priorityPerSlot(items: List<TodoItem>): List<TodoItem> =
-    items.groupBy { it.slot }.values.map { it.first() }.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenBy { it.slot })
+internal fun priorityPerSlot(items: List<TodoItem>, battleSlots: Set<Int> = emptySet()): List<TodoItem> =
+    items.groupBy { it.slot }.values.map { it.first() }.sortedWith(compareByDescending<TodoItem> { it.urgency }.thenByDescending { it.slot in battleSlots }.thenBy { it.slot })
 
 @Composable
 internal fun TodoCard(data: TodayData, only: Int? = null, onOpenSlot: (Int, Int) -> Unit) {
     val now = System.currentTimeMillis()
     val all = todoItems(data, now).filter { only == null || it.slot == only }
-    val sorted = priorityPerSlot(all)
+    val battle = data.slots.filter { it.compType?.contains("atalha", true) == true }.map { it.slot }.toSet()
+    val sorted = priorityPerSlot(all, battle)
     val readySlots = data.slots.filter { !it.ended && it.state == null && sorted.none { t -> t.slot == it.slot } }.map { it.slot }
     DsSection(if (only != null) "Prioridades do S$only" else "Prioridades do dia", if (sorted.isNotEmpty()) "${sorted.size}" else null)
     if (sorted.isEmpty()) {
@@ -2163,9 +2176,10 @@ internal fun TodoCard(data: TodayData, only: Int? = null, onOpenSlot: (Int, Int)
     }
     val tones = listOf(C.PRIMARY, C.INFO, C.GOLD)
     for ((i, t) in sorted.take(6).withIndex()) {
-        val tone = tones[i % tones.size]
+        val isBattle = t.slot in battle
+        val tone = if (isBattle) C.GOLD else if (t.title == "Tática pronta") C.OK else tones[i % tones.size]
         val shape = RoundedCornerShape(DS.RADIUS_CARD)
-        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(tone.copy(alpha = 0.08f)).border(1.dp, tone.copy(alpha = 0.45f), shape).clickable { onOpenSlot(t.slot, t.tab) }.padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(shape).background(tone.copy(alpha = 0.08f)).border(if (isBattle) 2.dp else 1.dp, tone.copy(alpha = if (isBattle) 0.9f else 0.45f), shape).clickable { onOpenSlot(t.slot, t.tab) }.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DsTile(t.icon, tone)
                 Spacer(Modifier.width(12.dp))
@@ -2174,6 +2188,7 @@ internal fun TodoCard(data: TodayData, only: Int? = null, onOpenSlot: (Int, Int)
                     Text(t.sub, fontSize = 13.sp, color = C.MUTED, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
+                if (isBattle) { DsChip("⚔ Batalha", C.GOLD); Spacer(Modifier.width(6.dp)) }
                 DsChip("S${t.slot}", C.GOLD)
             }
             Box(Modifier.fillMaxWidth().padding(top = 10.dp).heightIn(min = 44.dp).clip(RoundedCornerShape(DS.RADIUS_CONTROL)).background(DS.ELEVATED).border(1.dp, tone.copy(alpha = 0.6f), RoundedCornerShape(DS.RADIUS_CONTROL)), contentAlignment = Alignment.Center) {
@@ -2313,10 +2328,12 @@ internal fun SlotCardV2(s: SlotSummary, onOpen: () -> Unit, onTab: (Int) -> Unit
         // forma recente dos dois e preparação, como no pré-jogo do OSM
         if (s.myForm != null || s.rivalForm != null || s.prepLevel != null) {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(if (mineLeft) s.myForm else s.rivalForm) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(if (mineLeft) s.myForm else s.rivalForm, dim = !mineLeft && s.rivalFormStale) }
                 PrepChip(s.prepLevel)
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) s.rivalForm else s.myForm) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) s.rivalForm else s.myForm, dim = mineLeft && s.rivalFormStale) }
             }
+            // de onde vem a forma do RIVAL e até que rodada vai (placar confirmado × bolinha do Pré-jogo × série desatualizada)
+            s.rivalFormNote?.let { Text("Rival: $it", fontSize = 11.5.sp, color = if (s.rivalFormStale) C.GOLD else C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 3.dp), textAlign = TextAlign.Center) }
         }
         // vitória / empate / derrota (previsão calibrada com os seus jogos) + dados lidos e tática
         WdlBar(s.win, Modifier.padding(top = 12.dp))
@@ -2366,8 +2383,8 @@ internal fun WdlBar(p: WinModel.Prob?, modifier: Modifier = Modifier) {
 }
 
 @Composable
-internal fun FormDots(form: String?) {
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+internal fun FormDots(form: String?, dim: Boolean = false) {
+    Row(Modifier.graphicsLayer(alpha = if (dim) 0.45f else 1f), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
         if (form.isNullOrBlank()) Text("—", fontSize = 12.sp, color = C.MUTED)
         else for (c in form.take(5)) {
             val col = when (c) { 'V' -> C.OK; 'E' -> C.GOLD; else -> C.BAD }

@@ -95,22 +95,29 @@ object WorldOsm {
             // por CONDIÇÃO (não por marcador), para se corrigir sozinha se uma tentativa anterior não terminou.
             if (WorldRemote.cfg(ctx) != null && (wdb.count("football_players") > 60_000 || wdb.count("football_clubs") > 60_000)) {
                 val t0 = System.currentTimeMillis(); Live.on("osm", "Base: enxugando a cópia local"); Diag.log("Base: enxugando a cópia local (${wdb.count("football_players")} jogadores, ${wdb.count("football_clubs")} clubes)…")
-                purged = WorldClean.slim(sql); Diag.log("Base: cópia enxugada em ${System.currentTimeMillis() - t0} ms; compactando…")
-                runCatching { wdb.w.execSQL("VACUUM") }; Diag.log("Base: compactação concluída em ${System.currentTimeMillis() - t0} ms")
+                runCatching { purged = WorldClean.slim(sql); Diag.log("Base: cópia enxugada em ${System.currentTimeMillis() - t0} ms; compactando…") }
+                    .onFailure { WorldMaint.error = "Enxugar a cópia local falhou (${it.javaClass.simpleName}); a transação foi desfeita, tento de novo na próxima sincronização."; Diag.log("Base: ${WorldMaint.error}") }
+                if (purged > 0) { runCatching { wdb.w.execSQL("VACUUM") }; Diag.log("Base: compactação concluída em ${System.currentTimeMillis() - t0} ms") }
             }
             Live.on("osm", "Base: lendo o que o OSM mostrou")
             migrateLeague(sql)
             // 26/11: o cadastro trazia JOGADORAS (Soccerdonna) e homônimos sem cadastro profissional que confundiam a identificação (E. Martínez → atacante, R. Dias → Patrícia Dias). Uma vez:
             // some da cópia local quem veio do Supabase sem ID de Transfermarkt/API-Football (e não foi confirmado por você); o que for preciso volta sob demanda, já filtrado
-            if (Settings.get(ctx, "world_clean_nopro_v1", "") != "1") {
-                sql.exec("DELETE FROM football_pull_hits WHERE kind='player' AND entity_id IN (SELECT id FROM football_players WHERE source_id='supabase' AND tm_id IS NULL AND apif_id IS NULL)", emptyArray())
-                sql.exec("DELETE FROM football_players WHERE source_id='supabase' AND tm_id IS NULL AND apif_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE osm_kind='player' AND algo='manual' AND entity_id IS NOT NULL)", emptyArray())
-                sql.exec("DELETE FROM football_pull_log WHERE kind='player'", emptyArray())
-                Settings.put(ctx, "world_clean_nopro_v1", "1")
+            WorldMaint.once(ctx, "world_clean_nopro_v1", "Limpeza de cadastros sem ID profissional") {
+                WorldMaint.atomic(sql) {
+                    sql.exec("DELETE FROM football_pull_hits WHERE kind='player' AND entity_id IN (SELECT id FROM football_players WHERE source_id='supabase' AND tm_id IS NULL AND apif_id IS NULL)", emptyArray())
+                    sql.exec("DELETE FROM football_players WHERE source_id='supabase' AND tm_id IS NULL AND apif_id IS NULL AND id NOT IN (SELECT entity_id FROM football_osm_entity_mappings WHERE osm_kind='player' AND algo='manual' AND entity_id IS NOT NULL)", emptyArray())
+                    sql.exec("DELETE FROM football_pull_log WHERE kind='player'", emptyArray())
+                }
             }
-            // regra de identificação nova: reavalia tudo (menos o que você confirmou à mão) e esquece os "não achei" do cadastro para buscar de novo
+            // regra de identificação nova: reavalia tudo (menos o que você confirmou à mão: mapeamentos manuais não são tocados) e esquece os "não achei" do cadastro para buscar de novo
             if (Settings.get(ctx, "world_algo", "") != WorldIdentity.ALGO) {
-                sql.exec("UPDATE football_ocr_observations SET status='novo'", emptyArray()); sql.exec("DELETE FROM football_pull_log WHERE found=0", emptyArray()); Settings.put(ctx, "world_algo", WorldIdentity.ALGO)
+                runCatching {
+                    WorldMaint.atomic(sql) {
+                        sql.exec("UPDATE football_ocr_observations SET status='novo'", emptyArray()); sql.exec("DELETE FROM football_pull_log WHERE found=0", emptyArray())
+                    }
+                    Settings.put(ctx, "world_algo", WorldIdentity.ALGO)
+                }.onFailure { WorldMaint.error = "Reavaliação dos nomes falhou (${it.javaClass.simpleName}); tento de novo na próxima sincronização. Nada foi perdido."; Diag.log("Base: ${WorldMaint.error}") }
             }
             val obs = backfill(ctx)
             Live.on("osm", "Base: identificando nomes lidos")

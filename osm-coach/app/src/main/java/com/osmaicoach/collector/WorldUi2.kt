@@ -224,6 +224,6 @@ internal fun WorldRealBox(slot: Int, playerName: String) {
             // identificou o jogador errado (outro de mesmo nome, outra posição)? troque: a sua escolha vale mais que a automática
             OutlinedButton(onClick = { pick = !pick }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text(if (pick) "Fechar a busca" else "Não é este? Trocar / procurar de novo") }
         }
-        if (pick) PickReal("player", WorldNorm.fold(playerName), playerName)
+        if (pick) PickReal("player", WorldNorm.fold(playerName), playerName, slot)
     }
 }

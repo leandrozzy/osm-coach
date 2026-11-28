@@ -134,9 +134,6 @@ class Round4RivalFormTest {
         assertEquals("V", LeagueResults.formOf(listOf(g(2, "Rival FC", "X", 1, 0), g(5, "Y", "Rival FC", 0, 3)), "Rival FC"))
         assertEquals("", LeagueResults.formOf(emptyList(), "Rival FC"))
     }
-    @Test fun readResultsBeatAColorReadOfTheSameLength() {
-        assertEquals("D", FormRead.pickRival("V", "D")); assertEquals("VVD", FormRead.pickRival("VVD", "")); assertEquals("VVD", FormRead.pickRival("VVD", "D"))
-    }
 }
 
 class Round4ChatGptTest {
