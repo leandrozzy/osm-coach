@@ -220,7 +220,7 @@ object Arts {
                 if (!c.auto) { if (c.kind == "CAMP" || c.kind == "SEASON") seenSet.add(c.id); continue }
                 if (firstRun && now - c.at > 24 * 3600_000L) { seenSet.add(c.id); continue }
                 // cria TUDO que está ativo (sem limite por vez); uma falha não interrompe as outras, 2 falhas seguidas (serviço fora) param
-                if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; failStreak = 0; seenSet.add(c.id) } else { failed = true; failStreak++; if (failStreak >= 2) break@loop }
+                if (runCatching { produce(ctx, c) }.getOrNull() != null) { made++; failStreak = 0; seenSet.add(c.id) } else { failed = true; failStreak++; if (failStreak >= 2) break@loop }
             }
         }
         putSeen(repo, seenSet)
@@ -250,7 +250,7 @@ object Arts {
             for (c in candidates(repo, slot)) {
                 if (c.kind == "NEWS") continue
                 if (c.id in have || ArtsGpt.isDone(ctx, c.id)) { skipped++; continue }
-                if (runCatching { make(ctx, c) }.getOrNull() != null) { made++; streak = 0; seenSet.add(c.id) } else { streak++; if (streak >= 2) break@loop }
+                if (runCatching { produce(ctx, c) }.getOrNull() != null) { made++; streak = 0; seenSet.add(c.id) } else { streak++; if (streak >= 2) break@loop }
             }
         }
         putSeen(repo, seenSet)
@@ -290,6 +290,11 @@ object Arts {
             val logo = runCatching { BitmapFactory.decodeResource(ctx.resources, R.drawable.g_logo) }.getOrNull()
             ArtsDraw.withStrip(raw, logo).also { raw.recycle(); logo?.recycle() }
         }
+        return storeBitmap(ctx, repo, c, b)
+    }
+
+    /** Guarda a imagem pronta como a arte [c] (substitui a anterior do mesmo evento; no máx. 60). Usado pelo desenho do app e pelo Gemini. */
+    suspend fun storeBitmap(ctx: Context, repo: Repo, c: Cand, b: Bitmap): Item {
         val f = File(dir(ctx), "${System.currentTimeMillis()}_${c.slot}.png")
         f.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         b.recycle()
@@ -302,6 +307,10 @@ object Arts {
         UiBus.bump()
         return item
     }
+
+    /** Quem cria a arte no "criar sozinho"/"criar todas": Gemini (se ligado em Ajustes e há chave) ou o desenho do app com a cena gratuita. */
+    suspend fun produce(ctx: Context, c: Cand): Item? =
+        if (ArtsGemini.autoOn(ctx) && ArtsGemini.hasKey(ctx) && c.kind != "NEWS") ArtsGemini.generate(ctx, c).also { if (it == null) ArtsAi.lastError = ArtsGemini.lastError } else make(ctx, c)
 
     private fun posLabel(cat: String?, code: String?): String {
         val base = when (cat) { "GOL" -> "Goleiro"; "DEF" -> "Defensor"; "MEI" -> "Meio-campista"; "ATA" -> "Atacante"; else -> "" }

@@ -572,6 +572,7 @@ internal fun SettingsTab() {
         }
         SectionLabel("Artes e ChatGPT", "Guia semanal para o Projeto e link da conversa")
         GptGuideFold()
+        ArtsGeminiFold()
         SectionLabel("Imagens", "Fotos dos jogadores, escudos dos clubes e bandeiras")
         ImageManagerFold()
         CrestManagerFold()
@@ -1072,5 +1073,25 @@ internal fun BattleLabPanel() {
                 SwitchRow("S$n: empate basta (maximizar pontos)", pts) { pts = it; Settings.put(ctx, "lab_obj_S$n", if (it) EngineLab.OBJ_POINTS else EngineLab.OBJ_WIN) }
             }
         }
+    }
+}
+
+
+/** Ajustes → Artes: gerar sozinho (ou não) e, quando gera, usar o Gemini (chave de Ajustes → IA) em vez da cena gratuita do app. */
+@Composable
+internal fun ArtsGeminiFold() {
+    val ctx = LocalContext.current
+    var auto by remember { mutableStateOf(Arts.autoOn(ctx)) }
+    var gem by remember { mutableStateOf(ArtsGemini.autoOn(ctx)) }
+    val hasKey = ArtsGemini.hasKey(ctx)
+    Fold("🎨", "Gerar artes sozinho", if (!auto) "desligado" else if (gem) "Gemini" else "cena grátis") {
+        SwitchRow("Gerar artes sozinho depois de Encerrar a leitura", auto) { auto = it; Arts.setAuto(ctx, it) }
+        SwitchRow("Usar o Gemini para gerar (senão, a cena grátis do app)", gem) { gem = it; ArtsGemini.setAutoOn(ctx, it) }
+        Text(
+            if (hasKey) "Chave do Gemini cadastrada. Com isto ligado, cada arte nova usa o mesmo pedido do botão ChatGPT (dados reais do jogo) e leva ~30 s a 1 min. A cota de imagem do Gemini varia por conta; se acabar, a arte fica para depois e o erro do Google aparece na aba Artes."
+            else "Falta a chave do Gemini: cadastre em Ajustes → IA (aistudio.google.com › Get API key). Sem ela, o app usa a cena grátis.",
+            fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
+        )
+        Text("O botão \"Gemini\" de cada arte (aba Artes) gera na hora, mesmo com o automático desligado.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }
 }

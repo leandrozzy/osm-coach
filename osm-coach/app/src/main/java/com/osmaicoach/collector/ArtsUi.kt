@@ -231,6 +231,17 @@ internal fun ArtsTab() {
                                 msg = if (t == null) "Faltam dados lidos para montar o prompt desta arte." else { ArtsGpt.markDone(ctx, c.id); gptTick++; ArtsGpt.send(ctx, t) } } },
                             modifier = Modifier.height(36.dp)
                         ) { Text("ChatGPT", fontSize = 12.5.sp) }
+                        OutlinedButton(
+                            onClick = {
+                                busy = true; msg = "Gerando “${c.title}” com o Gemini… (pode levar ~1 min)"
+                                scope.launch {
+                                    val it = withContext(Dispatchers.IO) { runCatching { ArtsGemini.generate(ctx, c) }.getOrNull() }
+                                    msg = if (it != null) "Pronto (Gemini): ${c.title}." else (ArtsGemini.lastError ?: "Não consegui gerar com o Gemini.")
+                                    busy = false
+                                }
+                            },
+                            enabled = !busy, modifier = Modifier.height(36.dp)
+                        ) { Text("Gemini", fontSize = 12.5.sp) }
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
