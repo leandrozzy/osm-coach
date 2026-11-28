@@ -1421,6 +1421,8 @@ data class SlotData(
     /** Véspera do jogo: (feito?, texto) na ordem em que se faz. Vazio = jogo longe. */
     val eve: List<Pair<Boolean, String>> = emptyList(),
     val rivalProfile: PlanEntity? = null,
+    /** Forma recente (mesma conta do Hoje: `slotForms`). */
+    val forms: SlotForms? = null,
     val win: WinModel.Prob? = null,
     val evidence: JSONObject? = null,
     /** Leituras que não batem entre telas (para conferir). */
@@ -1515,6 +1517,7 @@ internal suspend fun loadSlot(ctx: Context, slot: Int): SlotData {
     return SlotData(
         ready = true,
         idle = idleText,
+        forms = runCatching { slotForms(repo, slot, f, dao.matchesOf(slot), System.currentTimeMillis()) }.getOrNull(),
         learned = runCatching { Learned.fit(Director.allLogs(repo)) }.getOrNull(),
         rivalPred = runCatching { RivalPredict.of(repo.rivalProfile(slot)?.json?.let { JSONObject(it) }) }.getOrNull(),
         fields = f, players = players, matches = dao.matchesOf(slot),
@@ -1569,6 +1572,14 @@ internal fun tacticCurrent(j: JSONObject, f: Map<String, StoredField>): Boolean 
 internal fun known(f: Map<String, StoredField>, key: String): String? =
     f[key]?.value?.takeIf { FieldMerge.known(it) }
 
+/** "Tática pronta" só vale para ESTE jogo: o rival da tática guardada é o rival atual (quando os dois são conhecidos) — não basta existir uma tática gerada. */
+internal fun tacticIsForThisGame(plan: JSONObject?, f: Map<String, StoredField>): Boolean {
+    if (plan == null) return false
+    val cur = known(f, K.RIVAL_TEAM)?.let { Txt.key(it) }
+    val was = plan.optString("rival").takeIf { it.isNotBlank() && it != NI }?.let { Txt.key(it) }
+    return cur == null || was == null || cur == was
+}
+
 internal suspend fun tacticFor(repo: Repo, slot: Int, @Suppress("UNUSED_PARAMETER") round: Int?): Boolean = Director.tacticReady(repo, slot)
 
 internal fun countdown(ms: Long): String {
@@ -1598,6 +1609,25 @@ internal fun countdownColor(ms: Long): Color {
     return if (m <= 60) C.BAD else if (m <= Director.TACTIC_WINDOW_MS / 60000L) C.GOLD else C.OK
 }
 
+/** Forma recente do slot (UMA conta para Hoje e para o cabeçalho do slot): meu time + rival com fonte e cobertura. */
+class SlotForms(val my: String?, val rival: FormRead.RivalForm?)
+
+internal suspend fun slotForms(repo: Repo, slot: Int, f: Map<String, StoredField>, all: List<MatchEntity>, now: Long): SlotForms {
+    val fr = repo.dao.plan(slot, "formread")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+    // forma do RIVAL: placares confirmados da MESMA competição (tela Resultados) com cobertura, ou bolinhas do Pré-jogo identificadas como tal (FormRead.rivalForm)
+    val rivalGames = LeagueResults.compKey(f)?.let { ck -> LeagueResults.games(repo.dao.plan(slot, "lres2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, ck) } ?: emptyList()
+    val nextMatch = Fixtures.nextFor(all, f[K.RIVAL_TEAM]?.value, f[K.ROUND]?.value?.toIntOrNull())
+    val cupOrBattle = f[K.COMP_TYPE]?.value.let { it == "Copa" || it == "Batalha" } || (nextMatch != null && Fixtures.isCup(nextMatch))
+    val dotsStr: String? = ((if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
+                ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value)
+                ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull(), complete = true) })?.takeIf { it.isNotEmpty() }
+    val rf = FormRead.rivalForm(rivalGames, f[K.RIVAL_TEAM]?.value, f[K.ROUND_DONE]?.value?.toIntOrNull(), dotsStr, dotsStr != null, cupOrBattle)
+    val myForm = (if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
+                ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }))
+                ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) }
+    return SlotForms(myForm, rf)
+}
+
 internal suspend fun loadToday(ctx: Context): TodayData {
     val repo = Repo(ctx)
     val list = ArrayList<SlotSummary>()
@@ -1620,11 +1650,7 @@ internal suspend fun loadToday(ctx: Context): TodayData {
             all, scoredRounds(repo.dao.matchReports(slot)), now, clk?.round ?: f[K.ROUND]?.value?.toIntOrNull(), clk?.at
         )
         val gameMissing = Completeness.gameMissing(f)
-        val fr = repo.dao.plan(slot, "formread")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-        // forma do RIVAL: placares confirmados da MESMA competição (tela Resultados) com cobertura, ou bolinhas do Pré-jogo identificadas como tal (FormRead.rivalForm)
-        val rivalGames = LeagueResults.compKey(f)?.let { ck -> LeagueResults.games(repo.dao.plan(slot, "lres2")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }, ck) } ?: emptyList()
-        val nextMatch = Fixtures.nextFor(all, f[K.RIVAL_TEAM]?.value, f[K.ROUND]?.value?.toIntOrNull())
-        val cupOrBattle = f[K.COMP_TYPE]?.value.let { it == "Copa" || it == "Batalha" } || (nextMatch != null && Fixtures.isCup(nextMatch))
+        val sf = slotForms(repo, slot, f, all, now)
         val tplan = repo.dao.plan(slot, "tactic")?.json?.let { try { JSONObject(it) } catch (e: Exception) { null } }
         val market = repo.dao.snapshots("TRANSFER", slot).isNotEmpty()
         val c = Completeness.compute(f, players, matches, market, f[K.ROUND_TOTAL]?.value?.toIntOrNull())
@@ -1636,10 +1662,6 @@ internal suspend fun loadToday(ctx: Context): TodayData {
             "preepoca" -> known(f, K.HUB_TITLE) ?: known(f, K.TEAM)
             else -> known(f, K.TEAM) ?: known(f, K.HUB_TITLE)
         }
-        val dotsStr: String? = ((if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else (if (fr != null && fr.optString("tag") == "${f[K.ROUND]?.value}|" + Txt.key(f[K.RIVAL_TEAM]?.value ?: "")) fr.optString("rival").takeIf { it.isNotEmpty() } else null)
-                    ?: f[K.RIVAL_FORM]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value)
-                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull(), complete = true) })?.takeIf { it.isNotEmpty() }
-        val rf = FormRead.rivalForm(rivalGames, f[K.RIVAL_TEAM]?.value, f[K.ROUND_DONE]?.value?.toIntOrNull(), dotsStr, dotsStr != null, cupOrBattle)
         list.add(
             SlotSummary(
                 slot = slot, title = name ?: "Slot $slot ainda não lido", known = name != null, state = state,
@@ -1652,7 +1674,7 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                 missing = gameMissing.size,
                 missingNames = gameMissing.map { it.label },
                 nextAt = known(f, K.MATCH_AT)?.toLongOrNull(),
-                tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && Director.rivalConfirmed(f, now) },
+                tacticReady = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && Director.rivalConfirmed(f, now) && tacticIsForThisGame(tplan, f) },
                 rivalGaps = Director.tacticGaps(f, now).isNotEmpty(),
                 readPre = Director.groups(f, now)[0].ok,
                 readAna = Director.groups(f, now)[1].ok,
@@ -1666,12 +1688,10 @@ internal suspend fun loadToday(ctx: Context): TodayData {
                 readAges = Director.groupAgesMs(f, now),
                 // meu time: igual ao jogo (5 bolinhas do Pré-jogo) quando o Calendário está incompleto; Calendário em dia vale mais
                 // nunca mais bolinhas do que jogos disputados NESTA competição (liga nova com 1 jogo mostrava 3 bolinhas)
-                myForm = (if (((f[K.ROUND_DONE]?.value?.toIntOrNull() ?: 0) == 0) && all.none { it.result != null }) null else FormRead.mine(all, f[K.ROUND_DONE]?.value?.toIntOrNull(), fr?.optString("my")?.takeIf { it.isNotEmpty() && now - fr.optLong("at") <= 7L * 86_400_000L }
-                    ?: f[K.MY_FORM]?.value, fr?.optInt("round")?.takeIf { fr.has("round") }))
-                    ?.let { FormRead.cap(it, all, f[K.ROUND_DONE]?.value?.toIntOrNull()) },
-                rivalForm = rf?.dots,
-                rivalFormNote = rf?.note,
-                rivalFormStale = rf?.stale ?: false,
+                myForm = sf.my,
+                rivalForm = sf.rival?.dots,
+                rivalFormNote = sf.rival?.note,
+                rivalFormStale = sf.rival?.stale ?: false,
                 prepLevel = f[K.PREP_LEVEL]?.takeIf { now - it.updatedAt <= 12L * 3_600_000L }?.value,
                 tacticStale = tacticFor(repo, slot, known(f, K.ROUND)?.toIntOrNull()).let { ok -> ok && !Director.rivalConfirmed(f, now) },
                 needsResult = awaiting != null,

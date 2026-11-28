@@ -352,10 +352,14 @@ internal fun DuelBanner(slot: Int, d: SlotData) {
             }
             if (mineLeft) riv(Modifier.weight(1f)) else mine(Modifier.weight(1f))
         }
-        val fm = known(d.fields, K.MY_FORM); val fr = known(d.fields, K.RIVAL_FORM)
-        if (fm != null || fr != null) Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(if (mineLeft) fm else fr) }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) fr else fm) }
+        // MESMA forma do Hoje (SlotForms): sem bolinha crua do Pré-jogo sem dizer a origem
+        val fm = d.forms?.my; val rf = d.forms?.rival
+        if (fm != null || rf != null) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { FormDots(if (mineLeft) fm else rf?.dots, dim = !mineLeft && rf?.stale == true) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { FormDots(if (mineLeft) rf?.dots else fm, dim = mineLeft && rf?.stale == true) }
+            }
+            rf?.let { Text("Rival: ${it.note}", fontSize = 11.5.sp, color = if (it.stale) C.GOLD else C.MUTED, modifier = Modifier.fillMaxWidth().padding(top = 3.dp)) }
         }
     }
 }

@@ -796,6 +796,7 @@ object Director {
             .put("marking", t.marking).put("offside", t.offside).put("tackle", t.tackle)
             .put("myStrength", inp.myStrength ?: JSONObject.NULL).put("rivalStrength", inp.rivalStrength ?: JSONObject.NULL)
             .put("human", inp.rivalHuman ?: JSONObject.NULL).put("home", inp.home ?: JSONObject.NULL)
+            .put("battle", inp.mustWin)
             .put("result", JSONObject.NULL)
         // previsão feita na hora (para calibrar com o resultado) e o que foi lido do rival (para ver se ele trocou)
         if (prob != null) j.put("predW", prob.win).put("predE", prob.draw).put("predD", prob.loss).put("predPts", prob.points)

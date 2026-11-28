@@ -9,6 +9,8 @@ import org.json.JSONObject
  */
 object WorldCatalog {
     const val PAGE = 40
+    /** Identificação do jogador SÓ do mesmo slot da observação: nome curto igual ("R. Dias") em outro slot é outra pessoa e não empresta a ficha. */
+    private const val BEST_SLOT = "(SELECT m.entity_id || '|' || m.status || '|' || COALESCE(m.score,0) FROM football_osm_entity_mappings m WHERE m.osm_kind='player' AND m.osm_key=o.norm AND m.slot=o.slot AND m.entity_id IS NOT NULL AND m.status IN ('confirmado','muito alta','provável') ORDER BY CASE m.status WHEN 'confirmado' THEN 0 WHEN 'muito alta' THEN 1 ELSE 2 END, m.score DESC LIMIT 1)"
     private const val BEST = "(SELECT m.entity_id || '|' || m.status || '|' || COALESCE(m.score,0) FROM football_osm_entity_mappings m WHERE m.osm_kind='%K%' AND m.osm_key=o.norm AND m.entity_id IS NOT NULL AND m.status IN ('confirmado','muito alta','provável') ORDER BY CASE m.status WHEN 'confirmado' THEN 0 WHEN 'muito alta' THEN 1 ELSE 2 END, m.score DESC LIMIT 1)"
 
     class Counts(val playersSeen: Long, val playersReal: Long, val clubsSeen: Long, val clubsReal: Long, val countries: Long, val pending: Long, val leaguesWithClubs: Long)
@@ -35,19 +37,34 @@ object WorldCatalog {
         RealP(id, it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5), if (it.isNull(6)) null else it.getInt(6), status, score, it.getString(7), it.getString(8), it.getString(9), it.getString(10))
     }.firstOrNull()
 
-    /** mode: 0 todos • 1 identificados • 2 pendentes. */
-    fun players(db: WorldSql, q: String, slot: Int?, mode: Int, offset: Int): List<PlayerRow> {
+    /** Ficha de UM jogador lido NO slot indicado (nome curto repetido em outros slots não entra). */
+    fun playerIn(db: WorldSql, key: String, slot: Int?): PlayerRow? = players(db, "", slot, 0, 0, exactKey = key).firstOrNull()
+
+    /** mode: 0 todos • 1 identificados • 2 pendentes. Um registro por (nome, slot): homônimos de slots diferentes aparecem separados. */
+    fun players(db: WorldSql, q: String, slot: Int?, mode: Int, offset: Int, exactKey: String? = null): List<PlayerRow> {
         val w = arrayListOf("o.kind='player'", "NOT EXISTS(SELECT 1 FROM football_ignored ig WHERE ig.kind=o.kind AND ig.norm=o.norm)"); val a = ArrayList<String>()
-        if (q.isNotBlank()) { w.add("o.norm LIKE ?"); a.add("%" + WorldNorm.fold(q) + "%") }
+        if (exactKey != null) { w.add("o.norm=?"); a.add(exactKey) }
+        else if (q.isNotBlank()) { w.add("o.norm LIKE ?"); a.add("%" + WorldNorm.fold(q) + "%") }
         if (slot != null) { w.add("o.slot=?"); a.add(slot.toString()) }
-        val having = when (mode) { 1 -> " HAVING best IS NOT NULL"; 2 -> " HAVING best IS NULL"; else -> "" }
-        val rows = db.q("SELECT o.norm, MIN(o.raw) AS raw, GROUP_CONCAT(DISTINCT o.slot), MAX(o.context), ${BEST.replace("%K%", "player")} AS best FROM football_ocr_observations o WHERE ${w.joinToString(" AND ")} GROUP BY o.norm$having ORDER BY raw COLLATE NOCASE LIMIT $PAGE OFFSET $offset", *a.toTypedArray()) {
+        // um registro por (nome, slot); a junção entre slots e o filtro identificados/pendentes são feitos aqui (o SQLite do Android não tem JSON1)
+        val rows = db.q("SELECT o.norm, MIN(o.raw) AS raw, o.slot, MAX(o.context), $BEST_SLOT AS best FROM football_ocr_observations o WHERE ${w.joinToString(" AND ")} GROUP BY o.norm, o.slot ORDER BY raw COLLATE NOCASE, o.slot", *a.toTypedArray()) {
             arrayOf(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.getString(4))
         }
-        return rows.map { r ->
+        class M(val key: String, val raw: String, val slots: MutableSet<String>, val ctx: JSONObject, val age: Int?, val pos: String?, var best: String?)
+        val merged = ArrayList<M>()
+        for (r in rows) {
             val c = runCatching { JSONObject(r[3] ?: "{}") }.getOrDefault(JSONObject())
-            val b = best(r[4])
-            PlayerRow(r[0]!!, r[1]!!, c.optInt("age", -1).takeIf { it > 0 }, c.optString("pos").takeIf { it.isNotBlank() && it != "null" }, (r[2] ?: "").split(',').sorted().joinToString(","), b?.let { realPlayer(db, it.first, it.second, it.third) }, c.optString("nameKey").takeIf { it.isNotBlank() && it != "null" })
+            val age = c.optInt("age", -1).takeIf { it > 0 }
+            val pos = c.optString("pos").takeIf { it.isNotBlank() && it != "null" }
+            // mesmo nome em outro slot só se junta quando idade (e posição) lidas são IGUAIS nos dois; sem idade ou diferente = outra pessoa (homônimo), nunca empresta a ficha
+            val m = merged.firstOrNull { o -> o.key == r[0] && o.age != null && o.age == age && (o.pos == null || pos == null || o.pos == pos) }
+            if (m != null) { m.slots.add(r[2]!!); if (m.best == null) m.best = r[4] }
+            else merged.add(M(r[0]!!, r[1]!!, sortedSetOf(r[2]!!), c, age, pos, r[4]))
+        }
+        val filtered = when (mode) { 1 -> merged.filter { it.best != null }; 2 -> merged.filter { it.best == null }; else -> merged }
+        return filtered.drop(offset).take(PAGE).map { m ->
+            val b = best(m.best)
+            PlayerRow(m.key, m.raw, m.age, m.pos, m.slots.sorted().joinToString(","), b?.let { realPlayer(db, it.first, it.second, it.third) }, m.ctx.optString("nameKey").takeIf { it.isNotBlank() && it != "null" })
         }
     }
 

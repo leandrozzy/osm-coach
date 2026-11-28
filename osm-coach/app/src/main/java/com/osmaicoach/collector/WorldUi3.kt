@@ -96,7 +96,7 @@ private fun WorldSearchResults(q: String, nav: WorldNav) {
     val r = rememberLoaded(null as Pair<List<WorldCatalog.PlayerRow>, List<WorldCatalog.ClubRow>>?, 0, q) { val db = AndroidSql(WorldDb.get(ctx).readableDatabase); Pair(WorldCatalog.players(db, q, null, 0, 0).take(8), WorldCatalog.clubs(db, q, null, 0, null, 0).take(8)) }
     if (r == null) { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = C.PRIMARY) }; return }
     if (r.first.isEmpty() && r.second.isEmpty()) { WorldEmpty("Nada do seu jogo com \"$q\"", "A busca ignora acentos e maiúsculas."); return }
-    if (r.first.isNotEmpty()) { DsSection("Jogadores"); r.first.forEach { PlayerCatalogRow(it) { nav.detail = "op:${it.key}" } } }
+    if (r.first.isNotEmpty()) { DsSection("Jogadores"); r.first.forEach { PlayerCatalogRow(it) { nav.detail = "op:${it.key}|${it.slots}" } } }
     if (r.second.isNotEmpty()) { DsSection("Clubes"); r.second.forEach { ClubCatalogRow(it) { nav.detail = "oc:${it.key}" } } }
 }
 
@@ -242,7 +242,7 @@ internal fun WorldDetail(d: String, nav: WorldNav) {
 @Composable
 private fun OsmPlayerDetail(key: String, nav: WorldNav) {
     val ctx = LocalContext.current; val scope = rememberCoroutineScope()
-    val row = rememberLoaded(null as WorldCatalog.PlayerRow?, 0, Pair(key, UiBus.version)) { WorldCatalog.players(AndroidSql(WorldDb.get(ctx).readableDatabase), key, null, 0, 0).firstOrNull { it.key == key } }
+    val row = rememberLoaded(null as WorldCatalog.PlayerRow?, 0, Pair(key, UiBus.version)) { WorldCatalog.playerIn(AndroidSql(WorldDb.get(ctx).readableDatabase), key.substringBefore("|"), key.substringAfter("|", "").toIntOrNull()) }
     var msg by remember { mutableStateOf("") }
     if (row == null) { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = C.PRIMARY) }; return }
     val re = row.real

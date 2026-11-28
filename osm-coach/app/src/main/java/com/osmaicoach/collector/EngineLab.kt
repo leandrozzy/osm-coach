@@ -151,12 +151,19 @@ object EngineLab {
         val pr = predict(scen.first().first, best.c.tactic, best.c.rows, hist)
         // plano B: outra formação/estilo que rende mais que a principal em algum cenário plausível (ganho mínimo 0,05 no objetivo)
         var alt: Alt? = null
+        val totalW = scen.sumOf { it.second }.coerceAtLeast(1e-9)
+        val readState = HumanLab.readState(f, now)
         val minGain = 0.05 * (if (objective == OBJ_POINTS) 3.0 else 1.0)
         for (r in scored.drop(1)) {
             if (r.c.tactic.formation == best.c.tactic.formation && r.c.tactic.playStyle == best.c.tactic.playStyle) continue
             var g = 0.0; var gi = -1
-            for (i in scen.indices) { val a = r.perScen.getOrNull(i); val b = best.perScen.getOrNull(i); if (a != null && b != null && a - b > g) { g = a - b; gi = i } }
-            if (gi >= 0 && g >= minGain) { alt = Alt(r.c.tactic, Director.planBTrigger(scen[gi].first, base), g); break }
+            for (i in scen.indices) {
+                // cenário plausível (peso mínimo) E com gatilho concreto na releitura; sem isso não há Plano B (nada de troca por gosto ou ganho marginal)
+                if (scen[i].second < 0.15 * totalW) continue
+                if (HumanLab.planBTrigger(scen[i].first, base, readState) == null) continue
+                val a = r.perScen.getOrNull(i); val b = best.perScen.getOrNull(i); if (a != null && b != null && a - b > g) { g = a - b; gi = i }
+            }
+            if (gi >= 0 && g >= minGain) { alt = Alt(r.c.tactic, HumanLab.planBTrigger(scen[gi].first, base, readState)!!, g); break }
         }
         val notes = ArrayList<String>()
         notes.add("Objetivo: " + (if (objective == OBJ_POINTS) "pontos esperados (3×P(vitória) + P(empate))" else "chance de vitória") + (if (battle) " • batalha: rival tratado como humano" else ""))
@@ -171,6 +178,7 @@ object EngineLab {
     fun toJson(r: Rec): JSONObject = TacticValidator.toJson(r.tactic).put("objective", r.objective).put("win", r.win).put("draw", r.draw).put("loss", r.loss)
         .put("value", r.value).put("worst", r.worst).put("scenarios", r.scenarios).put("emergency", r.emergencyTested)
         .put("notes", JSONArray(r.notes)).put("version", VERSION)
+        .put("lineupOk", HumanLab.lineupOk(r.tactic, r.rows)).put("existsInOsm", HumanLab.existsInOsm(r.tactic))
         .put("evidence", JSONArray(r.evidence.map { JSONObject().put("f", it.field).put("s", it.status.name).put("v", it.value ?: JSONObject.NULL).put("h", it.ageHours ?: JSONObject.NULL) }))
         .also { j -> r.planB?.let { a -> j.put("planB", TacticValidator.toJson(a.tactic).put("trigger", a.trigger).put("gain", a.gain)) } }
 
@@ -235,7 +243,7 @@ object EngineLab {
             .put("frozenAt", now).put("kickoff", kickoff ?: JSONObject.NULL).put("snap", snap)
             .put("revisions", (old?.optInt("revisions", 0) ?: -1) + 1)
             .put("versions", JSONObject().put("std", STD_VERSION).put("lab", VERSION))
-            .put("ctx", JSONObject().put("home", base0.home ?: JSONObject.NULL).put("human", base0.rivalHuman ?: JSONObject.NULL).put("diff", diff ?: JSONObject.NULL).put("bucket", diffBucket(diff)))
+            .put("ctx", JSONObject().put("battle", Director.mustWin(f)).put("rivalFormation", base0.rivalFormation ?: JSONObject.NULL).put("rivalStyle", base0.rivalStyle ?: JSONObject.NULL).put("readState", HumanLab.readState(f, now).label).put("home", base0.home ?: JSONObject.NULL).put("human", base0.rivalHuman ?: JSONObject.NULL).put("diff", diff ?: JSONObject.NULL).put("bucket", diffBucket(diff)))
             .put("objective", obj)
             .put("evidence", JSONArray(ev.map { JSONObject().put("f", it.field).put("s", it.status.name) }))
             .put("std", TacticValidator.toJson(stdTactic)).put("lab", toJson(lab)).put("preds", preds)
