@@ -210,6 +210,7 @@ internal fun ArtsTab() {
                 else if (cs.isEmpty()) Text("Sem eventos ainda.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 for (c in cs) {
                     var gptTick by remember(c.id) { mutableStateOf(0) }
+                    var gemMsg by remember(c.id) { mutableStateOf<String?>(null) }
                     val gdone = remember(c.id, gptTick) { ArtsGpt.isDone(ctx, c.id) }
                     val done = d.items.any { it.id == c.id } || gdone
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -237,12 +238,16 @@ internal fun ArtsTab() {
                                 scope.launch {
                                     val it = withContext(Dispatchers.IO) { runCatching { ArtsGemini.generate(ctx, c) }.getOrNull() }
                                     msg = if (it != null) "Pronto (Gemini): ${c.title}." else (ArtsGemini.lastError ?: "Não consegui gerar com o Gemini.")
+                                    gemMsg = msg
+                                    if (it != null) preview = it       // abre a imagem na hora
                                     busy = false
                                 }
                             },
                             enabled = !busy, modifier = Modifier.height(36.dp)
                         ) { Text("Gemini", fontSize = 12.5.sp) }
                     }
+                    // resultado do Gemini AO LADO do botão (o aviso do topo da página fica fora da vista)
+                    gemMsg?.let { Text(it, fontSize = 12.sp, color = if (it.startsWith("Pronto")) C.OK else C.BAD, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(

@@ -59,6 +59,16 @@ object ArtsGemini {
         null
     }.getOrNull()
 
+    /** Por que veio 200 sem imagem: bloqueio do pedido, motivo de parada ou o texto que o modelo escreveu no lugar. */
+    fun noImageReason(body: String): String = runCatching {
+        val o = JSONObject(body)
+        val block = o.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty()
+        val c = o.optJSONArray("candidates")?.optJSONObject(0)
+        val fin = c?.optString("finishReason").orEmpty()
+        val txt = c?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text").orEmpty().take(120)
+        listOf(if (block.isNotBlank()) "pedido bloqueado ($block)" else "", if (fin.isNotBlank() && fin != "STOP") "parou por $fin" else "", if (txt.isNotBlank()) "disse: \"$txt\"" else "").filter { it.isNotBlank() }.joinToString("; ").ifBlank { "resposta vazia" }
+    }.getOrDefault("resposta ilegível")
+
     /** Mensagem curta e em português do erro do Google (cota, chave, modelo). */
     fun explain(code: Int, body: String): String {
         val msg = runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().take(140)
@@ -116,6 +126,7 @@ object ArtsGemini {
         val keys = Settings.geminiKeys(ctx)
         if (keys.isEmpty()) { lastError = "Cadastre a chave do Gemini em Ajustes → IA."; return@withContext null }
         var err: String? = null
+        Diag.log("Artes: Gemini gerando ${c.kind} (${keys.size} chave(s))")
         for (key in keys) {
             for (model in models(ctx, key).take(3)) {
                 var aspect: String? = "3:4"
@@ -130,12 +141,14 @@ object ArtsGemini {
                                 Diag.log("Artes: Gemini ($model) criou ${c.kind}")
                                 return@withContext item
                             }
-                            err = "Gemini: respondeu sem imagem (o modelo recusou ou só devolveu texto)."
+                            err = "Gemini ($model): respondeu sem imagem — " + noImageReason(r.body)
+                            Diag.log("Artes: $err")
                             return@repeat
                         }
                         // imageConfig não aceito por alguns modelos: tenta de novo sem ele
                         if (r.code == 400 && aspect != null && r.body.contains("imageConfig", true)) { aspect = null; return@repeat }
                         err = explain(r.code, r.body)
+                        Diag.log("Artes: Gemini $model HTTP ${r.code}: " + r.body.take(200).replace(Regex("\\s+"), " "))
                         if (r.code == 429 || r.code == 403) return@repeat    // próxima chave
                     }
                 }
