@@ -29,13 +29,16 @@ class PlayedTacticCarryTest {
         assertNull(PlayedTactic.cell(none, "formation"))
     }
 
-    @Test fun carriedValuesClassifyAsFollowedOrChanged() {
+    @Test fun carriedValuesNeverConfirmTheAppliedTactic() {
+        // 28/11 (pedido do usuário): leitura herdada vale como "última conhecida", mas NUNCA confirma a aplicação numa partida nova
         val r10 = rec(10, mapOf("formation" to "4-3-3 A", "playStyle" to "Jogar pelas alas", "pressure" to "64", "mentality" to "72", "tempo" to "77", "marking" to "Homem-a-homem",
             "offside" to "Sim", "tackle" to "Normal", "advAttack" to "Atacar apenas", "advMid" to "Ajudar a defesa", "advDef" to "Manter posições"))
         val cur = PlayedTactic.carryFrom(null, "$comp|11|r", 11, listOf(r10))!!
         val sug = JSONObject().put("formation", "4-3-3 A").put("playStyle", "Jogar pelas alas").put("pressure", 64).put("mentality", 72).put("tempo", 77).put("marking", "Homem-a-homem")
-        assertEquals(PlayedTactic.SEGUIU, PlayedTactic.classify(sug, cur).usage)
+        val v = PlayedTactic.classify(sug, cur)
+        assertEquals(PlayedTactic.NAO, v.usage); assertFalse(v.fullApplied)
+        assertTrue(PlayedTactic.readNow(cur).isEmpty())
         val sug2 = JSONObject(sug.toString()).put("formation", "4-2-3-1")
-        assertEquals(PlayedTactic.ALTEROU, PlayedTactic.classify(sug2, cur).usage)
+        assertEquals(PlayedTactic.NAO, PlayedTactic.classify(sug2, cur).usage)       // divergência herdada também não prova nada
     }
 }

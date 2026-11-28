@@ -182,6 +182,7 @@ class MainActivity : ComponentActivity() {
         if (slot in 1..4) {
             Route.tab = i?.getIntExtra("tab", 4) ?: 4
             Route.slot = slot
+            i?.getStringExtra("charts")?.let { Route.chartFilter = it; Route.chartSlot = slot }
             Route.nonce++
         }
     }
@@ -3034,7 +3035,7 @@ internal fun DirectorTab(onOpen: (Int, Int) -> Unit) {
 /** Abas do slot como pílulas com ícone: a ativa fica azul; a lista rola e leva a ativa para a vista. */
 @Composable
 internal fun SlotTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-    val icons = listOf("📋", "⚔", "👥", "📅", "⚡", "📊", "🧭", "🧠")
+    val icons = listOf("📋", "⚔", "👥", "📅", "⚡", "📊", "🧭", "📈", "🧠", "🎓")
     val scroll = rememberScrollState()
     val density = androidx.compose.ui.platform.LocalDensity.current
     LaunchedEffect(selected) { scroll.animateScrollTo(((selected - 1).coerceAtLeast(0) * 96 * density.density).toInt().coerceAtMost(scroll.maxValue)) }
@@ -3049,7 +3050,7 @@ internal fun SlotTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit
                     .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val tn = listOf("eye", "swords", "users", "cal", "target", "trophy", "clock", "dir", "chart").getOrNull(i)
+                val tn = listOf("eye", "swords", "users", "cal", "target", "trophy", "clock", "chart", "dir").getOrNull(i)
                 if (tn != null) DsIcon(tn, 18.dp, if (on) DS.ON_LIME else C.MUTED) else Text(icons.getOrElse(i) { "•" }, fontSize = 14.sp)
                 Spacer(Modifier.width(6.dp))
                 Text(t, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) DS.ON_LIME else C.MUTED, maxLines = 1)
@@ -3065,7 +3066,10 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onSlot: (Int)
     val data = rememberLoaded(SlotData(), tick, Pair(slot, UiBus.version)) { loadSlot(ctx, slot) }
     val idle = data.idle
     // slot sem competição em andamento: só a Visão geral (resumo do que foi) e o estado no topo; nada de Elenco/Calendário/Tática da competição antiga
-    val tabs = if (idle != null) listOf("Visão geral") else listOf("Visão geral", "Pré-jogo", "Elenco", "Calendário", "Tática", "Resultado", "Histórico", "Diretor", "Aprendizado")
+    // "Gráficos" (id 9) aparece ao lado de Histórico sem mudar os ids antigos (7 Diretor, 8 Aprendizado), que atalhos e notificações usam
+    val order = if (idle != null) listOf(0) else SlotNav.ORDER
+    val names = mapOf(0 to "Visão geral", 1 to "Pré-jogo", 2 to "Elenco", 3 to "Calendário", 4 to "Tática", 5 to "Resultado", 6 to "Histórico", 9 to "Gráficos", 7 to "Diretor", 8 to "Aprendizado")
+    val tabs = order.map { names.getValue(it) }
     val tab = if (idle != null) 0 else tab
     val title = if (idle != null) "Slot $slot" else known(data.fields, K.TEAM) ?: known(data.fields, K.HUB_TITLE) ?: if (data.ready) "Slot $slot ainda não lido" else "carregando…"
     Column(Modifier.fillMaxSize()) {
@@ -3096,7 +3100,7 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onSlot: (Int)
             }
             OsmButton()
         }
-        if (idle == null) SlotTabs(tabs, tab, onTab)
+        if (idle == null) SlotTabs(tabs, order.indexOf(tab).coerceAtLeast(0)) { pos -> onTab(order[pos]) }
         if (!data.ready) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = C.PRIMARY) }
             return@Column
@@ -3119,8 +3123,9 @@ internal fun SlotScreen(slot: Int, tab: Int, onTab: (Int) -> Unit, onSlot: (Int)
                     2 -> SlotSquad(slot, data)
                     3 -> SlotCalendar(slot, data)
                     4 -> SlotTactic(slot, data)
-                    5 -> SlotResult(slot, data) { onTab(4) }
+                    5 -> SlotResult(slot, data, goCharts = { onTab(9) }) { onTab(4) }
                     6 -> SlotHistory(slot, data)
+                    9 -> SlotChartsTab(slot) { r -> Route.resultRound = r; onTab(5) }
                     7 -> SlotDirector(slot, data)
                     else -> SlotLearning(slot, data)
                 }

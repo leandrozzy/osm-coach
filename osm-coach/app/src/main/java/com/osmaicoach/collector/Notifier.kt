@@ -26,6 +26,11 @@ object Route {
     var nonce by mutableIntStateOf(0)
     /** Aba principal pedida (ex.: 1 = Agenda, pelo widget); -1 = nenhuma. */
     var main by mutableIntStateOf(-1)
+    /** Filtro de Gráficos vindo da bolha (JSON do confronto atual) e o slot dele. */
+    var chartFilter: String? = null
+    var chartSlot = 0
+    /** Rodada a abrir no Resultado (toque num ponto de gráfico); -1 = nenhuma. */
+    var resultRound = -1
 }
 
 /** O horário do jogo vem do card do calendário ("22:18"), que é o horário real da partida. */

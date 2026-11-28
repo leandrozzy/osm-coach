@@ -1174,7 +1174,7 @@ class Repo(private val ctx: Context) {
             dao.putPlan(PlanEntity(slot, "league", merged.toString(), now))
             // bolha: "Capturado" só quando a tabela inteira fechou (posições 1..N seguidas e as contas batendo); antes disso segue "Lendo"
             if (kind == "st") runCatching {
-                val v = Standings.build(League.table(merged, "st"), now, fieldMap(slot)[K.TEAM]?.value, null, false)
+                val v = Standings.build(League.table(merged, "st"), now, fieldMap(slot)[K.TEAM]?.value, null, false, fieldMap(slot)[K.COMP_TYPE]?.value == "Batalha")
                 Diag.setRead(if (v != null && v.complete) 2 else 1, "OTHER_OSM")
             }
             if (kind == "st") runCatching { CrestAdmin.rememberTrusted(ctx, rows.map { it.club }) }   // grafia limpa dos clubes: o nome dos escudos passa a ser este

@@ -67,6 +67,7 @@ class Round6Test {
         val j = JSONObject().put("formation", form).put("playStyle", style).put("result", res ?: JSONObject.NULL)
         if (human != null) j.put("human", human) else j.put("human", JSONObject.NULL)
         if (usage != null) j.put("usage", usage)
+        if (usage == PlayedTactic.ALTEROU) j.put("appliedFull", true)
         if (battle != null) j.put("battle", battle)
         return j
     }

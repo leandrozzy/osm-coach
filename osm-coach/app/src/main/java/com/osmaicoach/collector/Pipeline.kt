@@ -671,10 +671,7 @@ class FramePipeline private constructor(private val ctx: Context) {
         }
         if (GenState.running("tactic", slot) || GenState.running("tactic_ai", slot)) return
         if (now - (autoTacticAt[slot] ?: 0L) < 25_000L) return
-        val sigKeys = listOf(
-            K.ROUND, K.RIVAL_TEAM, K.RIVAL_NICK, K.RIVAL_STRENGTH, K.MY_STRENGTH, K.RIVAL_FORMATION, K.RIVAL_PLAN, K.RIVAL_PRESSURE,
-            K.RIVAL_MENTALITY, K.RIVAL_TEMPO, K.RIVAL_MARKING, K.RIVAL_OFFSIDE, K.RIVAL_TACKLE, K.RIVAL_SECRET, K.REFEREE, K.HOME
-        )
+        val sigKeys = TacticDecision.SIG_KEYS
         val sig = sigKeys.joinToString("|") { f[it]?.value.orEmpty() }
         val old = repo.dao.plan(slot, "autogen")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
         val p = repo.dao.plan(slot, "tactic")

@@ -211,7 +211,7 @@ internal fun repStat(rep: JSONObject?, label: String, mineHome: Boolean?, mine: 
 internal fun digits(s: String?): String = s?.let { Regex("(\\d{1,3})").find(it)?.groupValues?.get(1) } ?: ""
 
 @Composable
-internal fun SlotResult(slot: Int, d: SlotData, goTactic: () -> Unit) {
+internal fun SlotResult(slot: Int, d: SlotData, goCharts: () -> Unit = {}, goTactic: () -> Unit) {
     val ctx = LocalContext.current
     val rows = playedRows(d)
     if (rows.isEmpty()) {
@@ -221,13 +221,14 @@ internal fun SlotResult(slot: Int, d: SlotData, goTactic: () -> Unit) {
         }
         return
     }
-    var sel by remember { mutableIntStateOf(rows.firstOrNull { it.result == null }?.round ?: rows.first().round) }
+    var sel by remember { mutableIntStateOf(Route.resultRound.takeIf { r -> r > 0 && rows.any { it.round == r } }?.also { Route.resultRound = -1 } ?: rows.firstOrNull { it.result == null }?.round ?: rows.first().round) }
     val cur = rows.firstOrNull { it.round == sel } ?: rows.first()
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
         for (r in rows.take(16)) {
             FilterPill("J${r.round}" + (if (r.result == null) " • pendente" else " " + r.result), r.round == cur.round) { sel = r.round }
         }
     }
+    Text("📈 Ver gráficos deste slot", color = C.INFO, fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp).clickable { goCharts() })
     val rep = cur.report
     val repHome = if (rep != null && rep.has("mineHome")) rep.optBoolean("mineHome") else null
     val repScore = rep != null && rep.has("sh") && rep.has("sa") && repHome != null

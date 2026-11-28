@@ -103,10 +103,7 @@ internal fun LabCard(slot: Int) {
     }
 }
 
-private fun tacticOf(j: JSONObject): Tactic = Tactic(
-    j.optString("formation"), j.optString("playStyle"), j.optInt("pressure"), j.optInt("mentality"), j.optInt("tempo"), j.optString("marking"),
-    j.optString("offside"), j.optString("tackle"), j.optString("advAttack"), j.optString("advMid"), j.optString("advDef"), emptyList()
-)
+private fun tacticOf(j: JSONObject): Tactic = HumanLab.tacticOf(j)
 
 private val DAY = SimpleDateFormat("dd/MM/yyyy", Locale("pt", "BR"))
 
@@ -129,5 +126,30 @@ private fun Why(rec: JSONObject, ctxInfo: Pair<HumanLab.Human, HumanLab.ReadStat
     }
     tips?.second?.filter { it.error != null }?.let { bad ->
         if (bad.isNotEmpty()) Text("Fontes sem acesso agora: ${bad.size} (a última base verificada continua, com a idade acima).", color = C.MUTED, fontSize = 11.5.sp)
+    }
+}
+
+
+/** Decisão MANTENHA / AJUSTE / FALTA CONFIRMAR: a MESMA regra da bolha (`TacticDecision`), no topo da aba Tática. */
+@Composable
+internal fun DecisionCard(slot: Int) {
+    val ctx = LocalContext.current
+    val v = rememberLoaded<TacticDecision.View?>(null, UiBus.version, "decision$slot") { runCatching { TacticDecision.load(Repo(ctx), slot) }.getOrNull() }
+    if (v == null) return
+    var full by remember(slot) { mutableStateOf(false) }
+    val col = when (v.state) { TacticDecision.State.MANTENHA -> C.OK; TacticDecision.State.AJUSTE -> C.GOLD; TacticDecision.State.FALTA -> C.INFO; TacticDecision.State.SLOT_DESCONHECIDO -> C.BAD }
+    Panel {
+        Text(v.title, fontWeight = FontWeight.Bold)
+        Text(v.state.label, color = col, fontWeight = FontWeight.ExtraBold)
+        for (l in v.lines) Text(l, color = C.MUTED, fontSize = 12.5.sp)
+        for (c in v.changes) Text("• ${c.label}: ${c.read} → ${c.rec}", fontSize = 13.sp)
+        v.action?.let { Text("➜ $it", color = C.PRIMARY, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold) }
+        v.tableNote?.let { Text(it, color = C.GOLD, fontSize = 11.5.sp) }
+        if (v.table != null) {
+            Text(if (full) "Ocultar tática completa" else "Ver tática completa", color = C.INFO, modifier = Modifier.padding(top = 6.dp).clickable { full = !full })
+            if (full) for (r in v.table) Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(r.label, color = C.MUTED, fontSize = 13.sp); Text(r.value, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            }
+        }
     }
 }

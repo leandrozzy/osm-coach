@@ -116,7 +116,7 @@ object HumanLab {
             if (res == null) { skip("sem resultado lido"); continue }
             if (l.isNull("human") || !l.has("human")) { skip("humano/CPU desconhecido"); continue }
             if (!l.optBoolean("human")) { skip("rival CPU (bot)"); continue }
-            if (!PlayedTactic.confirmed(l)) { skip("Aplicação não confirmada"); continue }
+            if (!PlayedTactic.fullyConfirmed(l)) { skip("Aplicação não confirmada"); continue }
             val group = if (!l.has("battle") || l.isNull("battle")) "Sem marca de competição (registro antigo)" else if (l.optBoolean("battle")) "Batalha" else "Liga"
             val key = l.optString("formation") + " • " + l.optString("playStyle")
             val c = buckets.getOrPut(group) { LinkedHashMap() }.getOrPut(key) { Cell(key) }
@@ -156,7 +156,7 @@ object HumanLab {
             if (fz == null) { other++; continue }
             if (!seen.add(fz.optString("id"))) continue
             val res = log.optString("result"); if (res !in listOf("V", "E", "D")) continue
-            if (log.isNull("human") || !log.optBoolean("human") || !PlayedTactic.confirmed(log)) { other++; continue }
+            if (log.isNull("human") || !log.optBoolean("human") || !PlayedTactic.fullyConfirmed(log)) { other++; continue }
             val kick = if (fz.isNull("kickoff")) null else fz.optLong("kickoff")
             if (kick != null && fz.optLong("frozenAt") > kick) { other++; continue }
             val std = fz.optJSONObject("std"); val lab = fz.optJSONObject("lab")
@@ -188,6 +188,11 @@ object HumanLab {
         }
         return compare(pairs)
     }
+
+    fun tacticOf(j: JSONObject): Tactic = Tactic(
+        j.optString("formation"), j.optString("playStyle"), j.optInt("pressure"), j.optInt("mentality"), j.optInt("tempo"), j.optString("marking"),
+        j.optString("offside"), j.optString("tackle"), j.optString("advAttack"), j.optString("advMid"), j.optString("advDef"), emptyList()
+    )
 
     fun toJsonRows(rows: List<Row>): JSONArray = JSONArray(rows.map { JSONObject().put("k", it.label).put("v", it.value) })
 }

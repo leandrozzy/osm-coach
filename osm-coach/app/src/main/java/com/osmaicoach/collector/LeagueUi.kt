@@ -200,7 +200,7 @@ internal suspend fun loadStandings(repo: Repo, slot: Int, matches: List<MatchEnt
     val my = f[K.TEAM]?.value?.takeIf { FieldMerge.known(it) } ?: f[K.HUB_TITLE]?.value
     val leagueDone = matches.count { it.result != null && it.round != null && !Fixtures.isCup(it) }.takeIf { it > 0 }
     val hasNext = f[K.MATCH_AT]?.value?.toLongOrNull()?.let { it > System.currentTimeMillis() } == true
-    return Standings.build(League.table(lg, "st"), lg.optLong("stAt", 0L), my, leagueDone, hasNext)
+    return Standings.build(League.table(lg, "st"), lg.optLong("stAt", 0L), my, leagueDone, hasNext, f[K.COMP_TYPE]?.value == "Batalha")
 }
 
 /** Posição na liga: do jeito que a Classificação do OSM mostra (posição, pontos, jogos, V/E/D, gols), com o escudo de cada clube. */
@@ -230,7 +230,8 @@ internal fun StandingsCard(slot: Int, d: SlotData) {
         } else Text("Não achei o seu clube na tabela lida. Confira o nome do time no slot.", fontSize = 14.sp, color = C.WARN)
         if (v.stale) Text("⚠ Você já jogou mais depois desta leitura: abra a Classificação no OSM para atualizar.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 8.dp))
         if (v.missingRanks.isNotEmpty()) Text("⚠ Faltam as posições ${v.missingRanks.joinToString(", ") { "${it}º" }}: role a Classificação até o fim.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
-        else if (!v.complete) Text("⚠ A tabela lida não fecha as contas (vitórias ≠ derrotas): falta algum clube, em geral o fim da lista. Role a Classificação até o último clube.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
+        else if (!v.complete) Text("⚠ Posições 1º a ${v.rows.size}º lidas em sequência, mas vitórias (${v.sumV ?: "?"}) ≠ derrotas (${v.sumD ?: "?"}): alguma linha pode ter sido lida errado. Não dá para afirmar que falta clube; releia a Classificação para conferir.", fontSize = 12.5.sp, color = C.WARN, modifier = Modifier.padding(top = 6.dp))
+        else if (v.sumsMismatch) Text("✓ Posições 1º a ${v.rows.size}º lidas (Batalha de Grupos: vitórias ${v.sumV ?: "?"} × derrotas ${v.sumD ?: "?"} não precisam fechar).", fontSize = 12.5.sp, color = C.OK, modifier = Modifier.padding(top = 6.dp))
         else Text("✓ Tabela completa (as contas fecham).", fontSize = 12.5.sp, color = C.OK, modifier = Modifier.padding(top = 6.dp))
     }
     if (v.ifWin != null && v.ifDraw != null && v.ifLoss != null) {

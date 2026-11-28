@@ -13,13 +13,15 @@ object Standings {
         val missingRanks: List<Int>,         // posições sem linha lida (rolagem incompleta)
         val complete: Boolean,               // posições 1..N seguidas E a tabela fecha (Σ vitórias = Σ derrotas, Σ gols pró = Σ gols contra)
         val stale: Boolean,                  // você já jogou mais jogos de liga do que a tabela mostra
-        val ifWin: Int?, val ifDraw: Int?, val ifLoss: Int?
+        val ifWin: Int?, val ifDraw: Int?, val ifLoss: Int?,
+        /** posições 1..N seguidas, mas Σ vitórias ≠ Σ derrotas (ou gols): uma linha lida errado ou jogos contra clubes fora da tabela — NÃO prova que falta clube. */
+        val sumsMismatch: Boolean = false, val sumV: Int? = null, val sumD: Int? = null
     )
 
     const val PASS_MS = 180_000L
 
     /** `leagueDone` = jogos da LIGA (sem copa) com resultado lido no calendário do slot, ou null se não sabe. */
-    fun build(all: List<League.Row>, stAt: Long, myTeam: String?, leagueDone: Int?, hasNext: Boolean): View? {
+    fun build(all: List<League.Row>, stAt: Long, myTeam: String?, leagueDone: Int?, hasNext: Boolean, battle: Boolean = false): View? {
         val dedup = League.dedupe(all).filter { it.rank != null && it.pts != null }
         if (dedup.isEmpty()) return null
         val last = dedup.maxOf { it.at ?: 0L }
@@ -33,10 +35,13 @@ object Standings {
         // tabela completa fecha as contas: toda vitória é a derrota de alguém e todo gol marcado é sofrido por alguém. Faltando um clube, não fecha.
         val balanced = rows.all { it.v != null && it.d != null } && rows.sumOf { it.v!! } == rows.sumOf { it.d!! } &&
             (rows.any { it.gf == null || it.ga == null } || rows.sumOf { it.gf!! } == rows.sumOf { it.ga!! })
-        val complete = missing.isEmpty() && rows.first().rank == 1 && balanced
+        // Batalha de Grupos: posições 1..N seguidas bastam (os jogos podem ser contra clubes fora da tabela lida); liga exige as contas fechando
+        val contiguous = missing.isEmpty() && rows.first().rank == 1
+        val complete = contiguous && (balanced || battle)
         val me = League.find(rows, myTeam)
         val stale = me?.j != null && leagueDone != null && me.j < leagueDone
         fun rankWith(add: Int): Int? { me ?: return null; val p = me.pts ?: return null; return 1 + rows.count { it !== me && (it.pts ?: 0) > p + add } }
-        return View(rows, me, if (stAt > 0) stAt else last, missing, complete, stale, if (hasNext) rankWith(3) else null, if (hasNext) rankWith(1) else null, if (hasNext) rankWith(0) else null)
+        return View(rows, me, if (stAt > 0) stAt else last, missing, complete, stale, if (hasNext) rankWith(3) else null, if (hasNext) rankWith(1) else null, if (hasNext) rankWith(0) else null,
+            sumsMismatch = contiguous && !balanced, sumV = rows.mapNotNull { it.v }.takeIf { it.size == rows.size }?.sum(), sumD = rows.mapNotNull { it.d }.takeIf { it.size == rows.size }?.sum())
     }
 }

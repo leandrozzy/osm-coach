@@ -187,50 +187,69 @@ class CaptureService : AccessibilityService() {
 
     private val hideNotice = Runnable { noticeView?.visibility = View.GONE }
 
-    /** Texto da tática do slot atual (ou do próximo jogo, se o slot não foi reconhecido). */
-    private suspend fun tacticText(): String = try {
-        val repo = Repo(applicationContext)
-        val now = System.currentTimeMillis()
-        val slot = Diag.currentSlot.takeIf { it > 0 } ?: (1..4).mapNotNull { s ->
-            val p = repo.dao.plan(s, "tactic") ?: return@mapNotNull null
-            val j = runCatching { org.json.JSONObject(p.json) }.getOrNull() ?: return@mapNotNull null
-            val f = repo.fieldMap(s)
-            if (!Director.tacticValid(j, p.at, f, now)) return@mapNotNull null
-            Pair(s, f[K.MATCH_AT]?.value?.toLongOrNull() ?: Long.MAX_VALUE)
-        }.minByOrNull { it.second }?.first ?: 0
-        if (slot <= 0) "Entre no slot (pré-jogo) para eu saber qual tática mostrar."
-        else {
-            val p = repo.dao.plan(slot, "tactic")
-            val j = p?.json?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
-            if (p == null || j == null) "S$slot: nenhuma tática gerada. Gere no app (aba Tática)."
-            else {
-                val ok = Director.tacticValid(j, p.at, repo.fieldMap(slot), now)
-                val ch = rivalChangesOf(repo, slot)
-                val warn = if (ch.isNotEmpty()) "⚠ O rival mudou: " + RivalWatch.headline(ch) + ". Gere uma nova tática.\n" else ""
-                if (!ok) {
-                    val f = repo.fieldMap(slot)
-                    val next = f[K.RIVAL_TEAM]?.value?.takeIf { FieldMerge.known(it) }
-                    val at = f[K.MATCH_AT]?.value?.toLongOrNull()
-                    val gaps = Director.tacticGaps(f, now)
-                    "S$slot" + (next?.let { " • próximo jogo vs $it" } ?: "") + "\n" +
-                        "Ainda não há tática para este jogo (a guardada era contra ${j.optString("rival")}).\n" +
-                        (if (at != null && at - now > Director.TACTIC_WINDOW_MS) "Ela é gerada nas últimas 8 h antes do jogo."
-                        else if (gaps.isNotEmpty()) "Antes de gerar, leia: " + gaps.joinToString(", ") { it.first } + "."
-                        else "Toque em 📱 App → Tática para gerar.")
-                } else {
-                    "S$slot • vs ${j.optString("rival")}\n" + warn + Director.tacticSummary(j)
-                }
-            }
+    /** Slot escolhido à mão na bolha (vale só enquanto o OSM não deixa o app reconhecer o slot sozinho). */
+    private var pickedSlot: Int? = null
+    private var showFullTable = false
+
+    private fun onTacticTap() { showFullTable = false; refreshDecision() }
+
+    private fun refreshDecision() {
+        scope.launch {
+            val slot = TacticDecision.slotNow() ?: pickedSlot
+            val v = TacticDecision.load(Repo(applicationContext), slot)
+            withContext(Dispatchers.Main) { showDecision(v) }
         }
-    } catch (e: Exception) {
-        "Não consegui carregar a tática: " + (e.message ?: e.javaClass.simpleName)
     }
 
-    private fun onTacticTap() {
-        scope.launch {
-            val t = tacticText()
-            withContext(Dispatchers.Main) { showCard(listOf(Hints.Hint("📋", "Tática", t)), "Tática do jogo", allowDone = false) }
+    private fun openAppAt(slot: Int, tab: Int, filter: String?) {
+        runCatching {
+            startActivity(android.content.Intent(this, MainActivity::class.java).putExtra("slot", slot).putExtra("tab", tab)
+                .apply { filter?.let { putExtra("charts", it) } }
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP))
         }
+    }
+
+    /** Cartão da decisão tática (mesma regra da aba Tática: TacticDecision). Silencioso até o usuário abrir. */
+    private fun showDecision(v: TacticDecision.View) {
+        val card = cardView ?: return
+        val lv = listView ?: return
+        val dp = resources.displayMetrics.density
+        headView?.text = "Tática do jogo"
+        lv.removeAllViews()
+        fun tv(t: String, color: Int, size: Float, bold: Boolean = false) = TextView(this).apply {
+            text = t; setTextColor(color); textSize = size
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding((4 * dp).toInt(), (2 * dp).toInt(), (4 * dp).toInt(), (2 * dp).toInt())
+        }
+        lv.addView(tv(v.title, android.graphics.Color.WHITE, 14f, true))
+        val col = when (v.state) {
+            TacticDecision.State.MANTENHA -> 0xFF22C55E.toInt(); TacticDecision.State.AJUSTE -> 0xFFF5B942.toInt()
+            TacticDecision.State.FALTA -> 0xFF39BDF8.toInt(); TacticDecision.State.SLOT_DESCONHECIDO -> 0xFFEF5350.toInt()
+        }
+        lv.addView(tv(v.state.label, col, 13f, true))
+        for (l in v.lines) lv.addView(tv(l, 0xFFC3D3EE.toInt(), 12f))
+        for (c in v.changes) lv.addView(tv("• ${c.label}: ${c.read} → ${c.rec}", android.graphics.Color.WHITE, 13f))
+        v.action?.let { lv.addView(tv("➜ $it", 0xFFB9F363.toInt(), 12.5f, true)) }
+        v.tableNote?.let { lv.addView(tv(it, 0xFFF5B942.toInt(), 11.5f)) }
+        if (showFullTable && v.table != null) for (r in v.table) {
+            lv.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; setPadding((8 * dp).toInt(), (2 * dp).toInt(), (8 * dp).toInt(), (2 * dp).toInt())
+                addView(tv(r.label, 0xFF9FB4D6.toInt(), 12f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(tv(r.value, android.graphics.Color.WHITE, 12.5f, true))
+            })
+        }
+        val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun lp() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = (6 * dp).toInt(); topMargin = (6 * dp).toInt() }
+        if (v.slot == null) {
+            for (n in 1..4) btns.addView(chip("S$n", 0xFF2563EB.toInt(), dp).apply { setOnClickListener { pickedSlot = n; refreshDecision() } }, lp())
+        } else {
+            if (v.table != null) btns.addView(chip(if (showFullTable) "Ocultar tática" else "Ver tática completa", 0xFF1C2938.toInt(), dp).apply {
+                setOnClickListener { showFullTable = !showFullTable; refreshDecision() } }, lp())
+            btns.addView(chip("Ver jogos parecidos", 0xFF1C2938.toInt(), dp).apply { setOnClickListener { openAppAt(v.slot, 9, v.chartFilter) } }, lp())
+        }
+        lv.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(btns) })
+        card.visibility = View.VISIBLE
+        overlayBox?.post { overlayBox?.let { markBounds(it) } }
     }
 
     private fun removeOverlay() {

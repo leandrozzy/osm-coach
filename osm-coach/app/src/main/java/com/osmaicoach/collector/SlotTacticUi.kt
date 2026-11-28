@@ -412,6 +412,7 @@ internal fun SlotTactic(slot: Int, d: SlotData) {
         Hint(Director.ENDED_MSG)
         return
     }
+    DecisionCard(slot)
     TacticHero(d)
     WhyCard(slot, d)
     AuditCard(slot, d)

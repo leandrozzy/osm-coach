@@ -66,8 +66,11 @@ object PlayedTactic {
     fun matchId(slot: Int, comp: String?, total: String?, round: Int?, rival: String?): String =
         listOf(slot.toString(), Txt.key(comp ?: "").take(40), total?.filter { it.isDigit() }.orEmpty(), (round ?: -1).toString(), Txt.key(rival ?: "").take(40)).joinToString("|")
 
+    /** Sufixo do tipo de competição: Copa e Batalha nunca se misturam com a Liga contra o mesmo clube/rodada (Liga mantém o id antigo). */
+    fun typeTag(f: Map<String, StoredField>): String = when (f[K.COMP_TYPE]?.value) { "Copa" -> "#copa"; "Batalha" -> "#batalha"; else -> "" }
+
     fun matchId(slot: Int, f: Map<String, StoredField>): String =
-        matchId(slot, f[K.COMPETITION]?.value ?: f[K.HUB_TITLE]?.value, f[K.ROUND_TOTAL]?.value, f[K.ROUND]?.value?.filter { it.isDigit() }?.toIntOrNull(), f[K.RIVAL_TEAM]?.value)
+        matchId(slot, (f[K.COMPETITION]?.value ?: f[K.HUB_TITLE]?.value).orEmpty() + typeTag(f), f[K.ROUND_TOTAL]?.value, f[K.ROUND]?.value?.filter { it.isDigit() }?.toIntOrNull(), f[K.RIVAL_TEAM]?.value)
 
     fun kind(id: String): String = "played_" + Integer.toHexString(id.hashCode())
 
@@ -133,16 +136,27 @@ object PlayedTactic {
     /** Registro da partida de um jogo já jogado (usa a identidade guardada no tlog: rodada, rival e a competição atual do slot). */
     suspend fun forLog(repo: Repo, slot: Int, round: Int, rival: String?): JSONObject? {
         val f = repo.fieldMap(slot)
-        val id = matchId(slot, f[K.COMPETITION]?.value ?: f[K.HUB_TITLE]?.value, f[K.ROUND_TOTAL]?.value, round, rival)
-        val rec = repo.dao.plan(slot, kind(id))?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
-        return carryFrom(rec, id, round, otherRecords(repo, slot))
+        val comp = f[K.COMPETITION]?.value ?: f[K.HUB_TITLE]?.value
+        // tenta o id com o tipo da competição atual (Copa/Batalha) e depois o id de Liga (sem sufixo)
+        for (tag in listOf(typeTag(f), "").distinct()) {
+            val id = matchId(slot, comp.orEmpty() + tag, f[K.ROUND_TOTAL]?.value, round, rival)
+            val rec = repo.dao.plan(slot, kind(id))?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
+            if (rec != null) return carryFrom(rec, id, round, otherRecords(repo, slot))
+        }
+        val id = matchId(slot, comp.orEmpty() + typeTag(f), f[K.ROUND_TOTAL]?.value, round, rival)
+        return carryFrom(null, id, round, otherRecords(repo, slot))
     }
+
+    /** Campos LIDOS neste jogo (herdados da leitura anterior ficam de fora: valem só como "última conhecida", nunca como aplicação confirmada). */
+    fun readNow(played: JSONObject?): Map<String, String> = FIELDS.mapNotNull { f -> cell(played, f)?.takeIf { !it.optBoolean("carried") }?.optString("v")?.takeIf { it.isNotBlank() }?.let { f to it } }.toMap()
 
     fun cell(played: JSONObject?, field: String): JSONObject? = played?.optJSONObject("fields")?.optJSONObject(field)
 
     // ------------------------------------------------------------------ classificação
     class Diff(val field: String, val suggested: String, val played: String)
     class Verdict(val usage: String, val diffs: List<Diff>, val unknown: List<String>, val compared: Int) {
+        /** Configuração INTEIRA lida neste jogo (nenhum campo desconhecido): só então o resultado pode ser creditado à aplicada. */
+        val fullApplied: Boolean get() = compared > 0 && unknown.isEmpty()
         fun text(): String = when (usage) {
             SEGUIU -> "Seguiu a sugestão (todos os $compared campos confirmados)"
             ALTEROU -> "Alterou: " + diffs.joinToString("; ") { "${LABEL[it.field]} ${it.played} (sugerido ${it.suggested})" }
@@ -161,7 +175,7 @@ object PlayedTactic {
         val want = suggestedFields(sug)
         val diffs = ArrayList<Diff>(); val unknown = ArrayList<String>()
         for ((f, sv) in want) {
-            val pv = cell(played, f)?.optString("v")?.takeIf { it.isNotBlank() } ?: extra[f]?.let { norm(f, it) }
+            val pv = cell(played, f)?.takeIf { !it.optBoolean("carried") }?.optString("v")?.takeIf { it.isNotBlank() } ?: extra[f]?.let { norm(f, it) }
             if (pv == null) { unknown.add(f); continue }
             if (!same(f, sv, pv)) diffs.add(Diff(f, sv, pv))
         }
@@ -196,6 +210,9 @@ object PlayedTactic {
     /** Atribuição estrita (comparar sugerida × jogada): só "seguiu" ou "alterou" comprovados. */
     fun confirmed(log: JSONObject): Boolean = usageOf(log).let { it == SEGUIU || it == ALTEROU }
 
+    /** Configuração aplicada INTEIRA confirmada (seguiu; ou alterou com todos os campos lidos neste jogo): condição para creditar resultado à aplicada em comparações. Divergência isolada não basta. */
+    fun fullyConfirmed(log: JSONObject): Boolean = usageOf(log).let { it == SEGUIU || (it == ALTEROU && log.optBoolean("appliedFull", false)) }
+
     /**
      * Aplica a classificação ao tlog: guarda a sugestão original (`sug`) uma vez, o veredito (`usage`, `usageDiffs`, `usageUnknown`) e, quando alterou,
      * troca no registro a configuração pela JOGADA (mantendo `gen*` com a sugerida), como já fazia o aprendizado.
@@ -212,6 +229,7 @@ object PlayedTactic {
         }
         val v = classify(sug, played, extra)
         t.put("usage", v.usage)
+        t.put("appliedFull", v.fullApplied)
         t.put("usageDiffs", JSONArray(v.diffs.map { "${it.field}:${it.suggested}>${it.played}" }))
         t.put("usageUnknown", JSONArray(v.unknown))
         t.put("deviated", v.usage == ALTEROU)
