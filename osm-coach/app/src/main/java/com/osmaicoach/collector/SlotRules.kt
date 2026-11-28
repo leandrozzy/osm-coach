@@ -242,6 +242,62 @@ object SlotRules {
         if (r.relegated > 0) add("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}")
     }
 
+    enum class St { OK, BAD, UNKNOWN }
+    /** Uma regra principal com a situação AGORA: ✅ cumprida, ❌ precisa cumprir, ❔ sem dado para saber. */
+    data class Check(val text: String, val st: St, val detail: String? = null)
+
+    /** Situação de cada regra reconhecida (só as regras em negrito/numéricas; o texto colado não é repetido). */
+    fun checks(r: Rules, players: List<PlayerEntity>, round: Int?, roundTotal: Int?, lastReadAt: Long?, now: Long, x: Extra = Extra()): List<Check> {
+        val out = ArrayList<Check>()
+        val mine = players.filter { it.owner == "MY" }
+        fun nm(p: PlayerEntity) = "${p.name} (${p.strength})"
+        r.maxBuy?.let { out.add(Check("Comprar: até over $it", St.OK, "o app só sugere compras até esse over")) }
+        r.maxTrain?.let { tr ->
+            val bad = mine.filter { (it.training == true && (it.strength ?: 0) >= tr - 1) || (it.training != true && (it.strength ?: 0) >= tr - 1) }
+            out.add(Check("Treino: até over $tr", if (bad.isEmpty()) St.OK else St.BAD,
+                if (bad.isEmpty()) null else bad.take(3).joinToString { nm(it) } + (if (bad.any { it.training == true }) " — tire do treino" else " — não coloque no treino")))
+        }
+        r.maxStar?.let { star ->
+            val bad = mine.filter { (it.strength ?: 0) >= star }
+            out.add(Check("Craque: até over $star", if (bad.isEmpty()) St.OK else St.BAD, if (bad.isEmpty()) null else bad.take(3).joinToString { nm(it) } + " no limite/acima"))
+        }
+        r.maxSquad?.let { m ->
+            out.add(Check("Elenco: até $m jogadores", if (mine.size <= m) St.OK else St.BAD, "${mine.size}/$m"))
+        }
+        if (r.noTransferSecondHalf) {
+            val late = round != null && roundTotal != null && round > roundTotal / 2
+            out.add(Check("Sem transferências no 2º turno", if (late) St.BAD else St.OK, if (late) "estamos no 2º turno: não compre nem liste" else "1º turno: transferências liberadas"))
+        }
+        r.maxAwayDays?.let { d ->
+            if (lastReadAt == null) out.add(Check("Entrar na liga a cada $d dias", St.UNKNOWN, "sem leitura recente"))
+            else {
+                val h = (now - lastReadAt) / 3_600_000L
+                val bad = h >= (d - 1) * 24L
+                out.add(Check("Entrar na liga a cada $d dias", if (bad) St.BAD else St.OK, "última leitura há ${h / 24}d ${h % 24}h" + (if (bad) " — entre hoje" else "")))
+            }
+        }
+        if (r.natCount != null) {
+            val label = "${r.natCount} jogadores da nacionalidade da liga" + (r.natGames?.let { ", $it jogos cada" } ?: "")
+            val nat = x.natives
+            if (nat == null) out.add(Check(label, St.UNKNOWN, "escolha a bandeira da liga no cartão de regras do app"))
+            else {
+                val ready = nat.count { r.natGames == null || it.second >= r.natGames }
+                out.add(Check(label, if (ready >= r.natCount) St.OK else St.BAD, "$ready/${r.natCount} cumprindo"))
+            }
+        }
+        r.evolveX?.let { e ->
+            val now2 = x.valueNow; val base = x.valueBase
+            if (now2 == null || base == null || base <= 0.0) out.add(Check("Evoluir ${e}× o valor inicial", St.UNKNOWN, "valor do elenco ainda não lido"))
+            else { val k = now2 / base; out.add(Check("Evoluir ${e}× o valor inicial", if (k >= e) St.OK else St.BAD, "agora ${"%.1f".format(k).replace('.', ',')}×")) }
+        }
+        if (r.relegated > 0) {
+            val pos = x.pos; val teams = x.teams
+            if (pos == null || teams == null) out.add(Check("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}", St.UNKNOWN, "posição não lida"))
+            else out.add(Check("Rebaixa${if (r.relegated == 1) " o último" else "m os últimos ${r.relegated}"}", if (pos <= teams - r.relegated) St.OK else St.BAD, "${pos}º de $teams" + (if (pos > teams - r.relegated) " — zona de rebaixamento" else "")))
+        }
+        return out
+    }
+
     /** Texto para o prompt da IA: obrigatório respeitar (compra, treino, craque, elenco, escalação). */
     fun promptText(r: Rules): String =
         "REGRAS ESPECIAIS DESTA LIGA (obrigatórias; valem mais que as dicas gerais; não sugira nada que as quebre):\n" + r.text.take(1800)

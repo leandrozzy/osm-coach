@@ -211,19 +211,24 @@ class CaptureService : AccessibilityService() {
         rulesBtn?.post { rulesBtn?.visibility = if (rulesHas && slot in 1..4) View.VISIBLE else View.GONE }
     }
 
+    @Volatile private var cardSlot = 0
+
     private fun onRulesTap() {
         scope.launch {
             val slot = TacticDecision.slotNow() ?: pickedSlot
             val repo = Repo(applicationContext)
             val r = if (slot != null) SlotRules.load(repo, slot) else null
             val f = if (slot != null) repo.fieldMap(slot) else emptyMap()
-            val alerts = if (slot != null && r != null) runCatching { TacticDecision.ruleAlerts(repo, slot, f, System.currentTimeMillis()) }.getOrDefault(emptyList()) else emptyList()
-            withContext(Dispatchers.Main) { showRules(slot, f[K.COMPETITION]?.value, r, alerts) }
+            val now = System.currentTimeMillis()
+            val checks = if (slot != null && r != null) runCatching {
+                SlotRules.checks(r, repo.playersOf(slot), f[K.ROUND]?.value?.toIntOrNull(), f[K.ROUND_TOTAL]?.value?.toIntOrNull(), f.values.maxOfOrNull { it.updatedAt }, now, SlotRules.gather(repo, slot, r, f, now))
+            }.getOrDefault(emptyList()) else emptyList()
+            withContext(Dispatchers.Main) { cardSlot = slot ?: 0; showRules(slot, f[K.COMPETITION]?.value, r, checks) }
         }
     }
 
-    /** Cartão das regras da liga: alertas em vermelho primeiro, depois cada regra entendida em letra grande e o texto completo. */
-    private fun showRules(slot: Int?, comp: String?, r: SlotRules.Rules?, alerts: List<String>) {
+    /** Cartão das regras da liga: só as regras principais, cada uma com ✅ (cumprida) ou ❌ (precisa cumprir); sem repetir o texto colado. */
+    private fun showRules(slot: Int?, comp: String?, r: SlotRules.Rules?, checks: List<SlotRules.Check>) {
         val card = cardView ?: return
         val lv = listView ?: return
         val dp = resources.displayMetrics.density
@@ -237,12 +242,12 @@ class CaptureService : AccessibilityService() {
         if (r == null) { lv.addView(tv("Este slot não tem regras digitadas.", 0xFFC3D3EE.toInt(), 13f)) }
         else {
             comp?.takeIf { FieldMerge.known(it) }?.let { lv.addView(tv(it, 0xFFF5B942.toInt(), 13f, true)) }
-            for (a in alerts) lv.addView(tv(a, 0xFFFF5252.toInt(), 15f, true))
-            val sum = SlotRules.summary(r)
-            for (l in sum) lv.addView(tv("• $l", android.graphics.Color.WHITE, 15f, true))
-            if (sum.isEmpty()) lv.addView(tv("O app não reconheceu números nas regras; o texto abaixo vale para a IA.", 0xFFC3D3EE.toInt(), 12.5f))
-            lv.addView(tv("Texto completo", 0xFF9FB4D6.toInt(), 11.5f, true))
-            lv.addView(tv(r.text.take(900), 0xFFC3D3EE.toInt(), 12f))
+            if (checks.isEmpty()) lv.addView(tv("O app não reconheceu regras com número neste texto.", 0xFFC3D3EE.toInt(), 12.5f))
+            for (c in checks) {
+                val (mark, col) = when (c.st) { SlotRules.St.OK -> "✅" to 0xFF22C55E.toInt(); SlotRules.St.BAD -> "❌" to 0xFFFF5252.toInt(); SlotRules.St.UNKNOWN -> "❔" to 0xFFC3D3EE.toInt() }
+                lv.addView(tv("$mark ${c.text}", if (c.st == SlotRules.St.BAD) 0xFFFF5252.toInt() else android.graphics.Color.WHITE, 15f, true))
+                c.detail?.let { lv.addView(tv("      $it", col, 12f)) }
+            }
         }
         card.visibility = View.VISIBLE
         overlayBox?.post { overlayBox?.let { markBounds(it) } }
@@ -254,7 +259,7 @@ class CaptureService : AccessibilityService() {
         scope.launch {
             val slot = TacticDecision.slotNow() ?: pickedSlot
             val v = TacticDecision.load(Repo(applicationContext), slot)
-            withContext(Dispatchers.Main) { showDecision(v) }
+            withContext(Dispatchers.Main) { cardSlot = v.slot ?: 0; showDecision(v) }
         }
     }
 
@@ -515,7 +520,12 @@ class CaptureService : AccessibilityService() {
                     }
                 }
                 updateRulesButton(slot)
-                withContext(Dispatchers.Main) { updateRing() }
+                withContext(Dispatchers.Main) {
+                    // cartão de Regras/Tática aberto para OUTRO slot: fecha (nunca mostrar o confronto/regras do slot anterior)
+                    val h = headView?.text?.toString().orEmpty()
+                    if (cardView?.visibility == View.VISIBLE && (h.startsWith("Regras") || h.startsWith("Tática")) && slot > 0 && cardSlot > 0 && slot != cardSlot) { cardView?.visibility = View.GONE; cardSlot = 0 }
+                    updateRing()
+                }
                 delay(1500L)
             }
         }
