@@ -181,7 +181,7 @@ internal fun ArtsTab() {
         msg?.let { Text(it, fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 6.dp)) }
         run {
             var gl by remember { mutableStateOf(ArtsGpt.link(ctx)) }
-            Text("ChatGPT (realista): cole o link do seu Projeto/conversa. O botão \"ChatGPT\" de cada arte copia o prompt com os dados reais e abre esse link.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
+            Text("ChatGPT (realista): o botão \"ChatGPT\" de cada arte abre o app do ChatGPT com o pedido (dados reais + instruções) já escrito, numa conversa nova: é só enviar. Quando a imagem sair, compartilhe-a com o OSM Coach e ela vira a arte. O link abaixo só vale se o app do ChatGPT não estiver instalado.", fontSize = 12.5.sp, color = C.MUTED, modifier = Modifier.padding(top = 8.dp))
             androidx.compose.material3.OutlinedTextField(value = gl, onValueChange = { gl = it; ArtsGpt.setLink(ctx, it) }, singleLine = true,
                 placeholder = { Text("https://chatgpt.com/g/…") }, modifier = Modifier.fillMaxWidth())
         }
@@ -210,7 +210,6 @@ internal fun ArtsTab() {
                 else if (cs.isEmpty()) Text("Sem eventos ainda.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
                 for (c in cs) {
                     var gptTick by remember(c.id) { mutableStateOf(0) }
-                    var gemMsg by remember(c.id) { mutableStateOf<String?>(null) }
                     val gdone = remember(c.id, gptTick) { ArtsGpt.isDone(ctx, c.id) }
                     val done = d.items.any { it.id == c.id } || gdone
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -229,25 +228,10 @@ internal fun ArtsTab() {
                         ) { Text(if (done) (if (gdone) "✓ feita (ChatGPT)" else "✓ feita") else "Criar", fontSize = 12.5.sp) }
                         OutlinedButton(
                             onClick = { scope.launch { val t = withContext(Dispatchers.IO) { runCatching { ArtsGpt.prompt(ctx, Repo(ctx), c) }.getOrNull() }
-                                msg = if (t == null) "Faltam dados lidos para montar o prompt desta arte." else { ArtsGpt.markDone(ctx, c.id); gptTick++; ArtsGpt.send(ctx, t) } } },
+                                msg = if (t == null) "Faltam dados lidos para montar o prompt desta arte." else { gptTick++; ArtsGpt.sendToApp(ctx, t, c) } } },
                             modifier = Modifier.height(36.dp)
                         ) { Text("ChatGPT", fontSize = 12.5.sp) }
-                        OutlinedButton(
-                            onClick = {
-                                busy = true; msg = "Gerando “${c.title}” com o Gemini… (pode levar ~1 min)"
-                                scope.launch {
-                                    val it = withContext(Dispatchers.IO) { runCatching { ArtsGemini.generate(ctx, c) }.getOrNull() }
-                                    msg = if (it != null) "Pronto (Gemini): ${c.title}." else (ArtsGemini.lastError ?: "Não consegui gerar com o Gemini.")
-                                    gemMsg = msg
-                                    if (it != null) preview = it       // abre a imagem na hora
-                                    busy = false
-                                }
-                            },
-                            enabled = !busy, modifier = Modifier.height(36.dp)
-                        ) { Text("Gemini", fontSize = 12.5.sp) }
                     }
-                    // resultado do Gemini AO LADO do botão (o aviso do topo da página fica fora da vista)
-                    gemMsg?.let { Text(it, fontSize = 12.sp, color = if (it.startsWith("Pronto")) C.OK else C.BAD, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(

@@ -139,22 +139,9 @@ class Round4RivalFormTest {
     }
 }
 
-class Round4GeminiArtTest {
-    @Test fun imageModelsAreRankedAndImagenIsExcluded() {
-        val r = ArtsGemini.rankImageModels(listOf("models/gemini-2.5-pro", "models/imagen-4.0-generate-001", "models/gemini-2.5-flash-image", "models/gemini-3.1-flash-image-preview", "models/gemini-3-pro-image-preview", "models/gemini-embedding-001"))
-        assertEquals(listOf("gemini-3.1-flash-image-preview", "gemini-2.5-flash-image", "gemini-3-pro-image-preview"), r)
-    }
-    @Test fun requestAsksForAnImageWithTheRulesAndThePrompt() {
-        val b = org.json.JSONObject(ArtsGemini.requestBody("Crie um pôster: DIA DE JOGO"))
-        val txt = b.getJSONArray("contents").getJSONObject(0).getJSONArray("parts").getJSONObject(0).getString("text")
-        assertTrue(txt.contains("DIA DE JOGO") && txt.contains("EXATAMENTE"))
-        assertEquals("IMAGE", b.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0))
-        assertEquals("3:4", b.getJSONObject("generationConfig").getJSONObject("imageConfig").getString("aspectRatio"))
-        assertFalse(org.json.JSONObject(ArtsGemini.requestBody("x", null)).getJSONObject("generationConfig").has("imageConfig"))
-    }
-    @Test fun quotaZeroIsExplainedInPortuguese() {
-        val m = ArtsGemini.explain(429, "{\"error\":{\"message\":\"Quota exceeded ... limit: 0\"}}")
-        assertTrue(m.contains("cota") && m.contains("faturamento"))
-        assertTrue(ArtsGemini.explain(403, "{}").contains("permissão"))
+class Round4ChatGptTest {
+    @Test fun fullTextCarriesTheGuideRulesAndThePrompt() {
+        val t = ArtsGpt.fullText("Crie um pôster: DIA DE JOGO")
+        assertTrue(t.startsWith(GptGuide.INSTRUCTIONS)); assertTrue(t.endsWith("DIA DE JOGO"))
     }
 }

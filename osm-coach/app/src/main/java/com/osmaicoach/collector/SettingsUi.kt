@@ -572,7 +572,7 @@ internal fun SettingsTab() {
         }
         SectionLabel("Artes e ChatGPT", "Guia semanal para o Projeto e link da conversa")
         GptGuideFold()
-        ArtsGeminiFold()
+        ArtsAutoFold()
         SectionLabel("Imagens", "Fotos dos jogadores, escudos dos clubes e bandeiras")
         ImageManagerFold()
         CrestManagerFold()
@@ -1077,21 +1077,13 @@ internal fun BattleLabPanel() {
 }
 
 
-/** Ajustes → Artes: gerar sozinho (ou não) e, quando gera, usar o Gemini (chave de Ajustes → IA) em vez da cena gratuita do app. */
+/** Ajustes → Artes: gerar sozinho (ou não) depois de Encerrar a leitura. */
 @Composable
-internal fun ArtsGeminiFold() {
+internal fun ArtsAutoFold() {
     val ctx = LocalContext.current
     var auto by remember { mutableStateOf(Arts.autoOn(ctx)) }
-    var gem by remember { mutableStateOf(ArtsGemini.autoOn(ctx)) }
-    val hasKey = ArtsGemini.hasKey(ctx)
-    Fold("🎨", "Gerar artes sozinho", if (!auto) "desligado" else if (gem) "Gemini" else "cena grátis") {
+    Fold("🎨", "Gerar artes sozinho", if (auto) "ligado" else "desligado") {
         SwitchRow("Gerar artes sozinho depois de Encerrar a leitura", auto) { auto = it; Arts.setAuto(ctx, it) }
-        SwitchRow("Usar o Gemini para gerar (senão, a cena grátis do app)", gem) { gem = it; ArtsGemini.setAutoOn(ctx, it) }
-        Text(
-            if (hasKey) "Chave do Gemini cadastrada. Com isto ligado, cada arte nova usa o mesmo pedido do botão ChatGPT (dados reais do jogo) e leva ~30 s a 1 min. A cota de imagem do Gemini varia por conta; se acabar, a arte fica para depois e o erro do Google aparece na aba Artes."
-            else "Falta a chave do Gemini: cadastre em Ajustes → IA (aistudio.google.com › Get API key). Sem ela, o app usa a cena grátis.",
-            fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp)
-        )
-        Text("O botão \"Gemini\" de cada arte (aba Artes) gera na hora, mesmo com o automático desligado.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
+        Text("Ligado: o app cria as artes novas dos slots ligados (cena grátis do app, texto e escudos desenhados por ele). Desligado: só quando você tocar em Criar na aba Artes. O botão ChatGPT de cada arte continua à mão.", fontSize = 13.sp, color = C.MUTED, modifier = Modifier.padding(top = 4.dp))
     }
 }

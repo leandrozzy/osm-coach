@@ -154,7 +154,33 @@ class MainActivity : ComponentActivity() {
         AppScope.scope.launch(Dispatchers.IO) { Notifier.reschedule(applicationContext) }
     }
 
+    /** Imagem compartilhada (ChatGPT › Compartilhar › OSM Coach): vira a arte marcada ao tocar em "ChatGPT" (vale 6 h). */
+    private fun receiveSharedImage(i: Intent) {
+        val uri: android.net.Uri? = if (android.os.Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java) else @Suppress("DEPRECATION") i.getParcelableExtra(Intent.EXTRA_STREAM)
+        val app = applicationContext
+        AppScope.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val c = ArtsGpt.pending(app)
+            val msg = when {
+                uri == null -> "Não recebi a imagem."
+                c == null -> "Toque em ChatGPT numa arte (aba Artes) antes de compartilhar a imagem, para eu saber de qual arte ela é."
+                else -> {
+                    val bmp = runCatching {
+                        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+                        var sample = 1; while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2200) sample *= 2
+                        app.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }
+                    }.getOrNull()
+                    if (bmp == null) "Não consegui abrir essa imagem."
+                    else { Arts.storeBitmap(app, Repo(app), c, bmp); ArtsGpt.markDone(app, c.id); ArtsGpt.clearPending(app); "Arte salva: ${c.title}." }
+                }
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { runCatching { android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show() } }
+        }
+        Route.main = 4; Route.nonce++
+    }
+
     private fun handleIntent(i: Intent?) {
+        if (i?.action == Intent.ACTION_SEND && i.type?.startsWith("image/") == true) { receiveSharedImage(i); return }
         val slot = i?.getIntExtra("slot", 0) ?: 0
         if (i != null && i.hasExtra("main")) { Route.main = i.getIntExtra("main", -1); Route.nonce++ }
         if (slot in 1..4) {
