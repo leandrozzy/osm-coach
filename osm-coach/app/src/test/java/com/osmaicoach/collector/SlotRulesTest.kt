@@ -35,7 +35,7 @@ Superliga Uzbeque 🇺🇿
         val r = SlotRules.parse(TXT)
         val ps = listOf(p("A Um", 89, true), p("B Dois", 94), p("C Tres", 87)) + (1..28).map { p("X Jogador$it", 70) }
         val tips = SlotRules.tips(r, ps, emptySet(), 14, 22, null, 0L)
-        assertTrue(tips.any { it.icon == "🏋" && it.title.contains("A Um") })
+        assertTrue(tips.any { it.icon == "🚨" && it.title.contains("TIRE DO TREINO AGORA") && it.title.contains("A Um") })
         assertTrue(tips.any { it.title.contains("ACIMA DO LIMITE DE CRAQUE") && it.title.contains("B Dois") })
         assertTrue(tips.any { it.title.contains("Elenco com 31") })
         assertTrue(tips.any { it.title.contains("2º turno") })

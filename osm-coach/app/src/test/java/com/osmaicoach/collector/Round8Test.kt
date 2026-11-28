@@ -7,7 +7,7 @@ import org.junit.Test
 class Round8Test {
     private fun p(name: String, s: Int, training: Boolean = false) =
         PlayerEntity(2, "MY", Txt.key(name), name, 25, "MC", "MEI", s, "1M", training, false, 0L)
-    private val r = SlotRules.parse("Proibido ultrapassar over de treino 95. O craque não pode ultrapassar over 97.")
+    private val r = SlotRules.parse("Proibido ultrapassar over de treino 95. Proibido craque ultrapassar over 97.")
 
     private fun alerts(vararg ps: PlayerEntity) = SlotRules.tips(r, ps.toList(), emptySet(), 5, 22, null, 0L).filter { it.title.startsWith("🚫") }
 
