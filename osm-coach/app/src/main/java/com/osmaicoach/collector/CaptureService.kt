@@ -246,7 +246,10 @@ class CaptureService : AccessibilityService() {
             for (c in checks) {
                 val (mark, col) = when (c.st) { SlotRules.St.OK -> "✅" to 0xFF22C55E.toInt(); SlotRules.St.BAD -> "❌" to 0xFFFF5252.toInt(); SlotRules.St.UNKNOWN -> "❔" to 0xFFC3D3EE.toInt() }
                 lv.addView(tv("$mark ${c.text}", if (c.st == SlotRules.St.BAD) 0xFFFF5252.toInt() else android.graphics.Color.WHITE, 15f, true))
-                c.detail?.let { lv.addView(tv("      $it", col, 12f)) }
+                c.detail?.split("\n")?.forEach { d ->
+                    val dc = when { d.startsWith("✅") -> 0xFF22C55E.toInt(); d.startsWith("❌") || d.startsWith("👉") -> 0xFFF5B942.toInt(); else -> col }
+                    lv.addView(tv("      $d", dc, 12f))
+                }
             }
         }
         card.visibility = View.VISIBLE
@@ -517,6 +520,8 @@ class CaptureService : AccessibilityService() {
                         if (cardView?.visibility == View.VISIBLE && headView?.text?.startsWith("Tática") != true && headView?.text?.startsWith("Regras") != true) {
                             showCard(hints, (if (slot > 0) "S$slot • " else "OSM • ") + Hints.screenLabel(st))
                         }
+                        // cartão de Regras aberto: recontar (ex.: o jogador abriu o cartão grande e os JOGOS foram lidos)
+                        if (cardView?.visibility == View.VISIBLE && headView?.text?.startsWith("Regras") == true) onRulesTap()
                     }
                 }
                 updateRulesButton(slot)

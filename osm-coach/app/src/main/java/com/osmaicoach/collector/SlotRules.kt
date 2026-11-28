@@ -64,8 +64,11 @@ object SlotRules {
         /** Pontos de vantagem sobre o primeiro time rebaixado (negativo = dentro da zona). */
         val gapPts: Int? = null,
         val valueNow: Double? = null,
-        val valueBase: Double? = null
+        val valueBase: Double? = null,
+        /** Jogadores da nacionalidade da liga com os jogos: do cartão grande (`fromCard`), mínimo contado nos relatórios, ou null = ainda não lido. */
+        val nativeInfo: List<NativeP>? = null
     )
+    data class NativeP(val name: String, val games: Int?, val fromCard: Boolean)
 
     /** Grupos de bandeira do elenco: (assinatura, nomes) do maior para o menor. */
     suspend fun flagGroups(repo: Repo, slot: Int): List<Pair<String, List<String>>> {
@@ -175,6 +178,7 @@ object SlotRules {
     suspend fun gather(repo: Repo, slot: Int, r: Rules, f: Map<String, StoredField>, now: Long): Extra {
         val mine = repo.playersOf(slot).filter { it.owner == "MY" }
         var natives: List<Pair<String, Int>>? = null
+        var nativeInfo: List<NativeP>? = null
         val groups = flagGroups(repo, slot)
         if (r.natCount != null) {
             val lf = leagueFlag(repo, slot)
@@ -183,6 +187,12 @@ object SlotRules {
                 val nat = repo.dao.plan(slot, "nations")?.json?.let { runCatching { JSONObject(it) }.getOrNull() }
                 natives = mine.filter { nat?.optString(it.nameKey)?.let { s -> s.isNotEmpty() && sameFlag(s, lf) } == true }
                     .map { it.name to (apps[it.nameKey] ?: 0) }.sortedByDescending { it.second }
+                val card = CardGames.load(repo, slot)
+                nativeInfo = mine.filter { nat?.optString(it.nameKey)?.let { s -> s.isNotEmpty() && sameFlag(s, lf) } == true }.map { pl ->
+                    val c = card[pl.nameKey]; val a = apps[pl.nameKey] ?: 0
+                    NativeP(pl.name, if (c != null) maxOf(c, a) else a.takeIf { it > 0 }, c != null)
+                }
+                natives = nativeInfo.map { it.name to (it.games ?: 0) }
             }
         }
         val pos = f[K.LEAGUE_POS]?.value?.toIntOrNull()
@@ -203,7 +213,7 @@ object SlotRules {
             repo.dao.putPlan(PlanEntity(slot, "valuebase", JSONObject().put("v", now1).put("at", now).toString(), now))
             base = now1
         }
-        return Extra(natives, groups.isNotEmpty(), pos, teams, gap, now1, base)
+        return Extra(natives, groups.isNotEmpty(), pos, teams, gap, now1, base, nativeInfo)
     }
 
     /**
@@ -278,11 +288,28 @@ object SlotRules {
         }
         if (r.natCount != null) {
             val label = "${r.natCount} jogadores da nacionalidade da liga" + (r.natGames?.let { ", $it jogos cada" } ?: "")
+            val info = x.nativeInfo
             val nat = x.natives
             if (nat == null) out.add(Check(label, St.UNKNOWN, "escolha a bandeira da liga no cartão de regras do app"))
             else {
-                val ready = nat.count { r.natGames == null || it.second >= r.natGames }
-                out.add(Check(label, if (ready >= r.natCount) St.OK else St.BAD, "$ready/${r.natCount} cumprindo"))
+                val need = r.natGames
+                val rows = info ?: nat.map { NativeP(it.first, it.second.takeIf { g -> g > 0 }, false) }
+                val ready = rows.count { need == null || (it.games ?: 0) >= need }
+                val lines = ArrayList<String>()
+                lines.add("$ready/${r.natCount} cumprindo")
+                if (rows.size < r.natCount) lines.add("só ${rows.size} jogador(es) da nacionalidade no elenco: faltam ${r.natCount - rows.size}")
+                // quem ainda não teve os jogos lidos no cartão grande vem primeiro: é o que o usuário precisa abrir
+                for (p in rows.sortedBy { if (it.fromCard) 1 else 0 }.take(10)) {
+                    val g = p.games
+                    lines.add(when {
+                        need == null -> "• ${p.name}"
+                        g != null && g >= need -> "✅ ${p.name} — $g jogos"
+                        g != null && p.fromCard -> "❌ ${p.name} — $g/$need jogos"
+                        g != null -> "👉 ${p.name} — pelo menos $g jogos; abra o cartão grande para confirmar"
+                        else -> "👉 ${p.name} — abra o cartão grande (jogos não lidos)"
+                    })
+                }
+                out.add(Check(label, if (ready >= r.natCount) St.OK else St.BAD, lines.joinToString("\n")))
             }
         }
         r.evolveX?.let { e ->

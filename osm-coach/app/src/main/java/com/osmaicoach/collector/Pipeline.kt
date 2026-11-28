@@ -251,6 +251,8 @@ class FramePipeline private constructor(private val ctx: Context) {
         if (p == null) return false   // pode ser de outro slot (photosFrom tenta os demais)
         runCatching { WorldOcr.bigCard(ctx, slot, p.name, shown) }   // o card mostra o NOME COMPLETO: identificação real pelo nome inteiro
         val now = System.currentTimeMillis()
+        // "JOGOS" do cartão grande: vale para a regra de jogos da nacionalidade da liga (a bolha conta sozinha)
+        runCatching { CardGames.read(ocr.lines)?.let { g -> CardGames.put(repo, slot, p.nameKey, g, now) } }
         fun say(msg: String, tell: String? = null) {
             if (msg != lastBigLog) { lastBigLog = msg; Diag.log(msg) }
             if (tell != null) note(slot, tell, now, 20_000L)
